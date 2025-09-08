@@ -1,0 +1,113 @@
+References for Project 2 (Smart Traffic Light Control) and Project 6 (ALPR)
+======================================================================
+Team Size: 2 | Duration: max 6 months | GPU: RTX 3070Ti
+
+---
+PROJECT 2: SMART TRAFFIC LIGHT CONTROL SYSTEM
+-------------------------------------------
+A. Research on Current Problems (fixed-timing limits, pedestrian detection, weather/low-light, limited regional coordination):
+
+1. SUMO traffic simulator (tool commonly used in traffic research)
+   - Website: https://www.eclipse.org/sumo/
+   - Notes: widely used for traffic microsimulation and testing control algorithms.
+
+2. CityFlow: A Multi-Agent Reinforcement Learning Environment for Large Scale Traffic Scenario
+   - GitHub / project: https://github.com/cityflow-project/CityFlow
+   - Paper: CityFlow (use project repo to find paper links)
+   - Notes: environment for RL-based traffic signal control and benchmarking.
+
+3. IntelliLight — Reinforcement Learning for Traffic Signal Control
+   - Paper: "IntelliLight: A Reinforcement Learning Approach for Intelligent Traffic Light Control" (search on arXiv / conference sites)
+   - Notes: RL approach for single intersection control; useful baseline for RL ideas.
+
+4. CoLight / GAT-based methods for traffic signal control
+   - Search terms: "CoLight traffic signal control graph attention"
+   - Notes: Cooperative multi-agent or graph-based models for coordinating multiple intersections.
+
+5. Pedestrian detection & tracking (important for crosswalks)
+   - YOLO / Faster R-CNN surveys; practical implementation: YOLOv5 (Ultralytics)
+   - YOLOv5 repo: https://github.com/ultralytics/yolov5
+
+6. Sensor fusion for adverse weather / low-light
+   - SUMO + sensor fusion literature; search terms: "multi-modal sensor fusion traffic detection radar camera".
+
+B. Research / Implementations for Innovation Points (RL, emergency priority, multi-modal fusion, prediction):
+
+1. Reinforcement Learning for Traffic Signal Control — Survey & examples
+   - Search terms: "reinforcement learning traffic signal control survey"; look for arXiv survey papers and recent conference works.
+   - Example repo: https://github.com/Flow-project/flow (Flow integrates SUMO + RL algorithms)
+
+2. Emergency vehicle priority and preemption
+   - Search terms: "emergency vehicle preemption computer vision"; literature exists combining siren detection, flash light detection and V2X signals.
+
+3. Multi-modal fusion (camera + radar/infrared)
+   - Search terms: "multi-modal fusion traffic detection camera radar"; look for sensor fusion surveys and implementations in automated driving communities.
+
+4. Traffic flow prediction (time-series models)
+   - LSTM/Transformer-based forecasting papers: e.g., "Traffic Flow Forecasting with Spatial-Temporal Graph Neural Networks" (search STGNN literature)
+   - Example frameworks: DCRNN, STGCN (look up on arXiv)
+
+5. Regional coordination / multi-agent RL
+   - Search terms: "multi-agent reinforcement learning traffic light"; relevant algorithms: DQN, DDPG, PPO, multi-agent extensions
+
+6. Green wave coordination and optimization
+   - Search terms: "green wave traffic coordination reinforcement learning" or classic optimization-based green wave papers.
+
+---
+PROJECT 6: AUTOMATED LICENSE PLATE RECOGNITION (ALPR)
+---------------------------------------------------
+A. Research on Current Problems (robustness in night/rain/motion blur, occlusion, forged plates, cross-region generalization):
+
+1. CRNN (classic OCR architecture for sequence recognition)
+   - Paper: "An End-to-End Trainable Neural Network for Image-based Sequence Recognition and Its Application to Scene Text Recognition"
+   - arXiv: https://arxiv.org/abs/1507.05717
+   - Notes: foundation for many OCR systems including plate OCR.
+
+2. Transformer-based OCR (TrOCR)
+   - Paper: "TrOCR: Transformer-based OCR with Pre-trained Models"
+   - arXiv: https://arxiv.org/abs/2109.10282
+   - Notes: modern OCR alternative with strong accuracy on irregular text.
+
+3. CycleGAN (domain adaptation / style transfer for sim-to-real)
+   - Paper: "Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks"
+   - arXiv: https://arxiv.org/abs/1703.10593
+
+4. Domain Randomization (sim-to-real generalization)
+   - Paper: "Domain Randomization for Transferring Deep Neural Networks from Simulation to the Real World"
+   - arXiv: https://arxiv.org/abs/1703.06907
+
+5. Image Inpainting / Completion (handle occlusion / damage)
+   - Paper: "Generative Image Inpainting with Contextual Attention"
+   - arXiv: https://arxiv.org/abs/1801.07892
+   - Notes: useful idea for plate completion before OCR.
+
+6. License plate datasets (for training & evaluation)
+   - CCPD (Chinese City Parking Dataset): https://github.com/detectRecog/CCPD
+   - OpenALPR / OpenALPR datasets and project: https://github.com/openalpr
+   - UFPR-ALPR dataset: search "UFPR-ALPR dataset" (public dataset used in ALPR research)
+
+7. ALPR surveys and reviews
+   - Search terms: "license plate recognition survey" or "ALPR review" for literature overviews and common challenges.
+
+B. Research / Implementations for Innovation Points (occlusion handling, fake plate detection, multi-country support, domain adaptation, sim-to-real with game data):
+
+1. End-to-end ALPR pipelines (detection + recognition)
+   - Repositories and examples: OpenALPR (repo above), EasyOCR (https://github.com/JaidedAI/EasyOCR)
+
+2. OCR baselines and implementations
+   - EasyOCR: https://github.com/JaidedAI/EasyOCR
+   - Tesseract OCR: https://github.com/tesseract-ocr/tesseract
+
+3. DeepSORT for tracking & temporal consistency
+   - DeepSORT implementation: https://github.com/nwojke/deep_sort
+   - Notes: used to track vehicles across frames and enforce temporal consistency for better recognition.
+
+4. Sim-to-real and game data
+   - Domain adaptation with CycleGAN (link above) and domain randomization (link above)
+   - Papers and repos that use game engines (GTA V) for dataset generation; search: "GTA V dataset for computer vision" and "game synthetic dataset sim-to-real".
+
+5. Forgery / tamper detection methods
+   - Search terms: "license plate forgery detection"; related fields: image forgery detection, texture analysis, and deepfake detection literature.
+
+6. Lightweight models, pruning, quantization for edge
+   - TensorRT / ONNX resources: https://developer.nvidia.com/tensorrt and ONNX: https://onnx.ai/
