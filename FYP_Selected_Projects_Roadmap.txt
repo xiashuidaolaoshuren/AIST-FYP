@@ -1,0 +1,151 @@
+FYP Selected Projects: Detailed Roadmaps (6-Month Plan)
+=========================================================
+Date: September 11, 2025
+Team Size: 2 | Duration: 6 months | GPU: RTX 3070Ti (3090 optional)
+
+This document provides detailed 6-month roadmaps for five selected LLM projects, with the first month dedicated to research and planning.
+
+---
+
+### 1. Code Documentation Auto-Generator with Multi-Language Support
+--------------------------------------------------------------------
+- **Brief Introduction:** Develop an LLM-based system that automatically generates comprehensive documentation (READMEs, API docs, inline comments) for code repositories by analyzing code structure and logic.
+- **Technical Innovation:** Fine-tune smaller LLMs (e.g., CodeLlama) on code-documentation pairs; combine Abstract Syntax Tree (AST) analysis with LLM generation; support customizable documentation styles.
+- **Technical Stack:** Python, Transformers, Tree-sitter, FastAPI, React.
+- **Complexity:** Medium.
+
+**6-Month Compact Roadmap:**
+- **Month 1: Research & Planning**
+  - Conduct a literature review on code generation and summarization.
+  - Collect and analyze high-quality code-documentation datasets (e.g., from GitHub).
+  - Design system architecture, define documentation templates, and plan evaluation metrics.
+- **Month 2: Baseline & Data Pipeline**
+  - Implement a baseline using a pre-trained Code LLM with simple prompting.
+  - Build the data pipeline for parsing code with Tree-sitter and preparing fine-tuning data.
+- **Month 3: Core Model Fine-tuning**
+  - Fine-tune a 7B model (e.g., CodeLlama) using LoRA/QLoRA on the curated dataset.
+  - Develop the core logic for generating documentation from AST analysis.
+- **Month 4: Feature Enhancement**
+  - Implement multi-language support and customizable style templates.
+  - Integrate with Git to analyze code changes for incremental documentation updates.
+- **Month 5: Integration & Evaluation**
+  - Develop a simple web interface (FastAPI + React) or IDE extension for usability.
+  - Conduct a thorough evaluation against baselines and existing tools.
+- **Month 6: Finalization & Documentation**
+  - Refine the model based on evaluation feedback, write the final report and thesis, and prepare a project demo.
+
+---
+
+### 2. Multi-Modal Recipe Generator with Dietary Constraints
+----------------------------------------------------------
+- **Brief Introduction:** Develop a creative cooking assistant that generates recipes based on available ingredients (text or images), dietary restrictions, and nutritional goals.
+- **Technical Innovation:** Multi-modal input processing (text + images); nutritional calculation and optimization; cultural cuisine style transfer.
+- **Technical Stack:** Python, Transformers, Computer Vision models (e.g., CLIP, ViT), Nutritional APIs, Streamlit.
+- **Complexity:** Low-Medium.
+
+**6-Month Compact Roadmap:**
+- **Month 1: Research & Planning**
+  - Review literature on multi-modal models and recipe generation.
+  - Collect recipe datasets, nutritional information, and ingredient databases.
+  - Design the system architecture, including the multi-modal input fusion strategy.
+- **Month 2: Data & Baseline Model**
+  - Build the data pipeline for processing text and image inputs.
+  - Implement a baseline text-only recipe generator using a pre-trained LLM.
+- **Month 3: Multi-Modal Integration**
+  - Integrate a vision model (e.g., CLIP) to identify ingredients from images.
+  - Fine-tune the LLM to generate recipes from combined text and image features.
+- **Month 4: Core Features**
+  - Add support for dietary constraints and nutritional calculations using external APIs.
+  - Implement logic for adapting recipes based on serving sizes or equipment.
+- **Month 5: UI & Evaluation**
+  - Develop an interactive web interface using Streamlit for users to input ingredients and view recipes.
+  - Evaluate the quality, coherence, and user satisfaction of generated recipes.
+- **Month 6: Finalization & Documentation**
+  - Polish the user interface, write the final project report, and create a compelling demo video.
+
+---
+
+### 3. Conversational SQL Query Builder for Non-Technical Users
+-------------------------------------------------------------
+- **Brief Introduction:** Build a system that allows non-technical users to query databases using plain English, with features for interactive refinement and result visualization.
+- **Technical Innovation:** Safety-by-construction (grammar-constrained decoding), plan-then-generate with IR visualization, retrieval-grounded schema linking, ambiguity detection with multi-turn clarification, and an execution-aware repair loop.
+- **Technical Stack:** Python, Transformers, SQL parsers (sqlglot), Vector DBs, FastAPI, Streamlit, Plotly/ECharts.
+- **Complexity:** Medium.
+
+**6-Month Compact Roadmap:**
+- **Month 1: Research & Planning**
+  - Review literature on Text-to-SQL, focusing on the selected innovation points.
+  - Set up public datasets (e.g., Spider) and a local database for testing.
+  - Design the end-to-end system architecture and define evaluation protocols.
+- **Month 2: Baseline & Safety**
+  - Implement a baseline Text-to-SQL model using a pre-trained LLM.
+  - Integrate grammar-constrained decoding to ensure syntactically correct SQL output.
+- **Month 3: Core Innovations**
+  - Implement retrieval-grounded schema linking to improve accuracy.
+  - Develop the ambiguity detector and multi-turn clarification logic.
+- **Month 4: Advanced Features**
+  - Build the execution-aware repair loop to handle runtime errors.
+  - Add visualization for the query plan (IR/DAG) and query results.
+- **Month 5: Integration & Evaluation**
+  - Develop a Streamlit web interface for interactive use.
+  - Conduct a comprehensive evaluation on the Spider benchmark and measure the impact of each innovation.
+- **Month 6: Finalization & Documentation**
+  - Refine the system, write the final report detailing the innovations, and prepare a live demo.
+
+---
+
+### 4. Code Review Assistant with Security and Best Practices Focus
+------------------------------------------------------------------
+- **Brief Introduction:** Develop an intelligent code review system that identifies bugs, security vulnerabilities, and suggests improvements for code quality, performance, and maintainability.
+- **Technical Innovation:** Multi-aspect code analysis (security, performance, style); learning from high-quality open-source repositories; providing contextual suggestions with educational explanations.
+- **Technical Stack:** Python, Transformers, Static analysis tools (e.g., Semgrep), Git APIs, Web interface.
+- **Complexity:** Medium-High.
+
+**6-Month Compact Roadmap:**
+- **Month 1: Research & Planning**
+  - Review literature on AI for code review and automated program repair.
+  - Collect datasets of high-quality code, security vulnerabilities (e.g., CWE), and code review comments.
+  - Design the architecture for the multi-aspect analysis pipeline.
+- **Month 2: Data & Baseline**
+  - Build the data pipeline to process code from Git repositories.
+  - Implement a baseline assistant using a pre-trained Code LLM to suggest simple style fixes.
+- **Month 3: Security & Bug Detection**
+  - Fine-tune the LLM on datasets of security vulnerabilities and common bugs.
+  - Integrate static analysis tools to provide an initial set of findings for the LLM to refine.
+- **Month 4: Quality & Performance**
+  - Train the model to recognize anti-patterns and suggest performance improvements.
+  - Develop the logic for generating educational explanations for each suggestion.
+- **Month 5: Integration & Evaluation**
+  - Integrate the system with GitHub/GitLab via webhooks to automatically comment on pull requests.
+  - Evaluate the assistant's precision, recall, and the quality of its suggestions.
+- **Month 6: Finalization & Documentation**
+  - Polish the integration, write the final report, and create a demo showing the assistant reviewing a real pull request.
+
+---
+
+### 5. Hallucination Detection & Mitigation for LLMs
+--------------------------------------------------
+- **Brief Introduction:** Detect factual hallucinations in LLM outputs and reduce them using a lightweight, plug-and-play verifier module without needing a huge "judge" model.
+- **Technical Innovation:** A lightweight verifier ensemble combining retrieval evidence scoring, contradiction detection (NLI), and model uncertainty signals (e.g., self-consistency, entropy).
+- **Technical Stack:** Python, Transformers, PEFT (LoRA/QLoRA), Vector DBs (FAISS/Chroma), NLI models (e.g., DeBERTa).
+- **Complexity:** Medium.
+
+**6-Month Compact Roadmap:**
+- **Month 1: Research & Planning**
+  - Review literature on hallucination, fact-checking, and retrieval-augmented generation (RAG).
+  - Set up hallucination benchmarks (e.g., TruthfulQA, HaluEval) and evidence corpora (e.g., Wikipedia).
+  - Design the architecture for the generator-retriever-verifier pipeline.
+- **Month 2: Baseline & Retrieval**
+  - Implement a baseline RAG system.
+  - Build and optimize the retrieval module (e.g., hybrid BM25 + dense retriever).
+- **Month 3: Verifier Module - Part 1**
+  - Implement uncertainty signal detection (entropy, self-consistency).
+  - Train a simple evidence alignment scorer to check if claims are supported by retrieved documents.
+- **Month 4: Verifier Module - Part 2**
+  - Fine-tune a small NLI model to act as a contradiction detector between the LLM's claim and the evidence.
+  - Combine all signals into an ensemble verifier.
+- **Month 5: Mitigation & Evaluation**
+  - Implement mitigation strategies (e.g., trigger a re-generation, add a warning, cite sources).
+  - Evaluate the system's ability to reduce hallucinations on benchmarks.
+- **Month 6: Finalization & Documentation**
+  - Analyze the contribution of each verifier component, write the final report, and prepare a demo.
