@@ -71,19 +71,19 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
 The project builds upon established and recent research in the following areas:
 
 1.  **Foundational Fact-Checking & Attribution:**
-    *   **FEVER (Thorne et al., 2018):** Pioneered the claim-evidence-label framework ("Supported/Refuted/NotEnoughInfo"), establishing the methodology for claim-by-claim verification.
-    *   **KILT (Petroni et al., 2021):** Created a benchmark for knowledge-intensive tasks with source attribution, emphasizing traceability to the page or paragraph level.
+    *   **FEVER (Thorne et al., 2018):** Pioneered the claim-evidence-label framework ("Supported/Refuted/NotEnoughInfo"), establishing the methodology for claim-by-claim verification. (https://arxiv.org/abs/1803.05355)
+    *   **KILT (Petroni et al., 2021):** Created a benchmark for knowledge-intensive tasks with source attribution, emphasizing traceability to the page or paragraph level. (https://arxiv.org/abs/2009.00795)
 
 2.  **Automated Factuality Evaluation:**
-    *   **QAFactEval (Fabbri et al., 2021), FactCC (Kryscinski et al., 2019), SummaC (Laban et al., 2022):** These works developed automated metrics for factual consistency in text generation, often using an NLI-based approach to determine if a claim is supported by evidence. This supports our idea of a sentence/paragraph-level alignment module.
+    *   **QAFactEval (Fabbri et al., 2021), FactCC (Kryscinski et al., 2019), SummaC (Laban et al., 2022):** These works developed automated metrics for factual consistency in text generation, often using an NLI-based approach to determine if a claim is supported by evidence. This supports our idea of a sentence/paragraph-level alignment module. (https://arxiv.org/abs/2104.05478, https://arxiv.org/abs/1911.03420, https://arxiv.org/abs/2109.00525)
 
 3.  **Hallucination Benchmarking & Analysis:**
-    *   **TruthfulQA (Lin et al., 2021):** Demonstrated that models often generate plausible but false answers, highlighting the need for uncertainty estimation and verification.
-    *   **RAGTruth (2023):** A benchmark focused on hallucinations in RAG systems, showing that "cited hallucinations" are common even with retrieved evidence, which necessitates finer-grained evidence alignment and discrimination.
+    *   **TruthfulQA (Lin et al., 2021):** Demonstrated that models often generate plausible but false answers, highlighting the need for uncertainty estimation and verification. (https://arxiv.org/abs/2109.07958)
+    *   **RAGTruth (2023):** A benchmark focused on hallucinations in RAG systems, showing that "cited hallucinations" are common even with retrieved evidence, which necessitates finer-grained evidence alignment and discrimination. (https://arxiv.org/abs/2311.08290)
 
 4.  **Hallucination Detection & Mitigation Techniques:**
-    *   **SelfCheckGPT (Manakul et al., 2023):** Uses self-consistency sampling to detect unreliable statements. This can serve as a useful uncertainty signal but is insufficient on its own to guarantee citation correctness.
-    *   **Self-RAG (Asai et al., 2023):** A model that reflects on its own generations and retrieves evidence for self-verification during the generation process, improving attribution and reducing hallucinations.
-    *   **Chain-of-Verification (CoVe) (Gao et al., 2023/2024):** An "answer-then-verify" process that automatically checks and rewrites its initial response, significantly improving the factuality of long-form answers.
+    *   **SelfCheckGPT (Manakul et al., 2023):** Uses self-consistency sampling to detect unreliable statements. This can serve as a useful uncertainty signal but is insufficient on its own to guarantee citation correctness. (https://arxiv.org/abs/2303.08896)
+    *   **Self-RAG (Asai et al., 2023):** A model that reflects on its own generations and retrieves evidence for self-verification during the generation process, improving attribution and reducing hallucinations. (https://arxiv.org/abs/2310.11511)
+    *   **Chain-of-Verification (CoVe) (Gao et al., 2023/2024):** An "answer-then-verify" process that automatically checks and rewrites its initial response, significantly improving the factuality of long-form answers. (https://arxiv.org/abs/2309.11495)
 
 **Key Insight:** Research also indicates that using an LLM-as-a-judge can be prone to bias and instability, making it risky to rely solely on it for verifying citations. A more robust approach, which this project adopts, is to combine evidence retrieval with NLI-based contradiction detection.
