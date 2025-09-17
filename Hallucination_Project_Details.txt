@@ -1,0 +1,89 @@
+Project Title: Hallucination Detection & Mitigation for LLMs when Citing References
+
+Date: September 17, 2025
+
+## 1. Project Content Focus
+
+This project focuses on detecting and mitigating factual hallucinations in Large Language Model (LLM) outputs, with a specific emphasis on scenarios where the model needs to cite references to support its claims. The core goal is to develop a lightweight, plug-and-play verifier module that can assess the factual accuracy of a statement against a reliable knowledge source and reduce the generation of incorrect or "hallucinated" information without relying on a massive "judge" model.
+
+---
+
+## 2. Project Details from Roadmap
+
+The following is the established plan from the `FYP_Selected_Projects_Roadmap.txt` document.
+
+- **Brief Introduction:** Detect factual hallucinations in LLM outputs and reduce them using a lightweight, plug-and-play verifier module without needing a huge "judge" model.
+- **Technical Innovation:** A lightweight verifier ensemble combining retrieval evidence scoring, contradiction detection (NLI), and model uncertainty signals (e.g., self-consistency, entropy).
+- **Technical Stack:** Python, Transformers, PEFT (LoRA/QLoRA), Vector DBs (FAISS/Chroma), NLI models (e.g., DeBERTa).
+- **Complexity:** Medium.
+
+**6-Month Compact Roadmap:**
+- **Month 1: Research & Planning**
+  - Review literature on hallucination, fact-checking, and retrieval-augmented generation (RAG).
+  - Set up hallucination benchmarks (e.g., TruthfulQA, HaluEval) and evidence corpora (e.g., Wikipedia).
+  - Design the architecture for the generator-retriever-verifier pipeline.
+- **Month 2: Baseline & Retrieval**
+  - Implement a baseline RAG system.
+  - Build and optimize the retrieval module (e.g., hybrid BM25 + dense retriever).
+- **Month 3: Verifier Module - Part 1**
+  - Implement uncertainty signal detection (entropy, self-consistency).
+  - Train a simple evidence alignment scorer to check if claims are supported by retrieved documents.
+- **Month 4: Verifier Module - Part 2**
+  - Fine-tune a small NLI model to act as a contradiction detector between the LLM's claim and the evidence.
+  - Combine all signals into an ensemble verifier.
+- **Month 5: Mitigation & Evaluation**
+  - Implement mitigation strategies (e.g., trigger a re-generation, add a warning, cite sources).
+  - Evaluate the system's ability to reduce hallucinations on benchmarks.
+- **Month 6: Finalization & Documentation**
+  - Analyze the contribution of each verifier component, write the final report, and prepare a demo.
+
+---
+
+## 3. Data Requirements and Collection
+
+### Data Needs:
+
+1.  **Evidence Corpus (for Retrieval and Citation):**
+    *   **English Wikipedia:** The preferred source. It should be chunked at the sentence or small-window level, retaining metadata like `page_id` and paragraph/sentence spans for precise source attribution.
+
+2.  **Supervised Training Signals:**
+    *   **Claim-Evidence-Label Triples:** Datasets like **FEVER/FEVEROUS** provide "Supported," "Refuted," and "Not Enough Info" labels with corresponding evidence sentences. **KILT-FEVER** adds traceable page-level provenance.
+    *   **General-Purpose NLI Datasets:** **SNLI, MNLI, and ANLI** are crucial for training the model to better understand entailment and contradiction.
+    *   **RAG-Specific Hallucination Data:** **RAGTruth** offers a benchmark with RAG-generated answers and hallucination labels, which is highly relevant.
+
+3.  **Retrieval/Reranking Datasets:**
+    *   Subsets from the **BEIR** benchmark (e.g., **NQ, HotpotQA**) can be used to train and evaluate the retriever.
+    *   **MS MARCO Passage Ranking** dataset is an optional but valuable resource for training a baseline reranker model.
+
+4.  **Testing & Specialized Evaluation Sets:**
+    *   A subset of **TruthfulQA** and the **RAGTruth** test set will be used for standardized evaluation.
+    *   A **small-scale, custom-built "citation-annotated" evaluation set** (approx. 300–500 items) will be created. In this set, each atomic claim within a model's response will be labeled, and its cited evidence will be marked as "Supported," "Contradictory," or "Insufficient," with the evidence span precisely located.
+
+### Data Collection Methods:
+1.  **Knowledge Corpus:** Download and process a recent dump of the English Wikipedia. Clean the text and index it into a vector database (e.g., FAISS) with sentence/chunk-level embeddings and metadata.
+2.  **Public Datasets:** Download FEVER, KILT, SNLI/MNLI, RAGTruth, and BEIR subsets from official sources like Hugging Face Datasets or their respective GitHub repositories.
+3.  **Custom Evaluation Set:** Manually or semi-automatically generate claims from a source (e.g., Wikipedia) and have human annotators label the claims and the quality of their citations against the source documents.
+
+---
+
+## 4. Supporting Research
+
+The project builds upon established and recent research in the following areas:
+
+1.  **Foundational Fact-Checking & Attribution:**
+    *   **FEVER (Thorne et al., 2018):** Pioneered the claim-evidence-label framework ("Supported/Refuted/NotEnoughInfo"), establishing the methodology for claim-by-claim verification.
+    *   **KILT (Petroni et al., 2021):** Created a benchmark for knowledge-intensive tasks with source attribution, emphasizing traceability to the page or paragraph level.
+
+2.  **Automated Factuality Evaluation:**
+    *   **QAFactEval (Fabbri et al., 2021), FactCC (Kryscinski et al., 2019), SummaC (Laban et al., 2022):** These works developed automated metrics for factual consistency in text generation, often using an NLI-based approach to determine if a claim is supported by evidence. This supports our idea of a sentence/paragraph-level alignment module.
+
+3.  **Hallucination Benchmarking & Analysis:**
+    *   **TruthfulQA (Lin et al., 2021):** Demonstrated that models often generate plausible but false answers, highlighting the need for uncertainty estimation and verification.
+    *   **RAGTruth (2023):** A benchmark focused on hallucinations in RAG systems, showing that "cited hallucinations" are common even with retrieved evidence, which necessitates finer-grained evidence alignment and discrimination.
+
+4.  **Hallucination Detection & Mitigation Techniques:**
+    *   **SelfCheckGPT (Manakul et al., 2023):** Uses self-consistency sampling to detect unreliable statements. This can serve as a useful uncertainty signal but is insufficient on its own to guarantee citation correctness.
+    *   **Self-RAG (Asai et al., 2023):** A model that reflects on its own generations and retrieves evidence for self-verification during the generation process, improving attribution and reducing hallucinations.
+    *   **Chain-of-Verification (CoVe) (Gao et al., 2023/2024):** An "answer-then-verify" process that automatically checks and rewrites its initial response, significantly improving the factuality of long-form answers.
+
+**Key Insight:** Research also indicates that using an LLM-as-a-judge can be prone to bias and instability, making it risky to rely solely on it for verifying citations. A more robust approach, which this project adopts, is to combine evidence retrieval with NLI-based contradiction detection.
