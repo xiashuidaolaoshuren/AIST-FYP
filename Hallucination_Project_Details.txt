@@ -17,25 +17,35 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
 - **Technical Stack:** Python, Transformers, PEFT (LoRA/QLoRA), Vector DBs (FAISS/Chroma), NLI models (e.g., DeBERTa).
 - **Complexity:** Medium.
 
-**6-Month Compact Roadmap:**
+**6-Month Compact Roadmap & Workflow:**
 - **Month 1: Research & Planning**
-  - Review literature on hallucination, fact-checking, and retrieval-augmented generation (RAG).
-  - Set up hallucination benchmarks (e.g., TruthfulQA, HaluEval) and evidence corpora (e.g., Wikipedia).
-  - Design the architecture for the generator-retriever-verifier pipeline.
-- **Month 2: Baseline & Retrieval**
-  - Implement a baseline RAG system.
-  - Build and optimize the retrieval module (e.g., hybrid BM25 + dense retriever).
+  - **Literature Review:** Deep dive into papers on hallucination, fact-checking, RAG, and self-verification (e.g., Self-RAG, CoVe).
+  - **Data Sourcing:** Download and prepare all required datasets: Wikipedia corpus, FEVER, NLI datasets (SNLI/MNLI), and hallucination benchmarks (TruthfulQA, RAGTruth).
+  - **System Architecture Design:** Finalize the design for the generator-retriever-verifier pipeline, defining the inputs and outputs for each module.
+  - **Setup Development Environment:** Configure Python environment, install necessary libraries (Transformers, PEFT, FAISS), and set up GPU access.
+
+- **Month 2: Baseline & Retrieval Module**
+  - **Data Preparation:** Preprocess and chunk the Wikipedia corpus. Generate embeddings and index them into a FAISS vector database.
+  - **Retriever Implementation:** Build and optimize the hybrid retrieval module, combining BM25 (sparse) and a dense retriever. Evaluate its performance on a benchmark like MS MARCO or a BEIR subset.
+  - **Baseline RAG Implementation:** Implement a baseline RAG system by integrating a generator LLM with the retriever.
+
 - **Month 3: Verifier Module - Part 1**
-  - Implement uncertainty signal detection (entropy, self-consistency).
-  - Train a simple evidence alignment scorer to check if claims are supported by retrieved documents.
+  - **Uncertainty Signal Detection:** Implement modules to calculate uncertainty from the generator's output, focusing on token-level entropy and self-consistency scores.
+  - **Evidence Alignment Scorer:** Train a simple classification model on claim-evidence pairs (from FEVER or synthetic data) to score how well evidence supports a claim.
+
 - **Month 4: Verifier Module - Part 2**
-  - Fine-tune a small NLI model to act as a contradiction detector between the LLM's claim and the evidence.
-  - Combine all signals into an ensemble verifier.
+  - **NLI Contradiction Detector:** Fine-tune a small NLI model (e.g., DeBERTa) to act as a contradiction detector between the LLM's claim and the retrieved evidence.
+  - **Ensemble Verifier Integration:** Combine all signals (uncertainty, alignment score, NLI result) into a single, powerful ensemble verifier, possibly using a weighted heuristic or a meta-classifier.
+
 - **Month 5: Mitigation & Evaluation**
-  - Implement mitigation strategies (e.g., trigger a re-generation, add a warning, cite sources).
-  - Evaluate the system's ability to reduce hallucinations on benchmarks.
+  - **Mitigation Strategy Implementation:** Implement control logic based on the verifier's score to trigger actions like re-generation, adding warnings, or citing sources.
+  - **End-to-End Evaluation:** Evaluate the complete system's ability to reduce hallucinations on benchmarks (TruthfulQA, RAGTruth) and the custom-built citation evaluation set.
+  - **Performance Analysis:** Measure key metrics like factual consistency, hallucination rate, and attribution precision.
+
 - **Month 6: Finalization & Documentation**
-  - Analyze the contribution of each verifier component, write the final report, and prepare a demo.
+  - **Ablation Study:** Analyze the contribution of each verifier component by systematically disabling them and measuring the impact on performance.
+  - **Final Report & Demo:** Write the final project report, detailing the architecture, methodology, results, and insights. Prepare a compelling demo of the system.
+  - **Code Cleanup & Handoff:** Clean, comment, and document the codebase for future use and handoff.
 
 ---
 
@@ -115,3 +125,58 @@ The project builds upon established and recent research in the following areas:
 - **Link:** https://arxiv.org/abs/2309.11495
 
 **Key Insight:** Research also indicates that using an LLM-as-a-judge can be prone to bias and instability, making it risky to rely solely on it for verifying citations. A more robust approach, which this project adopts, is to combine evidence retrieval with NLI-based contradiction detection.
+
+---
+
+## 5. Project Workflow
+
+This workflow outlines the sequential steps for developing and evaluating the hallucination detection and mitigation system, aligned with the 6-month roadmap.
+
+**Phase 1: Foundation & Baseline (Months 1-2)**
+
+1.  **Data Preparation and Indexing:**
+    *   Download and preprocess the English Wikipedia corpus.
+    *   Chunk the text into sentence-level or small-window passages, retaining metadata (`page_id`, `span`).
+    *   Generate embeddings for each chunk and index them into a FAISS vector database.
+    *   Download and prepare all required training and evaluation datasets (FEVER, NLI datasets, TruthfulQA, etc.).
+
+2.  **Implement Baseline RAG System:**
+    *   Set up a generator LLM (e.g., a PEFT-tuned Mistral or Llama variant).
+    *   Implement a hybrid retriever combining sparse (BM25) and dense (vector-based) methods.
+    *   Integrate the generator and retriever into a baseline RAG pipeline that can answer questions using the indexed Wikipedia data.
+
+**Phase 2: Verifier Module Development (Months 3-4)**
+
+3.  **Develop Verifier Component 1: Uncertainty Signals:**
+    *   Implement a module to calculate uncertainty metrics from the generator's output, such as token-level entropy.
+    *   Implement a self-consistency mechanism where multiple answers are generated, and their consensus is used as a confidence signal.
+
+4.  **Develop Verifier Component 2: Evidence Alignment Scorer:**
+    *   Using claim-evidence pair datasets (like FEVER or synthetically generated ones), train a simple classification model.
+    *   This model will learn to produce a score indicating how well a retrieved evidence passage supports a generated claim.
+
+5.  **Develop Verifier Component 3: NLI Contradiction Detector:**
+    *   Fine-tune a small, efficient NLI model (e.g., a distilled DeBERTa) on a combination of general (MNLI) and domain-specific NLI data.
+    *   The model's primary role is to take a `(claim, evidence)` pair and classify the relationship as `entailment`, `neutral`, or `contradiction`.
+
+6.  **Integrate Ensemble Verifier:**
+    *   Combine the outputs from the three components (uncertainty signals, alignment score, NLI result) into a final, unified verification score.
+    *   This can be achieved through a weighted heuristic or by training a lightweight meta-classifier that learns to weigh the signals optimally.
+
+**Phase 3: Mitigation, Evaluation, and Finalization (Months 5-6)**
+
+7.  **Implement Mitigation Strategies:**
+    *   Design a control loop that uses the verifier's score to decide on an action:
+        *   **High Confidence:** Output the answer and cite the source.
+        *   **Medium Confidence:** Output the answer but append a warning (e.g., "This information could not be fully verified.").
+        *   **Low Confidence (High Hallucination Risk):** Suppress the initial answer and trigger a re-generation, potentially with new retrieved evidence or a different prompt.
+
+8.  **System Evaluation and Ablation Study:**
+    *   Evaluate the end-to-end system on hallucination benchmarks (TruthfulQA, RAGTruth) and the custom-built citation evaluation set.
+    *   Measure the reduction in hallucination rate and the improvement in factual consistency.
+    *   Conduct an ablation study to quantify the performance contribution of each individual component within the verifier module.
+
+9.  **Finalization and Documentation:**
+    *   Analyze the results and write the final project report, detailing the system architecture, methodology, and findings.
+    *   Prepare a demo to showcase the system's capabilities.
+    *   Clean, comment, and document the codebase for handoff.
