@@ -70,20 +70,48 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
 
 The project builds upon established and recent research in the following areas:
 
-1.  **Foundational Fact-Checking & Attribution:**
-    *   **FEVER (Thorne et al., 2018):** Pioneered the claim-evidence-label framework ("Supported/Refuted/NotEnoughInfo"), establishing the methodology for claim-by-claim verification. (https://arxiv.org/abs/1803.05355)
-    *   **KILT (Petroni et al., 2021):** Created a benchmark for knowledge-intensive tasks with source attribution, emphasizing traceability to the page or paragraph level. (https://arxiv.org/abs/2009.00795)
+### Foundational Fact-Checking & Attribution
+- **Paper:** "FEVER: a Large-scale Dataset for Fact Extraction and VERification" (Thorne et al., 2018)
+- **Use:** Pioneered the claim-evidence-label framework ("Supported/Refuted/NotEnoughInfo"), establishing the methodology for claim-by-claim verification.
+- **Link:** https://arxiv.org/abs/1803.05355
 
-2.  **Automated Factuality Evaluation:**
-    *   **QAFactEval (Fabbri et al., 2021), FactCC (Kryscinski et al., 2019), SummaC (Laban et al., 2022):** These works developed automated metrics for factual consistency in text generation, often using an NLI-based approach to determine if a claim is supported by evidence. This supports our idea of a sentence/paragraph-level alignment module. (https://arxiv.org/abs/2104.05478, https://arxiv.org/abs/1911.03420, https://arxiv.org/abs/2109.00525)
+- **Paper:** "KILT: a Benchmark for Knowledge Intensive Language Tasks" (Petroni et al., 2021)
+- **Use:** Created a benchmark for knowledge-intensive tasks with source attribution, emphasizing traceability to the page or paragraph level.
+- **Link:** https://arxiv.org/abs/2009.00795
 
-3.  **Hallucination Benchmarking & Analysis:**
-    *   **TruthfulQA (Lin et al., 2021):** Demonstrated that models often generate plausible but false answers, highlighting the need for uncertainty estimation and verification. (https://arxiv.org/abs/2109.07958)
-    *   **RAGTruth (2023):** A benchmark focused on hallucinations in RAG systems, showing that "cited hallucinations" are common even with retrieved evidence, which necessitates finer-grained evidence alignment and discrimination. (https://arxiv.org/abs/2311.08290)
+### Automated Factuality Evaluation
+- **Paper:** "QAFactEval: Improved QA-Based Factual Consistency Evaluation for Summarization" (Fabbri et al., 2021)
+- **Use:** Provides a question-answering based method to evaluate factual consistency, which can be adapted to verify claims against evidence by generating questions from the claim and checking answers from the source document.
+- **Link:** https://arxiv.org/abs/2104.05478
 
-4.  **Hallucination Detection & Mitigation Techniques:**
-    *   **SelfCheckGPT (Manakul et al., 2023):** Uses self-consistency sampling to detect unreliable statements. This can serve as a useful uncertainty signal but is insufficient on its own to guarantee citation correctness. (https://arxiv.org/abs/2303.08896)
-    *   **Self-RAG (Asai et al., 2023):** A model that reflects on its own generations and retrieves evidence for self-verification during the generation process, improving attribution and reducing hallucinations. (https://arxiv.org/abs/2310.11511)
-    *   **Chain-of-Verification (CoVe) (Gao et al., 2023/2024):** An "answer-then-verify" process that automatically checks and rewrites its initial response, significantly improving the factuality of long-form answers. (https://arxiv.org/abs/2309.11495)
+- **Paper:** "Evaluating the Factual Consistency of Abstractive Text Summarization" (Kryscinski et al., 2019)
+- **Use:** Introduces a model to classify claim-evidence pairs as factually consistent or inconsistent, providing a direct blueprint for a component of our verifier module.
+- **Link:** https://arxiv.org/abs/1911.03420
+
+- **Paper:** "SummaC: Re-Visiting NLI-based Models for Inconsistency Detection in Summarization" (Laban et al., 2022)
+- **Use:** Supports the project's core idea of using a Natural Language Inference (NLI) model for fine-grained, sentence-level alignment between the claim and the evidence to detect contradictions.
+- **Link:** https://arxiv.org/abs/2109.00525
+
+### Hallucination Benchmarking & Analysis
+- **Paper:** "TruthfulQA: Measuring How Models Mimic Human Falsehoods" (Lin et al., 2021)
+- **Use:** Demonstrated that models often generate plausible but false answers, highlighting the need for uncertainty estimation and verification.
+- **Link:** https://arxiv.org/abs/2109.07958
+
+- **Paper:** "RAGTruth: A Hallucination Benchmark for Retrieval-Augmented Generation" (2023)
+- **Use:** A benchmark focused on hallucinations in RAG systems, showing that "cited hallucinations" are common even with retrieved evidence, which necessitates finer-grained evidence alignment and discrimination.
+- **Link:** https://arxiv.org/abs/2311.08290
+
+### Hallucination Detection & Mitigation Techniques
+- **Paper:** "SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models" (Manakul et al., 2023)
+- **Use:** Uses self-consistency sampling to detect unreliable statements. This can serve as a useful uncertainty signal but is insufficient on its own to guarantee citation correctness.
+- **Link:** https://arxiv.org/abs/2303.08896
+
+- **Paper:** "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection" (Asai et al., 2023)
+- **Use:** A model that reflects on its own generations and retrieves evidence for self-verification during the generation process, improving attribution and reducing hallucinations.
+- **Link:** https://arxiv.org/abs/2310.11511
+
+- **Paper:** "Chain-of-Verification Reduces Hallucination in Large Language Models" (Gao et al., 2023/2024)
+- **Use:** An "answer-then-verify" process that automatically checks and rewrites its initial response, significantly improving the factuality of long-form answers.
+- **Link:** https://arxiv.org/abs/2309.11495
 
 **Key Insight:** Research also indicates that using an LLM-as-a-judge can be prone to bias and instability, making it risky to rely solely on it for verifying citations. A more robust approach, which this project adopts, is to combine evidence retrieval with NLI-based contradiction detection.
