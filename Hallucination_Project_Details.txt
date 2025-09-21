@@ -87,20 +87,20 @@ The project builds upon established and recent research in the following areas:
 
 - **Paper:** "KILT: a Benchmark for Knowledge Intensive Language Tasks" (Petroni et al., 2021)
 - **Use:** Created a benchmark for knowledge-intensive tasks with source attribution, emphasizing traceability to the page or paragraph level.
-- **Link:** https://arxiv.org/abs/2009.00795
+- **Link:** https://arxiv.org/abs/2009.02252
 
 ### Automated Factuality Evaluation
 - **Paper:** "QAFactEval: Improved QA-Based Factual Consistency Evaluation for Summarization" (Fabbri et al., 2021)
 - **Use:** Provides a question-answering based method to evaluate factual consistency, which can be adapted to verify claims against evidence by generating questions from the claim and checking answers from the source document.
-- **Link:** https://arxiv.org/abs/2104.05478
+- **Link:** https://arxiv.org/abs/2112.08542
 
 - **Paper:** "Evaluating the Factual Consistency of Abstractive Text Summarization" (Kryscinski et al., 2019)
 - **Use:** Introduces a model to classify claim-evidence pairs as factually consistent or inconsistent, providing a direct blueprint for a component of our verifier module.
-- **Link:** https://arxiv.org/abs/1911.03420
+- **Link:** https://arxiv.org/abs/1910.12840
 
 - **Paper:** "SummaC: Re-Visiting NLI-based Models for Inconsistency Detection in Summarization" (Laban et al., 2022)
 - **Use:** Supports the project's core idea of using a Natural Language Inference (NLI) model for fine-grained, sentence-level alignment between the claim and the evidence to detect contradictions.
-- **Link:** https://arxiv.org/abs/2109.00525
+- **Link:** https://arxiv.org/abs/2111.09525
 
 ### Hallucination Benchmarking & Analysis
 - **Paper:** "TruthfulQA: Measuring How Models Mimic Human Falsehoods" (Lin et al., 2021)
@@ -109,7 +109,7 @@ The project builds upon established and recent research in the following areas:
 
 - **Paper:** "RAGTruth: A Hallucination Benchmark for Retrieval-Augmented Generation" (2023)
 - **Use:** A benchmark focused on hallucinations in RAG systems, showing that "cited hallucinations" are common even with retrieved evidence, which necessitates finer-grained evidence alignment and discrimination.
-- **Link:** https://arxiv.org/abs/2311.08290
+- **Link:** https://arxiv.org/abs/2401.00396
 
 ### Hallucination Detection & Mitigation Techniques
 - **Paper:** "SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models" (Manakul et al., 2023)
