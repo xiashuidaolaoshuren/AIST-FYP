@@ -80,6 +80,11 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
 
 The project builds upon established and recent research in the following areas:
 
+### Overviews & Surveys
+- **Paper:** "A Survey on Hallucination in Large Language Models" (Zhang et al., 2023)
+- **Use:** Provides a comprehensive overview of the types of hallucinations, their causes, and the state-of-the-art detection and mitigation techniques, which helps to frame the project's contribution.
+- **Link:** https://arxiv.org/abs/2311.05232
+
 ### Foundational Fact-Checking & Attribution
 - **Paper:** "FEVER: a Large-scale Dataset for Fact Extraction and VERification" (Thorne et al., 2018)
 - **Use:** Pioneered the claim-evidence-label framework ("Supported/Refuted/NotEnoughInfo"), establishing the methodology for claim-by-claim verification.
@@ -123,5 +128,10 @@ The project builds upon established and recent research in the following areas:
 - **Paper:** "Chain-of-Verification Reduces Hallucination in Large Language Models" (Gao et al., 2023/2024)
 - **Use:** An "answer-then-verify" process that automatically checks and rewrites its initial response, significantly improving the factuality of long-form answers.
 - **Link:** https://arxiv.org/abs/2309.11495
+
+### Critiques of LLM-as-a-Judge
+- **Paper:** "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena" (Zheng et al., 2023)
+- **Use:** Highlights the challenges and biases (e.g., position, verbosity, and self-preference biases) of using LLMs as evaluators. This supports the project's decision to use a more robust, multi-component verification system instead of relying solely on an LLM judge.
+- **Link:** https://arxiv.org/abs/2306.05685
 
 **Key Insight:** Research also indicates that using an LLM-as-a-judge can be prone to bias and instability, making it risky to rely solely on it for verifying citations. A more robust approach, which this project adopts, is to combine evidence retrieval with NLI-based contradiction detection.
