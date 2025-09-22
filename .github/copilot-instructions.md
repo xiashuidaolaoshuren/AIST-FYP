@@ -47,3 +47,4 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Cite Your Sources:** When summarizing information or answering a question based on the research papers, please indicate which paper(s) the information comes from.
 - **Focus on Synthesis:** Do not just summarize individual papers. Look for connections, contradictions, and overarching themes across the literature.
 - **Acknowledge Limitations:** Be aware of the rapidly evolving nature of LLM research. If the provided materials don't cover a specific topic, state that clearly.
+- **Respond Language:** Answers should be provided in English unless otherwise specified.
