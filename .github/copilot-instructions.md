@@ -18,7 +18,7 @@ The repository primarily consists of research papers, project descriptions, and 
 
 Your primary role is to act as a research and code assistant. Key tasks include:
 
-- **Literature Review:** Summarizing and analyzing the research papers found in the `reference/` directory. When asked to review a paper, focus the following aspects:
+- **Literature Review:** Summarizing and analyzing the research papers found in the `reference/` directory. When asked to review or summarize a paper, focus the following aspects:
     1. Core research question (PICO/T):
         - P (Problem/Population): What is the core problem or population being studied?
         - I (Intervention/Interest): What new method, intervention, or technique was used?
