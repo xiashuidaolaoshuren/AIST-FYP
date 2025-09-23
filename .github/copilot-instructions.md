@@ -26,7 +26,7 @@ Your primary role is to act as a research and code assistant. Key tasks include:
         - O (Outcome): What are the primary outcomes being measured?
         - T (Timeframe): What is the core theoretical hypothesis or final argument?
     2. Methodology: Briefly describe the research design (e.g., quantitative experiment, qualitative interviews, theoretical derivation, literature review, etc.) and the key steps.
-    3. Key Findings: List the 3–5 most important findings in bullet points.
+    3. Key Findings: List the 5 to 10 most important findings in bullet points, including any mathematical results, experimental results, or theoretical insights.
     4. Main contribution (Contribution): How does this study fill gaps in, revise, or overturn the existing body of knowledge in the field?
     5. Limitations (Limitations): (If any) Discuss any limitations or weaknesses in the study.
     6. Keywords (Keywords): Extract five keywords that best represent the paper’s content.
@@ -40,7 +40,7 @@ For each paper, output the above summary in a text file named after the paper's 
 ## Important Files
 
 - `Hallucination_Project_Details.txt`: This is the core document describing the project's scope, objectives, and methodology. Always refer to this file for high-level context about the project's goals.
-- `reference/`: This directory contains the corpus of research papers that form the foundation of this project, and the summaries generated from these papers. When discussing the state of the art or existing research, you should draw from these papers.
+- `reference/`: This directory contains the corpus of research papers that form the foundation of this project, and the summaries generated from these papers. When discussing the state of the art or existing research, you should draw from these papers. For the pdf file name with number (which usually download from arxiv.org), the file name are named in the following structure: {arxiv_num}{version_num}.pdf. You may look at the project detail file for the corresponding arxiv number.
 
 ## Guidelines for Interaction
 
