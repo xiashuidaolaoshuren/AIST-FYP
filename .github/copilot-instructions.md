@@ -40,11 +40,14 @@ For each paper, output the above summary in a text file named after the paper's 
 ## Important Files
 
 - `Hallucination_Project_Details.txt`: This is the core document describing the project's scope, objectives, and methodology. Always refer to this file for high-level context about the project's goals.
-- `reference/`: This directory contains the corpus of research papers that form the foundation of this project, and the summaries generated from these papers. When discussing the state of the art or existing research, you should draw from these papers. For the pdf file name with number (which usually download from arxiv.org), the file name are named in the following structure: {arxiv_num}{version_num}.pdf. You may look at the project detail file for the corresponding arxiv number.
+- `reference/`: 
+    1. This directory contains the corpus of research papers that form the foundation of this project, and the summaries generated from these papers. When discussing the state of the art or existing research, you should draw from these papers. 
+    2. For the pdf file name in number (which usually download from arxiv.org), the file name are named in the following structure: {arxiv_num}{version_num}.pdf. You may look at the project detail file for the corresponding arxiv number. For other pdf files, the file name are named in paper title.
 
 ## Guidelines for Interaction
 
 - **Cite Your Sources:** When summarizing information or answering a question based on the research papers, please indicate which paper(s) the information comes from.
 - **Focus on Synthesis:** Do not just summarize individual papers. Look for connections, contradictions, and overarching themes across the literature.
 - **Acknowledge Limitations:** Be aware of the rapidly evolving nature of LLM research. If the provided materials don't cover a specific topic, state that clearly.
-- **Answer Concisely:** Provide clear, concrete and concise answers (e.g., state what the new methods is instead of just saying "the paper proposes a new method").
+- **Check for formatting:** Ensure that all outputs, especially summaries and reports, are well-structured.
+- **Answer Concisely:** Provide clear, concrete and concise answers (e.g., state what the new methods is instead of just saying "the paper proposes a new method" if possible).
