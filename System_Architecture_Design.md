@@ -8,11 +8,11 @@ This diagram illustrates the end-to-end flow of data, from the initial user quer
 
 ```mermaid
 graph TD
-    A[User Query] --> B{1. Generator};
+    A[User Query] --> B{Generator};
     B --> C[Initial Draft + Atomic Claims];
-    C --> D{2. Retriever};
+    C --> D{Retriever};
     D --> E[Ranked Evidence Documents];
-    subgraph 3. Verifier
+    subgraph Verifier
         F[NLI Contradiction Detector]
         G[Evidence Alignment Scorer]
         H[Uncertainty Signal Detector]
@@ -26,7 +26,7 @@ graph TD
     G --> I;
     H --> I;
     I --> J[Verified Claims with Scores];
-    C -- Initial Draft --> K{4. Final Response Generator};
+    C -- Initial Draft --> K{Final Response Generator};
     J -- Verified Claims --> K;
     K --> L[Final Verified Response with Citations];
 
