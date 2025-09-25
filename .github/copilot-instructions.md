@@ -53,3 +53,6 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Answer Concisely:** Provide clear, concrete and concise answers (e.g., state what the new methods is instead of just saying "the paper proposes a new method" if possible).
 - **Upto-date Knowledge:** When using third-party libraries or tools, use context7 mcp server to get the latest information and avoid deprecated methods.
 - **Sequential Thinking:** For complex tasks, break down your response into clear, logical steps to ensure thoroughness and clarity. Use sequential-thinking mcp to assist you in this process.
+
+## MCP Interactive Feedback Rules
+- Follow mcp-feedback-enhanced instructions
