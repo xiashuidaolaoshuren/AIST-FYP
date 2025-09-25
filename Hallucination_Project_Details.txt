@@ -2,6 +2,8 @@ Project Title: Hallucination Detection & Mitigation for LLMs when Citing Referen
 
 Date: September 17, 2025
 
+Project Constraint: Medium Complexity, 6-Month Duration, Team of 2 Members, RTX 3070Ti GPU (can be upgraded to 3090Ti or A100 if needed)
+
 ## 1. Project Content Focus
 
 This project focuses on detecting and mitigating factual hallucinations in Large Language Model (LLM) outputs, with a specific emphasis on scenarios where the model needs to cite references to support its claims. The core goal is to develop a lightweight, plug-and-play verifier module that can assess the factual accuracy of a statement against a reliable knowledge source and reduce the generation of incorrect or "hallucinated" information without relying on a massive "judge" model.
