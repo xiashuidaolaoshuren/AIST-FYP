@@ -51,8 +51,6 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Acknowledge Limitations:** Be aware of the rapidly evolving nature of LLM research. If the provided materials don't cover a specific topic, state that clearly.
 - **Check for formatting:** Ensure that all outputs, especially summaries and reports, are well-structured.
 - **Answer Concisely:** Provide clear, concrete and concise answers (e.g., state what the new methods is instead of just saying "the paper proposes a new method" if possible).
-- **Upto-date Knowledge:** When using third-party libraries or tools, use context7 mcp server to get the latest information and avoid deprecated methods.
-- **Sequential Thinking:** For complex tasks, break down your response into clear, logical steps to ensure thoroughness and clarity. Use sequential-thinking to assist you in this process.
-
-## MCP Interactive Feedback Rules
-- Follow mcp-feedback-enhanced instructions to use interactive feedback to improve your responses.
+- **Upto-date Knowledge:** When using third-party libraries or tools, use context7 MCP to get the latest information and avoid deprecated methods.
+- **Sequential Thinking:** Use sequential-thinking MCP for complex tasks. Break down the task into smaller steps and tackle them one at a time.
+- **MCP Interactive Feedback Rules:** Follow mcp-feedback-enhanced instructions before completing any task.

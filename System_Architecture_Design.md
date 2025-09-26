@@ -1,39 +1,42 @@
-# System Architecture: A Simplified Generator-Retriever-Verifier Pipeline
+# System Architecture: Integrating a Confidence UI
 
-This document outlines a redesigned, simplified architecture for the hallucination detection and mitigation pipeline. The new design emphasizes a more linear, three-stage process to align more closely with the project roadmap and reduce complexity.
+This document outlines a redesigned architecture that integrates a transparent Confidence UI. The design is updated to calculate and expose structured confidence signals, which drive both the UI and the mitigation strategies.
 
 ## High-Level Pipeline Flowchart
 
-This diagram illustrates the simplified, end-to-end data flow.
+This diagram illustrates the updated data flow, including the calculation of confidence signals and their visualization.
 
 ```mermaid
 graph TD
-    A[User Query] --> B[1. Baseline RAG Module];
+    A[User Query] --> B[Baseline RAG Module];
     subgraph B
         direction LR
         B1{Retriever} --> B2{Generator};
     end
-    B --> C[Draft Response + Claim-Evidence Pairs];
+    B --> C["Draft Response + Claim-Evidence Pairs"];
     C --> D[2. Verifier Module];
     subgraph D
         direction TB
-        D1[NLI Contradiction Detector]
-        D2[Evidence Alignment Scorer]
-        D3[Uncertainty Signal Detector]
+        D1["Unified Verifier (NLI/Alignment)"]
+        D2[Uncertainty Signal Detector]
+        D3[Evidence Quality Scorer]
         D_Ensemble{Ensemble Logic}
         D1 --> D_Ensemble;
         D2 --> D_Ensemble;
         D3 --> D_Ensemble;
     end
-    D --> E[Verified Claims];
-    C -- Draft --> F[3. Mitigation & Finalization Module];
-    E -- Verified Claims --> F;
-    F --> G[Final Verified Response];
+    D --> E["Verified Claims with Confidence Breakdown"];
+    E --> F[Mitigation & Finalization Module];
+    E --> G[Confidence UI Display];
+    F --> H[Final Verified Response];
+    G --> I((Final Output));
+    H --> I;
 
     style B fill:#f9f,stroke:#333,stroke-width:2px
     style D fill:#ccf,stroke:#333,stroke-width:2px
     style F fill:#fcf,stroke:#333,stroke-width:2px
-    style G fill:#bdf,stroke:#333,stroke-width:4px
+    style G fill:#ffc,stroke:#333,stroke-width:2px
+    style I fill:#bdf,stroke:#333,stroke-width:4px
 ```
 
 ---
@@ -41,58 +44,81 @@ graph TD
 ## Module-by-Module Design
 
 ### 1. Baseline RAG Module
-
-This module integrates the retrieval and generation steps into a single component, responsible for producing a draft response and the direct evidence used for its claims.
+*(This module's core function remains the same, but it now passes token-level metadata to the Verifier.)*
 
 -   **Inputs:**
     -   `user_query`: (string) The input prompt from the user.
-
 -   **Process:**
-    1.  **Retrieve:** The hybrid retriever (BM25 + dense) fetches a set of relevant documents from the knowledge base (e.g., FAISS vector database) based on the `user_query`.
-    2.  **Generate:** The generator LLM is prompted with the `user_query` and the content of the retrieved documents. It produces a draft response.
-    3.  **Decompose & Pair:** The draft is decomposed into atomic claims. For each claim, the module identifies which of the retrieved documents was most likely used to generate it, creating direct `(claim, evidence)` pairs.
-
+    1.  **Retrieve:** The hybrid retriever fetches relevant documents.
+    2.  **Generate:** The generator LLM produces a draft response, while capturing token-level metadata (e.g., logits).
+    3.  **Decompose & Pair:** The draft is decomposed into atomic claims, creating direct `(claim, evidence)` pairs.
 -   **Outputs:**
     -   `draft_response`: (string) The full, unverified draft response.
-    -   `claim_evidence_pairs`: (List[dict]) A list where each dictionary contains:
-        -   `claim`: (string) The atomic claim.
-        -   `evidence`: (dict) The evidence document used, containing `content`, `source_id`, and `span`.
+    -   `claim_evidence_pairs`: (List[dict]) A list where each dictionary contains the `claim`, the `evidence` document, and `generator_metadata`.
 
-### 2. Verifier Module (Plug-and-Play)
+### 2. Verifier Module (Confidence Signal Hub)
 
-This module acts as a self-contained "plug-and-play" unit that assesses the factuality of each claim-evidence pair.
+This module is redesigned to be the central hub for calculating all the sub-signals that constitute "confidence".
 
 -   **Inputs:**
     -   `claim_evidence_pairs`: (List[dict]) The output from the Baseline RAG Module.
 
--   **Process:**
-    1.  For each `(claim, evidence)` pair, the following three sub-components run in parallel:
-        -   **NLI Contradiction Detector:** A fine-tuned NLI model classifies the relationship between the claim and evidence as "entailment," "neutral," or "contradiction."
-        -   **Evidence Alignment Scorer:** A classifier scores how well the evidence supports the claim, producing a score for "supported," "refuted," or "not_enough_info."
-        -   **Uncertainty Signal Detector:** An uncertainty score is calculated based on the generator's confidence (e.g., token entropy from the RAG module's generation process) and/or self-consistency checks.
-    2.  **Ensemble Logic:** The outputs from the three sub-modules are fed into a simple, weighted heuristic or a meta-classifier to determine a final verification status for the claim.
+-   **Process & Sub-components:**
+    1.  For each `(claim, evidence)` pair, the following sub-components run in parallel:
+        -   **Unified Verifier (NLI/Alignment):** A model (or pair of models) that analyzes the claim against the evidence.
+            -   **Output:** A probability distribution: `{p_supported, p_refuted, p_nei}`.
+        -   **Uncertainty Signal Detector:** Analyzes the `generator_metadata`.
+            -   **Output:** A `token_uncertainty` score (e.g., normalized mean entropy over the claim's tokens).
+        -   **Evidence Quality Scorer:** A new component that assesses the retrieved evidence itself.
+            -   **Process:** Calculates the fraction of the claim's key entities and numbers that appear in the evidence (`coverage`) and a penalty based on the evidence's rank (`rank_penalty`).
+            -   **Output:** An `evidence_quality` dictionary: `{coverage, rank_penalty}`.
+    2.  **Ensemble Logic:** This step does **not** compute a single status. Instead, it gathers all the calculated signals into a structured breakdown.
 
 -   **Outputs:**
     -   `verified_claims`: (List[dict]) A list where each dictionary contains:
         -   `claim`: (string) The original atomic claim.
         -   `evidence`: (dict) The associated evidence.
-        -   `status`: (string) The final verification label: "Supported", "Contradictory", or "Insufficient_Info".
+        -   `confidence_breakdown`: (dict) A structured dictionary containing all signals:
+            -   `p_supported`: (float)
+            -   `p_refuted`: (float)
+            -   `p_nei`: (float)
+            -   `token_uncertainty`: (float)
+            -   `evidence_quality`: (dict) `{coverage, rank_penalty}`
 
 ### 3. Mitigation & Finalization Module
 
-This final module constructs the trustworthy response for the user by applying clear, rule-based corrections.
+This module uses the detailed confidence breakdown to apply more nuanced, rule-based corrections.
 
 -   **Inputs:**
-    -   `draft_response`: (string) The original draft from the RAG Module.
+    -   `draft_response`: (string) The original draft.
     -   `verified_claims`: (List[dict]) The output from the Verifier Module.
 
 -   **Process:**
     1.  The module iterates through the `verified_claims`.
-    2.  It builds the final response by applying a set of mitigation rules:
-        -   If a claim's status is **"Supported"**: The claim is included in the final text, and a citation pointing to the `evidence` is appended.
-        -   If a claim's status is **"Contradictory"**: The claim is either corrected based on the evidence or replaced with a warning statement (e.g., "An initial claim about X was found to be incorrect and has been removed.").
-        -   If a claim's status is **"Insufficient_Info"**: The claim is rephrased to reflect uncertainty (e.g., "It is suggested that Y, but this could not be fully verified.") or omitted, depending on the desired level of strictness.
-    3.  The module assembles the final, coherent response, complete with inline citations and a formatted reference list at the end.
+    2.  It builds the final response by applying rules based on the `confidence_breakdown`:
+        -   **If `p_supported` > 0.8 AND `p_refuted` < 0.1**: The claim is considered **Supported**. It is included in the final text with a citation.
+        -   **If `p_refuted` > 0.7**: The claim is considered **Contradictory**. It is corrected based on the evidence or replaced with a warning statement.
+        -   **Otherwise**: The claim is considered to have **Insufficient Info**. It is rephrased to reflect uncertainty (e.g., "It is suggested that Y...") or omitted if `p_nei` is very high.
+    3.  The module assembles the final, coherent response with citations and a reference list.
 
 -   **Outputs:**
-    -   `final_response`: (string) The final, polished, and verified text presented to the user.
+    -   `final_response`: (string) The final, polished, and verified text.
+
+### 4. Confidence UI Display
+
+This new module is responsible for visualizing the confidence signals for the end-user in a transparent way.
+
+-   **Inputs:**
+    -   `verified_claims`: (List[dict]) The output from the Verifier Module.
+
+-   **Process:**
+    1.  For each claim in the final response, the UI provides an interactive element (e.g., an icon or highlighted text).
+    2.  On hover or click, the UI displays a tooltip or a small pop-up that visualizes the `confidence_breakdown` without showing a single, opaque score.
+    3.  **Visualization Example:**
+        -   **Support:** A bar showing the `p_supported` probability (e.g., "85% Supported").
+        -   **Evidence Quality:** A score or icon representing `coverage` and `rank_penalty`.
+        -   **Model Confidence:** A meter showing `1 - token_uncertainty` (e.g., "High Model Confidence").
+        -   **Warning:** If `p_refuted` is high, a prominent red flag or warning icon is displayed.
+
+-   **Outputs:**
+    -   An interactive user interface integrated with the `final_response` that allows users to inspect the reasoning and confidence behind each claim.
