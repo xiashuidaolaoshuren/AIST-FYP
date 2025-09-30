@@ -8,14 +8,14 @@ This diagram illustrates the updated data flow, emphasizing the parallel, trainl
 
 ```mermaid
 graph TD
-    A[User Query] --> B[1. Baseline RAG Module];
-    subgraph B
+    A[User Query] --> B;
+    subgraph B[Baseline RAG Module]
         direction LR
         B1{Retriever} --> B2{Generator};
     end
     B --> C["Draft Response + Claim-Evidence Pairs"];
-    C --> D[2. Verifier Module (Trainless Signals)];
-    subgraph D
+    C --> D;
+    subgraph D["Verifier Module (Trainless Signals)"]
         direction TB
         D1["Intrinsic Uncertainty (Entropy)"]
         D2["Self-Agreement (Consistency)"]
@@ -28,8 +28,8 @@ graph TD
         D4 --> D_Aggregator;
     end
     D --> E["Verified Claims with Confidence Breakdown"];
-    E --> F[3. Flagging & Suppression Module];
-    E --> G[4. Minimal Confidence UI (Table/Badges)];
+    E --> F["Flagging & Suppression Module"];
+    E --> G["Minimal Confidence UI (Table/Badges)"];
     F --> H[Final Verified Response];
     G --> I((Final Output));
     H --> I;

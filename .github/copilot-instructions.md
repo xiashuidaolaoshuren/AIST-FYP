@@ -43,6 +43,8 @@ For each paper, output the above summary in a text file named after the paper's 
 - `reference/`: 
     1. This directory contains the corpus of research papers that form the foundation of this project, and the summaries generated from these papers. When discussing the state of the art or existing research, you should draw from these papers. 
     2. For the pdf file name in number (which usually download from arxiv.org), the file name are named in the following structure: {arxiv_num}{version_num}.pdf. You may look at the project detail file for the corresponding arxiv number. For other pdf files, the file name are named in paper title.
+- `System_Architecture_Design.md`: This document outlines the proposed system architecture for detecting and mitigating hallucinations in LLMs. It includes diagrams and module descriptions.
+- `helpful_tools.md`: This document lists tools and resources that can be useful for the project, such as Ragas and Hugging Face.
 
 ## Guidelines for Interaction
 
