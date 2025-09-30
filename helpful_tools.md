@@ -21,12 +21,13 @@ Ragas is an open-source framework designed to evaluate Retrieval-Augmented Gener
 
 By integrating Ragas, the project can systematically evaluate its hallucination detection and mitigation strategies.
 
-## 2. Hugging Face: Models and Datasets for Hallucination Detection
+## 2. Hugging Face: Models and Datasets for a Trainless Approach
 
-Hugging Face is an essential resource for this project. It provides access to a vast collection of pre-trained models and datasets that are crucial for building the "Verifier" module, which relies on tasks like Natural Language Inference (NLI) and fact-checking.
+Hugging Face is an essential resource for this project, especially for the new **trainless** approach. It provides access to off-the-shelf models and tools that are crucial for building the "Verifier" module without requiring fine-tuning.
 
-### How Hugging Face Can Be Used:
+### How Hugging Face Will Be Used:
 
-- **Pre-trained Models for NLI:** The "Verifier" in the architecture uses NLI to check for contradictions between the generated response and the source documents. The Hugging Face Hub contains many pre-trained NLI models that can be used for this purpose. A "contradiction" classification from one of these models is a strong signal of a hallucination.
-- **Datasets for Fine-tuning:** The Hub hosts numerous NLI and fact-checking datasets (like SNLI, MNLI, and FEVER) that can be used to fine-tune models for better performance on specific domains.
-- **Transformers Library:** The `transformers` library from Hugging Face simplifies the process of downloading and using these pre-trained models.
+- **Zero-Shot NLI Models:** The verifier will use a pre-trained, multi-domain NLI model to check for contradictions. A strong candidate is `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`, which is already fine-tuned on several fact-checking datasets (MNLI, FEVER, ANLI). This allows for immediate, high-quality contradiction detection without any training.
+- **Cross-Encoder Models for Relevance:** A pre-trained cross-encoder, such as one from the `ms-marco` collection (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`), can be used to score the semantic relevance between a generated claim and the retrieved evidence. A low relevance score can be a powerful heuristic for suspecting hallucination.
+- **Transformers Library:** The `transformers` library from Hugging Face simplifies the process of downloading and using these pre-trained models for inference.
+- **Datasets for Evaluation:** While the approach is trainless, datasets like `FEVER`, `TruthfulQA`, and `RAGTruth` remain critical for **evaluating** the effectiveness of the different zero-shot signals and the overall detector.

@@ -15,37 +15,42 @@ This project focuses on detecting and mitigating factual hallucinations in Large
 The following is the established plan from the `FYP_Selected_Projects_Roadmap.txt` document.
 
 - **Brief Introduction:** Detect factual hallucinations in LLM outputs and reduce them using a lightweight, plug-and-play verifier module without needing a huge "judge" model.
-- **Technical Innovation:** A lightweight verifier ensemble combining retrieval evidence scoring, contradiction detection (NLI), and model uncertainty signals (e.g., self-consistency, entropy).
-- **Technical Stack:** Python, Transformers, PEFT (LoRA/QLoRA), Vector DBs (FAISS/Chroma), NLI models (e.g., DeBERTa).
+- **Technical Innovation:** A lightweight, **trainless** verifier ensemble combining multiple zero-shot signals. This includes:
+  - **Intrinsic Uncertainty:** Using decoder statistics like token entropy.
+  - **Self-Agreement Methods:** Analyzing response variability across multiple generations (Self-Consistency).
+  - **Retrieval-Grounded Heuristics:** Calculating evidence coverage and lexical overlap.
+  - **Zero-Shot NLI:** Using off-the-shelf models to check for entailment and contradiction between claims and evidence.
+- **Technical Stack:** Python, Transformers, Vector DBs (FAISS/Chroma), and specific zero-shot NLI models (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`).
 - **Complexity:** Medium.
 
-**6-Month Compact Roadmap & Workflow:**
+**6-Month Compact Roadmap & Workflow (Detector-Focused):**
 - **Month 1: Research & Planning**
-  - **Literature Review:** Deep dive into papers on hallucination, fact-checking, RAG, and self-verification (e.g., Self-RAG, CoVe).
-  - **Data Sourcing:** Download and prepare all required datasets: Wikipedia corpus, FEVER, NLI datasets (SNLI/MNLI), and hallucination benchmarks (TruthfulQA, RAGTruth).
-  - **System Architecture Design:** Finalize the design for the generator-retriever-verifier pipeline, defining the inputs and outputs for each module.
-  - **Setup Development Environment:** Configure Python environment, install necessary libraries (Transformers, PEFT, FAISS), and set up GPU access.
+  - **Literature Review:** Deep dive into papers on **trainless** hallucination detection, fact-checking, RAG, and self-verification (e.g., SelfCheckGPT, CoVe).
+  - **Data Sourcing:** Download and prepare all required datasets: Wikipedia corpus, FEVER, NLI datasets, and hallucination benchmarks (TruthfulQA, RAGTruth).
+  - **System Architecture Design:** Finalize the design for the generator-retriever-verifier pipeline, focusing on a modular, trainless verifier.
+  - **Setup Development Environment:** Configure Python environment, install necessary libraries (Transformers, FAISS), and set up GPU access.
 
 - **Month 2: Baseline & Retrieval Module**
   - **Data Preparation:** Preprocess and chunk the Wikipedia corpus. Generate embeddings and index them into a FAISS vector database.
-  - **Retriever Implementation:** Build and optimize the hybrid retrieval module, combining BM25 (sparse) and a dense retriever. Evaluate its performance on a benchmark like MS MARCO or a BEIR subset.
+  - **Retriever Implementation:** Build a dense retriever. A hybrid approach with BM25 or a reranker can be added later if needed.
   - **Baseline RAG Implementation:** Implement a baseline RAG system by integrating a generator LLM with the retriever.
 
-- **Month 3: Verifier Module - Part 1**
-  - **Uncertainty Signal Detection:** Implement modules to calculate uncertainty from the generator's output, focusing on token-level entropy and self-consistency scores.
-  - **Evidence Alignment Scorer:** Train a simple classification model on claim-evidence pairs (from FEVER or synthetic data) to score how well evidence supports a claim.
+- **Month 3: Verifier Module - Signal Implementation (Part 1)**
+  - **Intrinsic Uncertainty Detector:** Implement modules to calculate uncertainty from the generator's output, focusing on token-level entropy and perplexity spikes.
+  - **Retrieval-Grounded Heuristics:** Implement heuristics to score evidence quality, such as `evidence coverage` (entity/noun phrase overlap) and `citation span integrity`.
 
-- **Month 4: Verifier Module - Part 2**
-  - **NLI Contradiction Detector:** Fine-tune a small NLI model (e.g., DeBERTa) to act as a contradiction detector between the LLM's claim and the retrieved evidence.
-  - **Ensemble Verifier Integration:** Combine all signals (uncertainty, alignment score, NLI result) into a single, powerful ensemble verifier, possibly using a weighted heuristic or a meta-classifier.
+- **Month 4: Verifier Module - Signal Implementation (Part 2)**
+  - **Zero-Shot NLI Contradiction Detector:** Integrate an off-the-shelf NLI model (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`) to check for contradictions between the LLM's claim and the retrieved evidence.
+  - **Self-Agreement Detector:** Implement a self-consistency check by sampling multiple generations and measuring claim variability.
 
-- **Month 5: Mitigation & Evaluation**
-  - **Mitigation Strategy Implementation:** Implement control logic based on the verifier's score to trigger actions like re-generation, adding warnings, or citing sources.
-  - **End-to-End Evaluation:** Evaluate the complete system's ability to reduce hallucinations on benchmarks (TruthfulQA, RAGTruth) and the custom-built citation evaluation set.
-  - **Performance Analysis:** Measure key metrics like factual consistency, hallucination rate, and attribution precision.
+- **Month 5: Detector Evaluation & Mitigation (Optional)**
+  - **Rule-Based Aggregation:** Combine all detector signals using explicit rules or a weighted heuristic to produce a final confidence score.
+  - **End-to-End Detector Evaluation:** Evaluate the complete detector's ability to identify hallucinations on benchmarks (TruthfulQA, RAGTruth).
+  - **Performance Analysis:** Measure key metrics like detection accuracy, precision, and recall.
+  - **(If time permits) Simple Mitigation:** Implement basic mitigation logic (e.g., flagging or suppressing low-confidence claims).
 
 - **Month 6: Finalization & Documentation**
-  - **Ablation Study:** Analyze the contribution of each verifier component by systematically disabling them and measuring the impact on performance.
+  - **Ablation Study:** Analyze the contribution of each **trainless signal** by systematically disabling them and measuring the impact on detection performance.
   - **Final Report & Demo:** Write the final project report, detailing the architecture, methodology, results, and insights. Prepare a compelling demo of the system.
   - **Code Cleanup & Handoff:** Clean, comment, and document the codebase for future use and handoff.
 

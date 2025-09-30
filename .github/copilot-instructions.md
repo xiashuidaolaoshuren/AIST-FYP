@@ -52,5 +52,5 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Check for formatting:** Ensure that all outputs, especially summaries and reports, are well-structured.
 - **Answer Concisely:** Provide clear, concrete and concise answers (e.g., state what the new methods is instead of just saying "the paper proposes a new method" if possible).
 - **Upto-date Knowledge:** When using third-party libraries or tools, use context7 MCP to get the latest information and avoid deprecated methods.
-- **Sequential Thinking:** Use sequential-thinking MCP for complex tasks. Break down the task into smaller steps and tackle them one at a time.
-- **MCP Interactive Feedback Rules:** Follow mcp-feedback-enhanced instructions before completing any task.
+- **Sequential Thinking:** Use sequential-thinking MCP for all tasks. Break down the task into smaller steps and tackle them one at a time.
+- **MCP Interactive Feedback Rules:** Use mcp-feedback-enhanced and follows the mcp instructions before completing any task.
