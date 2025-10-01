@@ -35,7 +35,10 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Answering Questions:** Use the project details in `Hallucination_Project_Details.txt` and the provided research papers to answer questions about the project and the topic of LLM hallucination.
 - **Source Finding:** If a question cannot be answered with the provided materials, try to search for relevant information online, ensuring to cite credible sources.
 - **Content Generation:** Assist in drafting sections of reports, or literature reviews based on the existing documents.
-- **Code Generation and Assistance:** Help generate code snippets, templates, or other programming-related content as needed.
+- **Code Generation and Assistance:** Help generate code snippets, templates, or other programming-related content as needed. Please follows the following rules:
+    1. Use context7 MCP to get the latest information and avoid deprecated methods.
+    2. Use sequential-thinking MCP for all tasks. Break down the task into smaller steps and tackle them one at a time.
+    3. Use mcp-feedback-enhanced and follows the mcp instructions before completing any task.
 
 ## Important Files
 
@@ -53,6 +56,3 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Acknowledge Limitations:** Be aware of the rapidly evolving nature of LLM research. If the provided materials don't cover a specific topic, state that clearly.
 - **Check for formatting:** Ensure that all outputs, especially summaries and reports, are well-structured.
 - **Answer Concisely:** Provide clear, concrete and concise answers (e.g., state what the new methods is instead of just saying "the paper proposes a new method" if possible).
-- **Upto-date Knowledge:** When using third-party libraries or tools, use context7 MCP to get the latest information and avoid deprecated methods.
-- **Sequential Thinking:** Use sequential-thinking MCP for all tasks. Break down the task into smaller steps and tackle them one at a time.
-- **MCP Interactive Feedback Rules:** Use mcp-feedback-enhanced and follows the mcp instructions before completing any task.
