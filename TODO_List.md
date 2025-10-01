@@ -6,16 +6,16 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 
 ### **Month 1: Research & Planning**
 
--   [ ] **Literature Review:**
-    -   [ ] Read and summarize key papers on trainless hallucination detection (e.g., SelfCheckGPT, CoVe).
-    -   [ ] Consolidate findings and identify the most promising signals for the verifier module.
+-   [X] **Literature Review:**
+    -   [X] Read and summarize key papers on trainless hallucination detection (e.g., SelfCheckGPT, CoVe).
+    -   [X] Consolidate findings and identify the most promising signals for the verifier module.
 -   [ ] **Data Sourcing:**
     -   [ ] Download the English Wikipedia corpus.
     -   [ ] Download evaluation benchmarks: `TruthfulQA`, `RAGTruth`, and `FEVER`.
     -   [ ] Organize all datasets in a structured project directory.
--   [ ] **System Architecture:**
-    -   [ ] Review and confirm the finalized trainless architecture design.
-    -   [ ] Define the precise inputs and outputs for each signal detector in the verifier module.
+-   [X] **System Architecture:**
+    -   [X] Review and confirm the finalized trainless architecture design.
+    -   [X] Define the precise inputs and outputs for each signal detector in the verifier module.
 -   [ ] **Environment Setup:**
     -   [ ] Create a dedicated Python environment (e.g., conda, venv).
     -   [ ] Install core libraries: `transformers`, `faiss-cpu` (or `faiss-gpu`), `torch`, `datasets`.

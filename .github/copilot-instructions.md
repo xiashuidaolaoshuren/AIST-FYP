@@ -48,6 +48,7 @@ For each paper, output the above summary in a text file named after the paper's 
     2. For the pdf file name in number (which usually download from arxiv.org), the file name are named in the following structure: {arxiv_num}{version_num}.pdf. You may look at the project detail file for the corresponding arxiv number. For other pdf files, the file name are named in paper title.
 - `System_Architecture_Design.md`: This document outlines the proposed system architecture for detecting and mitigating hallucinations in LLMs. It includes diagrams and module descriptions.
 - `helpful_tools.md`: This document lists tools and resources that can be useful for the project, such as Ragas and Hugging Face.
+- `TODO_List.md`: This file contains a detailed, month-by-month breakdown of tasks and milestones for the project. For every completed task, mark it as done by replacing `[ ]` with `[x]`.
 
 ## Guidelines for Interaction
 
@@ -56,3 +57,5 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Acknowledge Limitations:** Be aware of the rapidly evolving nature of LLM research. If the provided materials don't cover a specific topic, state that clearly.
 - **Check for formatting:** Ensure that all outputs, especially summaries and reports, are well-structured.
 - **Answer Concisely:** Provide clear, concrete and concise answers (e.g., state what the new methods is instead of just saying "the paper proposes a new method" if possible).
+- **Ask for Clarification:** If a request is ambiguous or lacks sufficient detail, ask for clarification before proceeding using feedback enhanced MCP.
+- **Check TODO list:** After completing any task, check the TODO list to see if there are any related tasks that can be marked as done.
