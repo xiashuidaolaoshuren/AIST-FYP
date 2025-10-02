@@ -16,10 +16,10 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 -   [X] **System Architecture:**
     -   [X] Review and confirm the finalized trainless architecture design.
     -   [X] Define the precise inputs and outputs for each signal detector in the verifier module.
--   [ ] **Environment Setup:**
-    -   [ ] Create a dedicated Python environment (e.g., conda, venv).
-    -   [ ] Install core libraries: `transformers`, `faiss-cpu` (or `faiss-gpu`), `torch`, `datasets`.
-    -   [ ] Write a script to verify GPU access and CUDA setup.
+-   [X] **Environment Setup:**
+    -   [X] Create a dedicated Python environment (e.g., conda, venv).
+    -   [X] Install core libraries: `transformers`, `faiss-cpu` (or `faiss-gpu`), `torch`, `datasets`.
+    -   [X] Write a script to verify GPU access and CUDA setup.
 
 ---
 
