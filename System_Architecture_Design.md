@@ -121,3 +121,117 @@ This module provides a simple, transparent view of the confidence signals.
 
 ---
 *Interface for Future Training:* The `Verifier Module` is designed to be extensible. Each trainless signal component can be replaced by a trained model in the future. The `Rule-Based Aggregator` can be swapped with a trainable `Ensemble Fusion Logic` that learns to weigh the signals optimally, without changing the overall architecture.
+
+---
+
+## Data Structures (IO Payloads)
+
+The following JSON-like structures define the key data objects passed between the modules in the pipeline.
+
+### Query
+Represents the initial input from the user.
+```json
+{
+  "id": "q_20250201_001",
+  "text": "Who founded the FEVER dataset project?",
+  "timestamp": "2025-02-01T10:10:10Z"
+}
+```
+
+### EvidenceChunk
+A single piece of text retrieved from the knowledge corpus.
+```json
+{
+  "doc_id": "enwiki_12345",
+  "sent_id": 17,
+  "text": "The FEVER dataset was introduced in 2018 by...",
+  "char_start": 210,
+  "char_end": 265,
+  "score_bm25": 7.43,
+  "score_dense": 0.62,
+  "score_hybrid": 0.69,
+  "rank": 3,
+  "source": "wikipedia",
+  "version": "wiki_sent_v1"
+}
+```
+
+### Claim
+An atomic, verifiable statement extracted from the LLM's draft response.
+```json
+{
+  "claim_id": "c_0007",
+  "answer_id": "ans_001",
+  "text": "The FEVER dataset was introduced in 2018.",
+  "answer_char_span": [134, 175],
+  "extraction_method": "rule_sentence_split_v1"
+}
+```
+
+### ClaimEvidencePair
+Associates a claim with its corresponding retrieved evidence.
+```json
+{
+  "claim_id": "c_0007",
+  "evidence_candidates": ["enwiki_12345#17","enwiki_77889#04"],
+  "top_evidence": "enwiki_12345#17",
+  "evidence_spans": [
+    {"doc_id": "enwiki_12345", "sent_id": 17, "text": "The FEVER dataset was introduced in 2018...", "rank": 3}
+  ]
+}
+```
+
+### VerifierSignal
+The raw output of a single detector signal for a given claim-evidence pair.
+```json
+{
+  "claim_id": "c_0007",
+  "doc_id": "enwiki_12345",
+  "sent_id": 17,
+  "nli": {"entail": 0.81, "contradict": 0.03, "neutral": 0.16},
+  "coverage": {"entities": 0.83, "numbers": 1.0, "tokens_overlap": 0.74},
+  "uncertainty": {"mean_entropy": 1.12},
+  "consistency": {"variance": null},
+  "citation_span_match": 0.9,
+  "numeric_check": true
+}
+```
+
+### ClaimDecision
+The final, aggregated verdict for a single claim after all verifier signals have been processed.
+```json
+{
+  "claim_id": "c_0007",
+  "status": "Supported",
+  "rationale": "High entail prob, good entity coverage",
+  "primary_evidence": "enwiki_12345#17",
+  "signals_ref": ["sig_c_0007_17"],
+  "confidence": {
+    "support_prob": 0.81,
+    "contradict_prob": 0.03,
+    "overall_confidence": 0.74,
+    "band": "High"
+  }
+}
+```
+
+### AnnotatedAnswer
+The final output object, containing the full answer annotated with decisions for each claim.
+```json
+{
+  "answer_id": "ans_001",
+  "query_id": "q_20250201_001",
+  "raw_answer": "…",
+  "claims": "[ClaimDecision, ...]",
+  "summary_stats": {
+    "claims_total": 9,
+    "supported_high": 5,
+    "supported_low": 1,
+    "contradicted": 1,
+    "insufficient": 2,
+    "mean_overall_confidence": 0.61
+  },
+  "mitigation_actions": ["removed_contradicted_claims"],
+  "version": "pipeline_v0.3"
+}
+```

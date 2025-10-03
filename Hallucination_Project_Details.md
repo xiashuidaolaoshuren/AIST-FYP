@@ -1,8 +1,8 @@
-Project Title: Hallucination Detection & Mitigation for LLMs when Citing References
+# Project Title: Hallucination Detection & Mitigation for LLMs when Citing References
 
-Date: September 17, 2025
+**Date: September 17, 2025**
 
-Project Constraint: Medium Complexity, 6-Month Duration, Team of 2 Members, RTX 3070Ti GPU (can be upgraded to 3090Ti or A100 if needed)
+**Project Constraint:** Medium Complexity, 6-Month Duration, Team of 2 Members, RTX 3070Ti GPU (can be upgraded to 3090Ti or A100 if needed)
 
 ## 1. Project Content Focus
 
@@ -159,7 +159,7 @@ The project builds upon established and recent research in the following areas:
 
 ### Critiques of LLM-as-a-Judge
 - **Paper:** "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena" (Zheng et al., 2023)
-- **Use:** Highlights the challenges and biases (e.g., position, verbosity, and self-preference biases) of using LLMs as evaluators. This supports the project's decision to use a more robust, multi-component verification system instead of relying solely on an LLM judge.
+- **Use:** Highlights the challenges and biases (e.g., position, verbosity, and self-preference biases) of using LLMs as evaluators. This supports the project's decision to use a more robust, a multi-component verification system instead of relying solely on an LLM judge.
 - **Link:** https://arxiv.org/abs/2306.05685
 
 **Key Insight:** Research also indicates that using an LLM-as-a-judge can be prone to bias and instability, making it risky to rely solely on it for verifying citations. A more robust approach, which this project adopts, is to combine evidence retrieval with NLI-based contradiction detection.
