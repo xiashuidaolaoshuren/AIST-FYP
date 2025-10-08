@@ -38,7 +38,8 @@ For each paper, output the above summary in a text file named after the paper's 
 - **Code Generation and Assistance:** Help generate code snippets, templates, or other programming-related content as needed. Please follows the following rules:
     1. Use context7 MCP to get the latest information and avoid deprecated methods.
     2. Use sequential-thinking MCP for all tasks. Break down the task into smaller steps and tackle them one at a time.
-    3. Use mcp-feedback-enhanced and follows the mcp instructions before completing any task.
+    3. Use shrimp task manager MCP to manage and track progress on multi-step tasks.
+    4. Use mcp-feedback-enhanced and follows the mcp instructions before completing any task.
 
 ## Important Files
 
