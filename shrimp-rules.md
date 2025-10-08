@@ -153,22 +153,22 @@
 
 **MUST ALWAYS USE (in this order):**
 
-1. **context7 MCP (`mcp_context7_*`):**
+1. **context7 MCP (`context7`):**
    - **When:** Before implementing ANY library/framework code
    - **Why:** Get latest documentation, avoid deprecated methods
    - **Example:** Before using transformers API, call `mcp_context7_resolve-library-id` then `mcp_context7_get-library-docs`
 
-2. **sequential-thinking MCP (`mcp_sequentialthi_sequentialthinking`):**
+2. **sequential-thinking MCP (`sequentialthinking`):**
    - **When:** For ALL tasks requiring multi-step reasoning
    - **Why:** Break down complex tasks, verify logic
    - **Example:** Planning verifier module implementation, analyzing paper connections
 
-3. **shrimp-task-manager MCP (`mcp_shrimp-task-m_*`):**
+3. **shrimp-task-manager MCP (`shrimp-task-manager`):**
    - **When:** For multi-step implementation tasks
    - **Why:** Track progress, manage dependencies, ensure systematic completion
    - **Example:** Implementing Month 3 verifier signals (intrinsic uncertainty + heuristics)
 
-4. **mcp-feedback MCP (`mcp_mcp-feedback-_interactive_feedback`):**
+4. **mcp-feedback MCP (`mcp-feedback_enhanced`):**
    - **When:** Before completing ANY task
    - **Why:** Validate work, get user confirmation, ensure requirements met
    - **Example:** After generating paper summary, before marking task complete
@@ -377,7 +377,7 @@ def calculate_everything(claim, evidence):  # ✗ Too broad
 - [ ] **MCP tools used correctly** (context7 for APIs, feedback for validation)
 - [ ] **No speculation or assumptions** (all information sourced from project files or verified externally)
 - [ ] **Citations provided** (papers, URLs, or file paths referenced)
-- [ ] **mcp-feedback called** (user validation obtained)
+- [ ] **mcp-feedback-enhanced called** (user validation obtained)
 
 ### Self-Review Questions
 
