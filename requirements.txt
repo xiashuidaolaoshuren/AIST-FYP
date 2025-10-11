@@ -32,6 +32,11 @@ pandas==2.3.3
 tqdm==4.67.1
 scikit-learn==1.7.2
 
+# Month 2: Text Processing and Testing
+spacy==3.7.2
+wikiextractor==3.0.6
+pytest==7.4.3
+
 # Visualization
 matplotlib==3.10.6
 seaborn==0.13.2
