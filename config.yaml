@@ -1,0 +1,125 @@
+# =============================================================================
+# AIST-FYP Month 2 Configuration
+# Baseline RAG Module Configuration for LLM Hallucination Detection
+# =============================================================================
+
+# Model Configuration
+models:
+  # Sentence transformer for embeddings (384D, fast on 8GB GPU)
+  sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
+  
+  # Generator LLM (250M params, fits in 8GB GPU)
+  generator: "google/flan-t5-base"
+  
+  # Alternative models (uncomment to use):
+  # sentence_transformer: "sentence-transformers/all-mpnet-base-v2"  # 768D, better quality
+  # generator: "google/flan-t5-large"  # 780M params, requires more memory
+
+# Data Paths
+data:
+  # Wikipedia data
+  wikipedia_dump: "data/raw/enwiki-latest-pages-articles.xml.bz2"
+  wikipedia_sample_dev: "data/raw/wiki_sample_development.jsonl"
+  wikipedia_sample_val: "data/raw/wiki_sample_validation.jsonl"
+  
+  # Processed chunks
+  processed_chunks: "data/processed/wiki_chunks_{strategy}.jsonl"
+  
+  # Embeddings
+  embeddings: "data/embeddings/wiki_embeddings_{strategy}.npy"
+  embeddings_metadata: "data/embeddings/metadata_{strategy}.json"
+  
+  # FAISS index
+  faiss_index: "data/indexes/{strategy}/faiss.index"
+  index_metadata: "data/indexes/{strategy}/metadata.pkl"
+
+# Data Strategy Configuration
+data_strategy:
+  # Development: Fast testing with small subset (10k articles)
+  development:
+    max_articles: 10000
+    name: "development"
+  
+  # Validation: Medium testing (100k articles)
+  validation:
+    max_articles: 100000
+    name: "validation"
+  
+  # Production: Full Wikipedia corpus
+  production:
+    max_articles: null  # null = all articles
+    name: "production"
+
+# Processing Parameters
+processing:
+  # Batch size for embedding generation (16 for 8GB GPU)
+  batch_size: 16
+  
+  # Device selection (cuda/cpu)
+  device: "cuda"
+  
+  # Mixed precision (FP16) for faster processing
+  use_fp16: true
+  
+  # Chunk parameters
+  chunk_overlap: 0  # Number of overlapping sentences
+  max_chunk_length: 512  # Maximum tokens per chunk
+  min_sentence_length: 10  # Minimum characters for valid sentence
+
+# Retrieval Configuration
+retrieval:
+  # Number of evidence chunks to retrieve
+  top_k: 5
+  
+  # FAISS index type: FLAT (exact), IVFFLAT (approximate), HNSW (best quality/speed)
+  index_type: "IVFFLAT"
+  
+  # IVF parameters
+  nlist: 4096  # Number of clusters for IVF
+  nprobe: 128  # Number of clusters to search (accuracy vs speed)
+  
+  # HNSW parameters (if using HNSW)
+  hnsw_m: 32  # Number of connections per element
+
+# Generation Configuration
+generation:
+  # Maximum new tokens to generate
+  max_new_tokens: 256
+  
+  # Sampling parameters
+  temperature: 0.7
+  top_p: 0.9
+  do_sample: true
+  
+  # Load model in 8-bit (for larger models)
+  load_in_8bit: false
+
+# Checkpointing
+checkpointing:
+  # Save checkpoint every N chunks during embedding generation
+  checkpoint_frequency: 10000
+  
+  # Checkpoint directory
+  checkpoint_dir: "data/embeddings/checkpoints/"
+
+# Logging Configuration
+logging:
+  # Log file location
+  log_file: "logs/month2.log"
+  
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+  
+  # Console output level
+  console_level: "ERROR"
+
+# Evaluation (for future use)
+evaluation:
+  # Benchmark datasets
+  benchmarks:
+    - "truthful_qa"
+    - "rag_truth"
+    - "fever"
+  
+  # Evaluation batch size
+  eval_batch_size: 8
