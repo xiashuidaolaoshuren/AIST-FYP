@@ -158,6 +158,8 @@ class TestGeneratorWrapper:
                 text='ML is a subset of AI.',
                 char_start=0,
                 char_end=23,
+                score_dense=0.95,
+                rank=0,
                 source='wikipedia',
                 version='v1'
             ),
@@ -167,6 +169,8 @@ class TestGeneratorWrapper:
                 text='It uses data to learn.',
                 char_start=24,
                 char_end=46,
+                score_dense=0.90,
+                rank=1,
                 source='wikipedia',
                 version='v1'
             )
@@ -225,6 +229,8 @@ class TestGeneratorWrapper:
                 text='Photosynthesis converts light energy into chemical energy.',
                 char_start=0,
                 char_end=58,
+                score_dense=0.98,
+                rank=0,
                 source='textbook',
                 version='v1'
             )
