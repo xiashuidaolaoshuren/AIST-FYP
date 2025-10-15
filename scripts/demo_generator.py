@@ -35,6 +35,8 @@ def main():
             text='Machine learning is a subset of artificial intelligence.',
             char_start=0,
             char_end=57,
+            score_dense=0.95,
+            rank=0,
             source='textbook',
             version='v1'
         ),
@@ -44,6 +46,8 @@ def main():
             text='It uses data to learn patterns and make predictions.',
             char_start=58,
             char_end=111,
+            score_dense=0.90,
+            rank=1,
             source='textbook',
             version='v1'
         )

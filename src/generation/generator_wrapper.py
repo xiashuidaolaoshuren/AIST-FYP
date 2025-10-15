@@ -45,7 +45,7 @@ class GeneratorWrapper:
         model_name: str = 'google/flan-t5-base',
         device: str = 'cuda',
         load_in_8bit: bool = False,
-        torch_dtype: Optional[torch.dtype] = torch.float16
+        dtype: Optional[torch.dtype] = torch.float16
     ):
         """
         Initialize the generator wrapper.
@@ -57,7 +57,7 @@ class GeneratorWrapper:
             model_name: HuggingFace model name (default: google/flan-t5-base)
             device: Device to run on ('cuda' or 'cpu')
             load_in_8bit: Whether to use 8-bit quantization (for models >1GB)
-            torch_dtype: Data type for model weights (default: float16 for GPU)
+            dtype: Data type for model weights (default: float16 for GPU)
         
         Raises:
             ValueError: If model loading fails
@@ -67,7 +67,10 @@ class GeneratorWrapper:
         self.logger = setup_logger(__name__)
         
         self.logger.info(f"Loading model: {model_name}")
-        self.logger.info(f"Device: {device}, 8-bit: {load_in_8bit}, dtype: {torch_dtype}")
+        self.logger.info(f"Device: {device}, 8-bit: {load_in_8bit}, dtype: {dtype}")
+
+        # Determine whether we should forward the dtype argument based on device
+        is_cuda_device = isinstance(device, str) and device.startswith('cuda')
         
         # Load tokenizer
         try:
@@ -88,16 +91,23 @@ class GeneratorWrapper:
                 self.logger.info("Model loaded with 8-bit quantization")
             else:
                 # Standard loading
-                if device == 'cuda' and torch.cuda.is_available():
+                if is_cuda_device and torch.cuda.is_available():
+                    model_kwargs = {'device_map': 'auto'}
+                    if dtype is not None:
+                        model_kwargs['dtype'] = dtype
                     self.model = AutoModelForSeq2SeqLM.from_pretrained(
                         model_name,
-                        torch_dtype=torch_dtype,
-                        device_map='auto'
+                        **model_kwargs
                     )
                 else:
-                    self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                        model_name
-                    ).to(device)
+                    cpu_kwargs = {}
+                    if dtype is not None and not is_cuda_device:
+                        cpu_kwargs['dtype'] = dtype
+                    cpu_model = AutoModelForSeq2SeqLM.from_pretrained(
+                        model_name,
+                        **cpu_kwargs
+                    )
+                    self.model = cpu_model.to(device)
                 
                 self.logger.info(f"Model loaded successfully on {self.model.device}")
             
