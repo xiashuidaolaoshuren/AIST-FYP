@@ -36,6 +36,7 @@ scikit-learn==1.7.2
 spacy==3.7.2
 wikiextractor==3.0.6
 pytest==7.4.3
+accelerate==1.10.1
 
 # Visualization
 matplotlib==3.10.6
