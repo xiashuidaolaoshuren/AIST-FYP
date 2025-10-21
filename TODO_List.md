@@ -71,12 +71,15 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] Define explicit rules and thresholds to classify each claim as "Supported," "Contradictory," or "Low Confidence."
 -   [ ] **Confidence UI Display:**
     -   [ ] Implement a simple UI to visualize the confidence score for each generated claim.
+-   [ ] **Ragas Integration:**
+    -   [ ] Integrate the Ragas framework into the evaluation pipeline.
+    -   [ ] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
 -   [ ] **End-to-End Detector Evaluation:**
     -   [ ] Set up an evaluation harness to run the full system on the `TruthfulQA` and `RAGTruth` benchmarks.
     -   [ ] Run the evaluation and collect the results.
 -   [ ] **Performance Analysis:**
     -   [ ] Calculate key metrics: detection accuracy, precision, recall, and F1-score for identifying hallucinations.
-    -   [ ] Analyze the results to identify strengths and weaknesses of the detector.
+    -   [ ] Correlate custom verifier scores with Ragas metrics to analyze performance.
 -   [ ] **(Optional) Simple Mitigation:**
     -   [ ] If time permits, implement a simple `Flagging` module that adds warnings to low-confidence or contradictory claims in the final output.
 
