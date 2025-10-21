@@ -43,8 +43,9 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
   - **Zero-Shot NLI Contradiction Detector:** Integrate an off-the-shelf NLI model (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`) to check for contradictions between the LLM's claim and the retrieved evidence.
   - **Self-Agreement Detector:** Implement a self-consistency check by sampling multiple generations and measuring claim variability.
 
-- **Month 5: Detector Evaluation & Mitigation (Optional)**
+- **Month 5: Detector Evaluation & Mitigation**
   - **Rule-Based Aggregation:** Combine all detector signals using explicit rules or a weighted heuristic to produce a final confidence score.
+  - **Confidence UI Display:** Implement a simple UI to visualize the confidence score for each generated claim, making the detector's output interpretable.
   - **End-to-End Detector Evaluation:** Evaluate the complete detector's ability to identify hallucinations on benchmarks (TruthfulQA, RAGTruth).
   - **Performance Analysis:** Measure key metrics like detection accuracy, precision, and recall.
   - **(If time permits) Simple Mitigation:** Implement basic mitigation logic (e.g., flagging or suppressing low-confidence claims).

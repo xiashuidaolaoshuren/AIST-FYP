@@ -64,11 +64,13 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 
 ---
 
-### **Month 5: Detector Evaluation & Mitigation (Optional)**
+### **Month 5: Detector Evaluation & Mitigation**
 
 -   [ ] **Rule-Based Aggregation:**
     -   [ ] Design and implement a `RuleBasedAggregator` that combines the outputs of all four signal detectors.
     -   [ ] Define explicit rules and thresholds to classify each claim as "Supported," "Contradictory," or "Low Confidence."
+-   [ ] **Confidence UI Display:**
+    -   [ ] Implement a simple UI to visualize the confidence score for each generated claim.
 -   [ ] **End-to-End Detector Evaluation:**
     -   [ ] Set up an evaluation harness to run the full system on the `TruthfulQA` and `RAGTruth` benchmarks.
     -   [ ] Run the evaluation and collect the results.
