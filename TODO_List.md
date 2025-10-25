@@ -25,16 +25,16 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 
 ### **Month 2: Baseline & Retrieval Module**
 
--   [ ] **Data Preparation:**
-    -   [ ] Write and run a script to parse and clean the Wikipedia XML dump.
-    -   [ ] Write a script to chunk the cleaned text into sentence-level fragments.
-    -   [ ] Generate embeddings for all chunks using a pre-trained sentence-transformer model.
-    -   [ ] Build and save the FAISS index for efficient similarity search.
--   [ ] **Retriever Implementation:**
-    -   [ ] Implement a `DenseRetriever` class that takes a query and returns the top-k evidence chunks from the FAISS index.
--   [ ] **Baseline RAG Implementation:**
-    -   [ ] Integrate a generator LLM (e.g., from Hugging Face) with the `DenseRetriever`.
-    -   [ ] Create a simple pipeline that takes a user query and returns a generated answer with retrieved context.
+-   [x] **Data Preparation:**
+    -   [x] Write and run a script to parse and clean the Wikipedia XML dump.
+    -   [x] Write a script to chunk the cleaned text into sentence-level fragments.
+    -   [x] Generate embeddings for all chunks using a pre-trained sentence-transformer model.
+    -   [x] Build and save the FAISS index for efficient similarity search.
+-   [x] **Retriever Implementation:**
+    -   [x] Implement a `DenseRetriever` class that takes a query and returns the top-k evidence chunks from the FAISS index.
+-   [x] **Baseline RAG Implementation:**
+    -   [x] Integrate a generator LLM (e.g., from Hugging Face) with the `DenseRetriever`.
+    -   [x] Create a simple pipeline that takes a user query and returns a generated answer with retrieved context.
 
 ---
 
