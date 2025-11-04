@@ -20,7 +20,7 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
   - **Self-Agreement Methods:** Analyzing response variability across multiple generations (Self-Consistency).
   - **Retrieval-Grounded Heuristics:** Calculating evidence coverage and lexical overlap.
   - **Zero-Shot NLI:** Using off-the-shelf models to check for entailment and contradiction between claims and evidence.
-- **Technical Stack:** Python, Transformers, Vector DBs (FAISS/Chroma), and specific zero-shot NLI models (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`).
+- **Technical Stack:** Python, Transformers, Vector DBs (FAISS/Chroma), Ragas, and specific zero-shot NLI models (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`).
 - **Complexity:** Medium.
 
 **6-Month Compact Roadmap & Workflow (Detector-Focused):**
@@ -43,10 +43,12 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
   - **Zero-Shot NLI Contradiction Detector:** Integrate an off-the-shelf NLI model (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`) to check for contradictions between the LLM's claim and the retrieved evidence.
   - **Self-Agreement Detector:** Implement a self-consistency check by sampling multiple generations and measuring claim variability.
 
-- **Month 5: Detector Evaluation & Mitigation (Optional)**
+- **Month 5: Detector Evaluation & Mitigation**
   - **Rule-Based Aggregation:** Combine all detector signals using explicit rules or a weighted heuristic to produce a final confidence score.
+  - **Confidence UI Display:** Implement a simple UI to visualize the confidence score for each generated claim, making the detector's output interpretable.
+  - **Ragas Integration for Evaluation:** Integrate the Ragas framework to systematically evaluate the RAG pipeline's performance using metrics like `faithfulness` and `answer_relevancy`. This will serve as a complementary evaluation layer to the custom verifier.
   - **End-to-End Detector Evaluation:** Evaluate the complete detector's ability to identify hallucinations on benchmarks (TruthfulQA, RAGTruth).
-  - **Performance Analysis:** Measure key metrics like detection accuracy, precision, and recall.
+  - **Performance Analysis:** Measure key metrics like detection accuracy, precision, and recall, and compare with Ragas metrics.
   - **(If time permits) Simple Mitigation:** Implement basic mitigation logic (e.g., flagging or suppressing low-confidence claims).
 
 - **Month 6: Finalization & Documentation**

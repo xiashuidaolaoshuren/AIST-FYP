@@ -1,0 +1,30 @@
+# Test configuration for integration tests
+# Minimal config for testing without full data pipeline
+
+models:
+  sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
+  generator: "google/flan-t5-base"
+
+data_strategy:
+  test:
+    max_articles: 10
+    name: "test"
+
+processing:
+  batch_size: 2
+  device: "cpu"  # Use CPU for testing to avoid GPU requirements
+  use_fp16: false
+
+retrieval:
+  top_k: 3
+
+generation:
+  max_new_tokens: 50
+  temperature: 0.7
+  top_p: 0.9
+  do_sample: false
+  load_in_8bit: false
+
+logging:
+  log_level: "WARNING"
+  console_level: "ERROR"

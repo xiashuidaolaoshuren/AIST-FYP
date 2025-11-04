@@ -42,7 +42,7 @@
 - `System_Architecture_Design _ Mermaid Chart-2025-10-03-081957.png` - Architecture diagram
 
 **WRITABLE (CAN MODIFY/CREATE):**
-- `reference/*_Summary.txt` - Paper summaries (follow naming convention)
+- `reference/*_Summary.md` - Paper summaries (follow naming convention)
 - `TODO_List.md` - Task tracking (MUST update checkboxes)
 - `Hallucination_Project_Details.md` - Project documentation
 - `System_Architecture_Design.md` - Architecture specification
@@ -61,8 +61,8 @@
 - **Lookup:** Check `Hallucination_Project_Details.md` Section 4 for arxiv number mappings
 
 **Paper Summaries:**
-- **Format:** `{Paper_Title_With_Underscores}_Summary.txt`
-- **Example:** `SelfCheckGPT_Zero-Resource_Black-Box_Hallucination_Detection_for_Generative_Large_Language_Models_Summary.txt`
+- **Format:** `{Paper_Title_With_Underscores}_Summary.md`
+- **Example:** `SelfCheckGPT_Zero-Resource_Black-Box_Hallucination_Detection_for_Generative_Large_Language_Models_Summary.md`
 - **Location:** `reference/` directory
 - **Encoding:** UTF-8
 
@@ -96,7 +96,7 @@
    ```
 
 3. **Output format:**
-   - Save as `.txt` file in `reference/` directory
+   - Save as `.md` file in `reference/` directory
    - Use clear section headers with `##` markdown
    - Keep findings concise and specific (NOT "the paper proposes a method" BUT "proposes Chain-of-Verification: LLM generates answer → generates verification questions → answers questions → revises original answer")
 
@@ -225,12 +225,12 @@ Question about...                  → Check file...
 ├─ Python dependencies             → requirements.txt
 ├─ GPU/CUDA status                 → Run verify_gpu.py
 ├─ Available tools                 → helpful_tools.md
-└─ Research context                → reference/*_Summary.txt files
+└─ Research context                → reference/*_Summary.md files
 ```
 
 **STEP 2: If Not Found Locally → Check Research Papers**
 ```
-1. Search reference/*_Summary.txt files (faster)
+1. Search reference/*_Summary.md files (faster)
 2. If insufficient, read relevant reference/*.pdf directly
 3. ALWAYS cite specific paper when answering
 ```
@@ -507,7 +507,7 @@ Yes, I've finished the summary.
 ```
 Yes, I've completed the FEVER paper summary:
 
-1. ✓ Created `FEVER_a_large-scale_dataset_for_Fact_Extraction_and_VERification_Summary.txt` in `reference/` directory
+1. ✓ Created `FEVER_a_large-scale_dataset_for_Fact_Extraction_and_VERification_Summary.md` in `reference/` directory
 2. ✓ Used PICO/T framework as specified in .github/copilot-instructions.md
 3. ✓ Included 7 key findings with specific metrics (e.g., 185,000 claims annotated)
 4. ✓ Assessed relevance as "High" - directly applicable to Month 4 NLI detector
