@@ -95,24 +95,30 @@ Examples:
         f"max_articles = {max_articles if max_articles else 'unlimited'}"
     )
     
-    # Determine Wikipedia dump path
+    # Determine Wikipedia dump path based on strategy
     if args.dump:
         dump_path = Path(args.dump)
     else:
-        # Check if dump path is in config
-        dump_path = Path(config.get('paths.wikipedia_dump', 'data/raw/enwiki-sample.xml'))
+        # For development/validation, use JSONL files from download_wikipedia.py
+        # For production, use XML dump
+        if args.strategy == 'development':
+            dump_path = Path(config.get('data.wikipedia_sample_dev', 'data/raw/wiki_sample_development.jsonl'))
+        elif args.strategy == 'validation':
+            dump_path = Path(config.get('data.wikipedia_sample_val', 'data/raw/wiki_sample_validation.jsonl'))
+        else:  # production
+            dump_path = Path(config.get('data.wikipedia_dump', 'data/raw/enwiki-latest-pages-articles.xml.bz2'))
     
     if not dump_path.exists():
         logger.error(
-            f"Wikipedia dump not found: {dump_path}\n"
-            f"Please either:\n"
-            f"1. Provide --dump argument with path to Wikipedia XML dump\n"
-            f"2. Download a Wikipedia dump and place it at {dump_path}\n"
-            f"3. Create a sample XML file for testing"
+            f"Wikipedia data not found: {dump_path}\n"
+            f"Please run the download script first:\n"
+            f"  python scripts/download_wikipedia.py --strategy {args.strategy}\n"
         )
         sys.exit(1)
     
-    logger.info(f"Using Wikipedia dump: {dump_path}")
+    # Detect file type
+    is_jsonl = dump_path.suffix == '.jsonl'
+    logger.info(f"Using Wikipedia data: {dump_path} (format: {'JSONL' if is_jsonl else 'XML'})")
     
     # Determine output path
     if args.output_dir:
@@ -127,9 +133,13 @@ Examples:
     
     # Initialize components
     try:
-        wiki_parser = WikipediaParser(str(dump_path), max_articles=max_articles)
         text_chunker = TextChunker()
-        logger.info("Initialized WikipediaParser and TextChunker")
+        logger.info("Initialized TextChunker")
+        
+        # For XML files, use WikipediaParser
+        if not is_jsonl:
+            wiki_parser = WikipediaParser(str(dump_path), max_articles=max_articles)
+            logger.info("Initialized WikipediaParser for XML input")
     except Exception as e:
         logger.error(f"Failed to initialize components: {e}")
         sys.exit(1)
@@ -142,21 +152,54 @@ Examples:
         with open(output_file, 'w', encoding='utf-8') as f:
             logger.info("Starting article processing...")
             
-            for article in wiki_parser.extract_articles():
-                try:
-                    # Chunk the article
-                    chunks = text_chunker.chunk_article(article)
+            # Handle JSONL input (from download_wikipedia.py)
+            if is_jsonl:
+                logger.info("Processing JSONL input...")
+                with open(dump_path, 'r', encoding='utf-8') as jsonl_file:
+                    for line_num, line in enumerate(tqdm(jsonl_file, desc="Processing articles", unit=" articles")):
+                        # Check max_articles limit
+                        if max_articles and line_num >= max_articles:
+                            logger.info(f"Reached max_articles limit: {max_articles}")
+                            break
+                        
+                        try:
+                            article = json.loads(line.strip())
+                            
+                            # Chunk the article
+                            chunks = text_chunker.chunk_article(article)
+                            
+                            # Write chunks to JSONL
+                            for chunk in chunks:
+                                f.write(json.dumps(chunk, ensure_ascii=False) + '\n')
+                            
+                            total_articles += 1
+                            total_chunks += len(chunks)
+                        
+                        except json.JSONDecodeError as e:
+                            logger.error(f"JSON decode error at line {line_num + 1}: {e}")
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error processing article at line {line_num + 1}: {e}")
+                            continue
+            
+            # Handle XML input (for production)
+            else:
+                logger.info("Processing XML input...")
+                for article in wiki_parser.extract_articles():
+                    try:
+                        # Chunk the article
+                        chunks = text_chunker.chunk_article(article)
+                        
+                        # Write chunks to JSONL
+                        for chunk in chunks:
+                            f.write(json.dumps(chunk, ensure_ascii=False) + '\n')
+                        
+                        total_articles += 1
+                        total_chunks += len(chunks)
                     
-                    # Write chunks to JSONL
-                    for chunk in chunks:
-                        f.write(json.dumps(chunk, ensure_ascii=False) + '\n')
-                    
-                    total_articles += 1
-                    total_chunks += len(chunks)
-                
-                except Exception as e:
-                    logger.error(f"Error processing article {article.get('doc_id', 'unknown')}: {e}")
-                    continue
+                    except Exception as e:
+                        logger.error(f"Error processing article {article.get('doc_id', 'unknown')}: {e}")
+                        continue
         
         # Print summary
         avg_chunks_per_article = total_chunks / total_articles if total_articles > 0 else 0
