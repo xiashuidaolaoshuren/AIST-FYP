@@ -84,7 +84,7 @@ retrieval:
 # Generation Configuration
 generation:
   # Maximum new tokens to generate
-  max_new_tokens: 256
+  max_new_tokens: 512
   
   # Sampling parameters
   temperature: 0.7
