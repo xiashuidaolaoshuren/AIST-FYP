@@ -80,8 +80,8 @@ python scripts/download_wikipedia.py --strategy production
 After downloading, process the data into chunks:
 
 ```bash
-# Parse Wikipedia and create chunks
-python -m src.data_processing.wikipedia_parser \
+# Parse Wikipedia and create chunks using helper script
+python scripts/prepare_wikipedia_chunks.py \
     --input data/raw/wiki_sample_development.jsonl \
     --output data/processed/wiki_chunks_development.jsonl \
     --config config.yaml
@@ -96,8 +96,8 @@ Expected output:
 Generate embeddings for all chunks:
 
 ```bash
-# Generate embeddings using sentence-transformers
-python -m src.data_processing.embedding_generator \
+# Generate embeddings using helper script
+python scripts/generate_embeddings.py \
     --input data/processed/wiki_chunks_development.jsonl \
     --output data/embeddings/wiki_embeddings_development.npy \
     --metadata data/embeddings/metadata_development.json \
@@ -125,8 +125,8 @@ Metadata saved to: data/embeddings/metadata_development.json
 Create a FAISS index for efficient similarity search:
 
 ```bash
-# Build FAISS index
-python -m src.retrieval.faiss_index_manager \
+# Build FAISS index using helper script
+python scripts/build_faiss_index.py \
     --embeddings data/embeddings/wiki_embeddings_development.npy \
     --metadata data/embeddings/metadata_development.json \
     --output data/indexes/development \
@@ -147,30 +147,37 @@ Metadata saved to: data/indexes/development/metadata.pkl
 
 Now you're ready to query the system:
 
+```bash
+# Use the demo script for quick testing
+python scripts/demo_baseline_rag.py \
+    --query "What is machine learning?" \
+    --config config.yaml \
+    --index-path data/indexes/development/faiss.index \
+    --metadata-path data/indexes/development/metadata.pkl
+```
+
+**For interactive usage in Python:**
+
 ```python
-# Interactive Python session
-from src.generation.baseline_rag_pipeline import BaselineRAGPipeline
+# Import the demo function or use it as a reference
+# See scripts/demo_baseline_rag.py for the complete implementation
+from src.pipelines.baseline_rag import BaselineRAGPipeline
 from src.utils.config import Config
 
 # Load configuration
 config = Config("config.yaml")
 
 # Initialize pipeline
-pipeline = BaselineRAGPipeline(
-    index_path="data/indexes/development/faiss.index",
-    metadata_path="data/indexes/development/metadata.pkl",
-    config=config
-)
+pipeline = BaselineRAGPipeline(config)
 
 # Query the system
 query = "What is machine learning?"
-results = pipeline.query(query)
+results = pipeline.run(query)
 
 # Display results
-for claim_evidence_pair in results:
-    print(f"Claim: {claim_evidence_pair.claim.text}")
-    print(f"Evidence: {claim_evidence_pair.evidence.text}")
-    print(f"Confidence: {claim_evidence_pair.claim.metadata['avg_token_prob']}")
+for pair in results['claim_evidence_pairs']:
+    print(f"Claim: {pair.claim.text}")
+    print(f"Evidence: {pair.evidence.text}")
     print("-" * 80)
 ```
 
@@ -229,11 +236,11 @@ data/
 
 ### Command-Line Interface
 
-You can also use the command-line interface:
+You can use the helper script for command-line queries:
 
 ```bash
-# Single query
-python -m src.generation.baseline_rag_pipeline \
+# Single query using demo script
+python scripts/demo_baseline_rag.py \
     --query "What is machine learning?" \
     --config config.yaml \
     --index-path data/indexes/development/faiss.index \
@@ -243,24 +250,20 @@ python -m src.generation.baseline_rag_pipeline \
 
 ### Python Script
 
-Create a script `run_rag.py`:
+You can also reference the provided demo script `scripts/demo_baseline_rag.py` or create your own based on it:
 
 ```python
 #!/usr/bin/env python3
-"""Run the baseline RAG pipeline."""
+"""Run the baseline RAG pipeline with multiple queries."""
 
-from src.generation.baseline_rag_pipeline import BaselineRAGPipeline
+from src.pipelines.baseline_rag import BaselineRAGPipeline
 from src.utils.config import Config
 import json
 
 def main():
     # Initialize
     config = Config("config.yaml")
-    pipeline = BaselineRAGPipeline(
-        index_path="data/indexes/development/faiss.index",
-        metadata_path="data/indexes/development/metadata.pkl",
-        config=config
-    )
+    pipeline = BaselineRAGPipeline(config)
     
     # Queries
     queries = [
@@ -275,21 +278,20 @@ def main():
         print(f"\nQuery: {query}")
         print("=" * 80)
         
-        results = pipeline.query(query)
+        results = pipeline.run(query)
         all_results[query] = [
             {
                 "claim": pair.claim.text,
                 "evidence": pair.evidence.text,
-                "metadata": pair.claim.metadata
+                "metadata": results.get('generator_metadata', {})
             }
-            for pair in results
+            for pair in results['claim_evidence_pairs']
         ]
         
         # Display
-        for i, pair in enumerate(results, 1):
+        for i, pair in enumerate(results['claim_evidence_pairs'], 1):
             print(f"\n{i}. Claim: {pair.claim.text}")
             print(f"   Evidence: {pair.evidence.text[:200]}...")
-            print(f"   Confidence: {pair.claim.metadata.get('avg_token_prob', 'N/A')}")
     
     # Save results
     with open("rag_results.json", "w") as f:
@@ -303,6 +305,11 @@ if __name__ == "__main__":
 Run it:
 ```bash
 python run_rag.py
+```
+
+**Or simply use the provided demo script:**
+```bash
+python scripts/demo_baseline_rag.py --query "Your question here"
 ```
 
 ## Example Queries
@@ -388,7 +395,10 @@ Confidence: 0.88
 - Check the index path in your command/script
 - Rebuild the index if corrupted:
   ```bash
-  python -m src.retrieval.faiss_index_manager --embeddings ... --output ...
+  python scripts/build_faiss_index.py \
+      --embeddings data/embeddings/wiki_embeddings_development.npy \
+      --metadata data/embeddings/metadata_development.json \
+      --output data/indexes/development
   ```
 
 #### 4. Slow Retrieval
