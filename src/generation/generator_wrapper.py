@@ -128,7 +128,8 @@ class GeneratorWrapper:
         Format the prompt with evidence context.
         
         Creates a structured prompt that includes relevant evidence chunks
-        followed by the user's question.
+        followed by the user's question. Uses "Passage N:" format to avoid
+        confusion with citation-style markers.
         
         Args:
             prompt: User's query/question
@@ -138,22 +139,32 @@ class GeneratorWrapper:
             Formatted prompt string with context and question
         
         Example:
-            Context: [Evidence 1] [Evidence 2] ...
+            Context: Passage 1: Deep learning is a type of machine learning...
+            
+            Passage 2: Neural networks use multiple layers...
             
             Question: What is machine learning?
             
             Answer:
+        
+        Note:
+            Previously used [1] [2] [3] citation markers, but changed to
+            "Passage N:" format to prevent FLAN-T5 from generating citation
+            references like "[1]" instead of actual answers.
         """
         if not evidence_chunks:
             # No evidence provided, just use the question
             return f"Question: {prompt}\n\nAnswer:"
         
-        # Format evidence context
+        # Format evidence context without citation numbers to avoid confusion
+        # FLAN-T5 sometimes interprets [1] [2] [3] as citation references
+        # Instead, use "Passage N:" format which is less ambiguous
         evidence_texts = []
         for i, chunk in enumerate(evidence_chunks, 1):
-            evidence_texts.append(f"[{i}] {chunk.text}")
+            evidence_texts.append(f"Passage {i}: {chunk.text}")
         
-        evidence_context = " ".join(evidence_texts)
+        # Join with double newlines for clear separation
+        evidence_context = "\n\n".join(evidence_texts)
         
         # Create structured prompt
         formatted_prompt = (
