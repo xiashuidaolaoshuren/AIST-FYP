@@ -137,6 +137,10 @@ The project builds upon established and recent research in the following areas:
 - **Use:** Supports the project's core idea of using a Natural Language Inference (NLI) model for fine-grained, sentence-level alignment between the claim and the evidence to detect contradictions.
 - **Link:** https://arxiv.org/abs/2111.09525
 
+- **Paper:** "CiteEval: Principle-Driven Citation Evaluation for Source Attribution" (Xu et al., 2025)
+- **Use:** Introduces a state-of-the-art, principle-driven framework for evaluating citation quality in RAG systems. Its methodology for context attribution and fine-grained quality criteria directly informs the design of our verifier module and provides a potential benchmark for evaluation.
+- **Link:** https://arxiv.org/abs/2506.01829
+
 ### Hallucination Benchmarking & Analysis
 - **Paper:** "TruthfulQA: Measuring How Models Mimic Human Falsehoods" (Lin et al., 2021)
 - **Use:** Demonstrated that models often generate plausible but false answers, highlighting the need for uncertainty estimation and verification.
