@@ -181,6 +181,47 @@ Associates a claim with its corresponding retrieved evidence.
 }
 ```
 
+### CitationFormatterOutput
+Result of post-processing a generated answer to add inline bracketed citations and to prepare passages for external evaluators (e.g., CiteEval/CiteBench). This does not alter retrieval or verifier logic.
+```json
+{
+  "formatted_text": "The FEVER dataset was introduced in 2018. [1]",
+  "citation_map": {
+    "c_0007": [1]
+  },
+  "passages": [
+    {"text": "The FEVER dataset was introduced in 2018 by...", "title": "FEVER"},
+    {"text": "FEVER is a benchmark for fact verification.", "title": "FEVER"}
+  ],
+  "notes": {
+    "merged_redundant": true,
+    "method": "right_span_insertion_v1"
+  }
+}
+```
+Fields:
+- `formatted_text`: Answer with inline citations using 1-based indices `[i]` that refer to `passages[i-1]`.
+- `citation_map`: Mapping from `claim_id` to the list of passage indices used inside that claim’s span.
+- `passages`: Ordered list derived from ranked evidence chunks; each item contains at least `text`, and optionally `title` if available from metadata.
+- `notes` (optional): Diagnostics such as merges, drops, or formatter strategy used.
+
+### CiteEvalSystemExample
+Adapter object for CiteEval “System Evaluation”. Produced from `CitationFormatterOutput` without changing core architecture.
+```json
+{
+  "id": "ex_0001",
+  "query": "Who introduced the FEVER dataset?",
+  "passages": [
+    {"text": "The FEVER dataset was introduced in 2018 by...", "title": "FEVER"},
+    {"text": "FEVER is a benchmark for fact verification.", "title": "FEVER"}
+  ],
+  "pred": "The FEVER dataset was introduced in 2018. [1]"
+}
+```
+Notes:
+- Indices in `pred` are 1-based and must align with the order of `passages`.
+- This object enables CiteEval “Full” (citations optional) and “Cited” (citations required) modes.
+
 ### VerifierSignal
 The raw output of a single detector signal for a given claim-evidence pair.
 ```json
