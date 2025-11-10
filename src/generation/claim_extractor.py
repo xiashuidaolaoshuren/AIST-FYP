@@ -9,36 +9,10 @@ improvement in Month 5 with more sophisticated NLP techniques.
 import re
 import uuid
 from typing import List, Optional, Tuple
-import spacy
 
 from src.utils.data_structures import Claim
 from src.utils.logger import setup_logger
-
-
-# Global spaCy model (loaded once)
-_nlp_model = None
-
-
-def _get_spacy_model():
-    """
-    Get or load the spaCy model for sentence splitting.
-    
-    Loads the model only once and caches it globally.
-    """
-    global _nlp_model
-    if _nlp_model is None:
-        logger = setup_logger(__name__)
-        try:
-            logger.info("Loading spaCy model: en_core_web_sm")
-            _nlp_model = spacy.load('en_core_web_sm')
-            logger.info("spaCy model loaded successfully")
-        except OSError:
-            logger.warning(
-                "spaCy model 'en_core_web_sm' not found. "
-                "Install with: python -m spacy download en_core_web_sm"
-            )
-            raise
-    return _nlp_model
+from src.utils.nlp_utils import get_spacy_model
 
 
 def extract_claims_spacy(
@@ -78,7 +52,7 @@ def extract_claims_spacy(
     
     # Load spaCy model
     try:
-        nlp = _get_spacy_model()
+        nlp = get_spacy_model()
     except OSError as e:
         logger.error(f"Failed to load spaCy model: {e}")
         logger.info("Falling back to regex-based sentence splitting")

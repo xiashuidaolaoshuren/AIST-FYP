@@ -94,6 +94,38 @@ generation:
   # Load model in 8-bit (for larger models)
   load_in_8bit: false
 
+# Verification Configuration (Month 3)
+verification:
+  # Enable/disable verification module (default: false for backward compatibility)
+  enabled: false
+  
+  # spaCy model for NER and noun phrase extraction
+  spacy_model: "en_core_web_sm"
+  
+  # Intrinsic Uncertainty Detector Configuration
+  intrinsic:
+    # Epsilon value for numerical stability in log calculations
+    epsilon: 1.0e-10
+    
+    # Uncertainty calculation method
+    method: "entropy"
+  
+  # Retrieval-Grounded Detector Configuration
+  grounded:
+    # spaCy entity types to check for coverage
+    # Common types: PERSON, ORG (organization), GPE (geopolitical entity),
+    # DATE, NORP (nationalities/religious/political groups)
+    entity_types: ["PERSON", "ORG", "GPE", "DATE", "NORP"]
+    
+    # Enable fuzzy matching for entity detection (case-insensitive)
+    fuzzy_matching: true
+    
+    # Minimum token length for overlap calculation (ignore short words)
+    min_token_length: 2
+    
+    # ROUGE method for token overlap calculation
+    rouge_method: "rouge-l"
+
 # Checkpointing
 checkpointing:
   # Save checkpoint every N chunks during embedding generation
