@@ -46,6 +46,7 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
 - **Month 5: Detector Evaluation & Mitigation**
   - **Rule-Based Aggregation:** Combine all detector signals using explicit rules or a weighted heuristic to produce a final confidence score.
   - **Confidence UI Display:** Implement a simple UI to visualize the confidence score for each generated claim, making the detector's output interpretable.
+  - **CitationFormatter (for CiteBench/CiteEval):** Add a lightweight formatter to insert inline bracketed citations (e.g., [1], [2]) into the generated answer that reference the ranked evidence passages. Provide a post-processing step to align citations with claim spans and export a CiteEval-compatible system output (id, query, passages, pred). This enables both "Full" and "Cited" modes in CiteEval.
   - **Ragas Integration for Evaluation:** Integrate the Ragas framework to systematically evaluate the RAG pipeline's performance using metrics like `faithfulness` and `answer_relevancy`. This will serve as a complementary evaluation layer to the custom verifier.
   - **End-to-End Detector Evaluation:** Evaluate the complete detector's ability to identify hallucinations on benchmarks (TruthfulQA, RAGTruth).
   - **Performance Analysis:** Measure key metrics like detection accuracy, precision, and recall, and compare with Ragas metrics.

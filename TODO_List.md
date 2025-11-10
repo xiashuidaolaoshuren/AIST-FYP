@@ -93,6 +93,13 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] **Rule-Based Aggregation:**
         -   [ ] Design and implement a `RuleBasedAggregator` that combines the outputs of all four signal detectors.
         -   [ ] Define explicit rules and thresholds to classify each claim as "Supported," "Contradictory," or "Low Confidence."
+    -   [ ] **CitationFormatter (Enable CiteBench/CiteEval):**
+        -   [ ] Design a citation strategy that maps top-k retrieved evidence chunks to 1-based bracketed indices `[1]..[k]` in the answer.
+        -   [ ] Implement `CitationFormatter` to inject inline citations and return: formatted_text, citation_map (claim_id → [indices]), passage_list (ordered evidence for export).
+        -   [ ] Add a post-processor to align citation markers to claim character spans (uses `extract_claims` spans) and validate with `validate_claim_spans`.
+        -   [ ] Implement an exporter to produce CiteEval System Evaluation JSON: `{id, query, passages:[{text,title?}], pred}`.
+        -   [ ] Smoke test CiteEval in `Full` mode (no citations required), then `Cited` mode (with `[i]` markers).
+        -   [ ] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
     -   [ ] **Confidence UI Display:**
         -   [ ] Implement a simple UI to visualize the confidence score for each generated claim.
     -   [ ] **Ragas Integration:**
