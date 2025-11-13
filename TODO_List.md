@@ -72,6 +72,15 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] Analyze different approaches to self-agreement and consistency checking (e.g., SelfCheckGPT variants).
     -   [ ] Consolidate findings from all four signals and prepare for the integration analysis.
 -   **Member 2 (Development & Experimentation Focus):**
+    -   [ ] **Architecture Refactoring:**
+        -   [ ] Implement `VerifierHub` class in `src/verification/verifier_hub.py` to centralize all detector orchestration.
+        -   [ ] Refactor `baseline_rag.py` to use VerifierHub instead of calling detectors directly.
+    -   [ ] **Evidence Strategy Enhancement:**
+        -   [ ] Extend verification from top-ranked evidence only to verify each claim against ALL evidence chunks.
+        -   [ ] Update VerifierHub to support both strategies via configuration flag (e.g., `verification.verify_all_evidence: bool`).
+        -   [ ] Implement signal aggregation when multiple signals per claim exist (e.g., max, mean, or weighted average).
+        -   [ ] Add performance optimization to avoid redundant detector calls if needed.
+        -   [ ] **Note:** Month 3 uses top-ranked evidence for all claims - this task extends to comprehensive verification.
     -   [ ] **Zero-Shot NLI Contradiction Detector:**
         -   [ ] Load the pre-trained `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` model from Hugging Face.
         -   [ ] Implement a module that takes a (claim, evidence) pair and returns the probabilities for "entailment," "contradiction," and "neutral."
@@ -79,7 +88,8 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] Implement a function to generate `k` different responses for the same query using stochastic sampling (e.g., temperature > 0).
         -   [ ] Implement a module to measure the semantic consistency or claim variability across the `k` responses.
     -   [ ] **Integration:**
-        -   [ ] Add these two new detectors to the verifier module.
+        -   [ ] Add NLI and self-consistency detectors to VerifierHub.
+        -   [ ] Update VerifierSignal construction to populate `nli` and `consistency` fields (currently None in Month 3).
 
 ---
 
