@@ -72,6 +72,15 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] Analyze different approaches to self-agreement and consistency checking (e.g., SelfCheckGPT variants).
     -   [ ] Consolidate findings from all four signals and prepare for the integration analysis.
 -   **Member 2 (Development & Experimentation Focus):**
+    -   [ ] **Architecture Refactoring:**
+        -   [ ] Implement `VerifierHub` class in `src/verification/verifier_hub.py` to centralize all detector orchestration.
+        -   [ ] Refactor `baseline_rag.py` to use VerifierHub instead of calling detectors directly.
+    -   [ ] **Evidence Strategy Enhancement:**
+        -   [ ] Extend verification from top-ranked evidence only to verify each claim against ALL evidence chunks.
+        -   [ ] Update VerifierHub to support both strategies via configuration flag (e.g., `verification.verify_all_evidence: bool`).
+        -   [ ] Implement signal aggregation when multiple signals per claim exist (e.g., max, mean, or weighted average).
+        -   [ ] Add performance optimization to avoid redundant detector calls if needed.
+        -   [ ] **Note:** Month 3 uses top-ranked evidence for all claims - this task extends to comprehensive verification.
     -   [ ] **Zero-Shot NLI Contradiction Detector:**
         -   [ ] Load the pre-trained `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` model from Hugging Face.
         -   [ ] Implement a module that takes a (claim, evidence) pair and returns the probabilities for "entailment," "contradiction," and "neutral."
@@ -79,7 +88,8 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] Implement a function to generate `k` different responses for the same query using stochastic sampling (e.g., temperature > 0).
         -   [ ] Implement a module to measure the semantic consistency or claim variability across the `k` responses.
     -   [ ] **Integration:**
-        -   [ ] Add these two new detectors to the verifier module.
+        -   [ ] Add NLI and self-consistency detectors to VerifierHub.
+        -   [ ] Update VerifierSignal construction to populate `nli` and `consistency` fields (currently None in Month 3).
 
 ---
 
@@ -93,6 +103,13 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] **Rule-Based Aggregation:**
         -   [ ] Design and implement a `RuleBasedAggregator` that combines the outputs of all four signal detectors.
         -   [ ] Define explicit rules and thresholds to classify each claim as "Supported," "Contradictory," or "Low Confidence."
+    -   [ ] **CitationFormatter (Enable CiteBench/CiteEval):**
+        -   [ ] Design a citation strategy that maps top-k retrieved evidence chunks to 1-based bracketed indices `[1]..[k]` in the answer.
+        -   [ ] Implement `CitationFormatter` to inject inline citations and return: formatted_text, citation_map (claim_id → [indices]), passage_list (ordered evidence for export).
+        -   [ ] Add a post-processor to align citation markers to claim character spans (uses `extract_claims` spans) and validate with `validate_claim_spans`.
+        -   [ ] Implement an exporter to produce CiteEval System Evaluation JSON: `{id, query, passages:[{text,title?}], pred}`.
+        -   [ ] Smoke test CiteEval in `Full` mode (no citations required), then `Cited` mode (with `[i]` markers).
+        -   [ ] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
     -   [ ] **Confidence UI Display:**
         -   [ ] Implement a simple UI to visualize the confidence score for each generated claim.
     -   [ ] **Ragas Integration:**

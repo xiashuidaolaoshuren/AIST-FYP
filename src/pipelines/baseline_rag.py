@@ -12,9 +12,11 @@ from pathlib import Path
 from src.retrieval.dense_retriever import DenseRetriever
 from src.generation.generator_wrapper import GeneratorWrapper
 from src.generation.claim_extractor import extract_claims
-from src.utils.data_structures import ClaimEvidencePair, EvidenceChunk, Claim
+from src.utils.data_structures import ClaimEvidencePair, EvidenceChunk, Claim, VerifierSignal
 from src.utils.config import Config
 from src.utils.logger import setup_logger
+from src.verification.intrinsic_uncertainty import IntrinsicUncertaintyDetector
+from src.verification.retrieval_grounded import RetrievalGroundedDetector
 
 
 class BaselineRAGPipeline:
@@ -63,7 +65,15 @@ class BaselineRAGPipeline:
         self.config = config
         self.logger = setup_logger(__name__)
         
-        self.logger.info("BaselineRAGPipeline initialized")
+        # Initialize verification detectors if enabled (Month 3)
+        if config and hasattr(config, 'verification') and hasattr(config.verification, 'enabled') and config.verification.enabled:
+            self.uncertainty_detector = IntrinsicUncertaintyDetector(config)
+            self.grounded_detector = RetrievalGroundedDetector(config)
+            self.verifier_enabled = True
+            self.logger.info("BaselineRAGPipeline initialized with verification enabled")
+        else:
+            self.verifier_enabled = False
+            self.logger.info("BaselineRAGPipeline initialized (verification disabled)")
     
     def run(
         self,
@@ -191,6 +201,51 @@ class BaselineRAGPipeline:
                 f"Paired claim {claim.claim_id} with {len(evidence_candidates)} evidence chunks"
             )
         
+        # Step 4.5: Compute verifier signals (Month 3 functionality)
+        # Verifies each claim against top-ranked evidence using two detectors:
+        # - IntrinsicUncertaintyDetector: Entropy-based model confidence
+        # - RetrievalGroundedDetector: Evidence coverage (entities, numbers, tokens)
+        verifier_signals = []
+        if self.verifier_enabled and evidence_chunks:
+            self.logger.debug("Computing verifier signals for claims")
+            
+            for claim, pair in zip(claims, claim_evidence_pairs):
+                # Use top-ranked evidence chunk for verification
+                # Month 4 TODO: Extend to verify each claim against all evidence chunks
+                top_chunk = evidence_chunks[0]
+                
+                # Compute intrinsic uncertainty signal (entropy from token logits)
+                uncertainty_signal = self.uncertainty_detector.compute_signal(
+                    claim, top_chunk, generation_output
+                )
+                
+                # Compute retrieval-grounded signal (entity/number/token coverage)
+                grounded_signal = self.grounded_detector.compute_signal(
+                    claim, top_chunk, generation_output
+                )
+                
+                # Construct VerifierSignal dataclass
+                # Note: nli and consistency are None for Month 3 (added in Month 4)
+                signal = VerifierSignal(
+                    claim_id=claim.claim_id,
+                    doc_id=top_chunk.doc_id,
+                    sent_id=top_chunk.sent_id,
+                    nli=None,  # Month 4: NLI entailment scores
+                    coverage=grounded_signal,  # {'entities', 'numbers', 'tokens_overlap'}
+                    uncertainty=uncertainty_signal,  # {'mean_entropy'}
+                    consistency={'variance': None},  # Month 4: Self-consistency variance
+                    citation_span_match=grounded_signal['tokens_overlap'],
+                    numeric_check=grounded_signal.get('numbers', 0.0) == 1.0
+                )
+                
+                verifier_signals.append(signal.to_dict())
+            
+            self.logger.info(f"Computed {len(verifier_signals)} verifier signals")
+        elif self.verifier_enabled and not evidence_chunks:
+            self.logger.warning(
+                "Verification enabled but no evidence retrieved - skipping verifier signals"
+            )
+        
         # Step 5: Format output
         output = {
             'query': query,
@@ -204,6 +259,10 @@ class BaselineRAGPipeline:
                 'evidence_doc_ids': [chunk.doc_id for chunk in evidence_chunks]
             }
         }
+        
+        # Add verifier signals if computed (Month 3)
+        if verifier_signals:
+            output['verifier_signals'] = verifier_signals
         
         self.logger.info(
             f"Pipeline complete: {len(claims)} claims, "

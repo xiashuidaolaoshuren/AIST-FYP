@@ -379,11 +379,13 @@ def extract_claims(generated_text: str) -> List[str]:
 ```
 Answer the question using the provided context. Be concise and factual.
 
-Context:
-{evidence_chunk_1}
-{evidence_chunk_2}
+Context: Passage 1: {evidence_chunk_1_text}
+
+Passage 2: {evidence_chunk_2_text}
+
 ...
-{evidence_chunk_5}
+
+Passage 5: {evidence_chunk_5_text}
 
 Question: {query}
 
@@ -394,6 +396,10 @@ Answer:
 - Clear instruction: "Be concise and factual"
 - Multiple evidence chunks (top-5) for comprehensive context
 - Explicit structure: Context → Question → Answer
+- **Format:** Uses "Passage N:" labels separated by double newlines
+  - Avoids citation-style markers `[1] [2] [3]` which can confuse FLAN-T5
+  - Prevents model from generating "[1]" as a response instead of actual answer
+  - See `docs/investigation_citation_issue.md` for detailed analysis
 
 ## Design Decisions
 

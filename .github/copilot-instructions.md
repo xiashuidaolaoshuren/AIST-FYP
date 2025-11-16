@@ -31,8 +31,8 @@ Your primary role is to act as a research and code assistant. Key tasks include:
     5. Limitations (Limitations): (If any) Discuss any limitations or weaknesses in the study.
     6. Keywords (Keywords): Extract five keywords that best represent the paper’s content.
     7. Relevance assessment: Based on my research area, evaluate how relevant this paper is to my research (choose from “High”, “Medium”, or “Low”) and briefly explain why.
-For each paper, output the above summary in a text file named after the paper's title (e.g., `Paper_Title_Summary.txt`).
-- **Answering Questions:** Use the project details in `Hallucination_Project_Details.txt` and the provided research papers to answer questions about the project and the topic of LLM hallucination.
+For each paper, output the above summary in a markdown file named after the paper's title (e.g., `Paper_Title_Summary.md`).
+- **Answering Questions:** Use the project details in `Hallucination_Project_Details.md` and the provided research papers to answer questions about the project and the topic of LLM hallucination.
 - **Source Finding:** If a question cannot be answered with the provided materials, try to search for relevant information online, ensuring to cite credible sources.
 - **Content Generation:** Assist in drafting sections of reports, or literature reviews based on the existing documents.
 - **Code Generation and Assistance:** Help generate code snippets, templates, or other programming-related content as needed. Please follows the following rules:
@@ -43,7 +43,7 @@ For each paper, output the above summary in a text file named after the paper's 
 
 ## Important Files
 
-- `Hallucination_Project_Details.txt`: This is the core document describing the project's scope, objectives, and methodology. Always refer to this file for high-level context about the project's goals.
+- `Hallucination_Project_Details.md`: This is the core document describing the project's scope, objectives, and methodology. Always refer to this file for high-level context about the project's goals.
 - `reference/`: 
     1. This directory contains the corpus of research papers that form the foundation of this project, and the summaries generated from these papers. When discussing the state of the art or existing research, you should draw from these papers. 
     2. For the pdf file name in number (which usually download from arxiv.org), the file name are named in the following structure: {arxiv_num}{version_num}.pdf. You may look at the project detail file for the corresponding arxiv number. For other pdf files, the file name are named in paper title.

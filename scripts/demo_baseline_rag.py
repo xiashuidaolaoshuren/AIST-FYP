@@ -74,9 +74,10 @@ def run_demo():
     
     # Define sample queries
     sample_queries = [
-        "Who founded the FEVER dataset?",
-        "What is machine learning?",
-        "When was Wikipedia created?",
+        "What is artificial intelligence?",
+        "How do machines learn from data?",
+        "What is deep learning?",
+        "What is natural language processing?"
     ]
     
     # Store all results for JSON output

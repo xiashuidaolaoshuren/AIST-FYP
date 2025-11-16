@@ -44,6 +44,15 @@ venv.bak/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Testing
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+coverage.xml
+*.cover
+.hypothesis/
+
 # Machine Learning / AI
 *.pkl
 *.joblib
