@@ -37,26 +37,113 @@ These signals are combined via a **Rule-Based Aggregator** to produce a final ve
 We have successfully completed the foundational phases of the project (Months 1 & 2) and have made significant progress on the Verifier Module (Month 3).
 
 ### A. Data Processing & Retrieval (Completed)
--   **Wikipedia Corpus:** We successfully parsed and cleaned the English Wikipedia XML dump.
--   **Chunking & Embedding:** The text was segmented into sentence-level chunks. We generated vector embeddings for these chunks using a pre-trained **Sentence-Transformer** model.
--   **Vector Database:** We built a **FAISS (Facebook AI Similarity Search)** index to enable efficient, low-latency similarity search over the massive corpus.
--   **Dense Retriever:** Implemented a `DenseRetriever` class (`src/retrieval/dense_retriever.py`) that:
-    -   Encodes queries using the same Sentence-Transformer model.
-    -   Performs cosine similarity search (via inner product on L2-normalized vectors) against the FAISS index.
-    -   Returns ranked `EvidenceChunk` objects.
+
+This component forms the foundation of our RAG system, responsible for ingesting the massive Wikipedia corpus and enabling real-time, semantic search. It transforms raw text into a searchable vector space, allowing the system to retrieve relevant evidence based on meaning rather than just keyword matching. We utilized a high-performance vector database (FAISS) to handle the scale of millions of document chunks, ensuring low-latency retrieval essential for an interactive system.
+
+*   **Input:** A raw user query (e.g., "Who founded the FEVER dataset?").
+*   **Method:**
+    1.  **Encoding:** The query is encoded into a high-dimensional vector (384 dimensions) using the `sentence-transformers/all-MiniLM-L6-v2` model.
+    2.  **Indexing:** We use **FAISS** (Facebook AI Similarity Search) with an `IndexFlatIP` (Inner Product) index. Since embeddings are normalized, this is equivalent to Cosine Similarity.
+    3.  **Search:** The system performs an exact nearest neighbor search to find the top-k most similar chunks from the Wikipedia corpus.
+*   **Output:** A ranked list of `EvidenceChunk` objects containing the text and metadata.
+
+**Code Example (`src/retrieval/dense_retriever.py`):**
+```python
+def retrieve(self, query: str, top_k: int = 5) -> List[EvidenceChunk]:
+    # 1. Encode query
+    query_embedding = self.encoder.encode([query], normalize_embeddings=True)
+    
+    # 2. Search FAISS index
+    scores, indices = self.index.search(query_embedding, top_k)
+    
+    # 3. Construct results
+    results = []
+    for idx, score in zip(indices[0], scores[0]):
+        metadata = self.metadata[idx]
+        results.append(EvidenceChunk(..., score_dense=float(score)))
+    return results
+```
 
 ### B. Baseline RAG Pipeline (Completed)
--   **Pipeline Integration:** We implemented a baseline RAG system (`src/pipelines/baseline_rag.py`) that integrates the retriever with a generator LLM.
--   **Claim Extraction:** The pipeline includes a `ClaimExtractor` that decomposes the generated response into atomic claims using **spaCy** for sentence segmentation (falling back to regex if needed).
--   **Claim-Evidence Pairing:** Each extracted claim is paired with the top-ranked retrieved evidence chunks to form `ClaimEvidencePair` objects, which serve as the input for the verifier.
+
+The Baseline RAG Pipeline integrates the retrieval mechanism with a generative Large Language Model (LLM) to produce grounded answers. Beyond standard generation, this pipeline is engineered to be "verifier-aware": it captures critical metadata during generation—specifically token-level logits—and structures the output into atomic "claim-evidence pairs". This structured output is the prerequisite for our downstream verification logic, enabling granular fact-checking at the sentence level.
+
+*   **Input:** User query.
+*   **Method:**
+    1.  **Retrieval:** Calls the `DenseRetriever`.
+    2.  **Generation:** Uses a `GeneratorWrapper` (e.g., Llama-3-8B) to generate a response. Crucially, we set `output_scores=True` to capture **logits** for uncertainty analysis.
+    3.  **Claim Extraction:** We use **spaCy** to segment the generated response into sentences (atomic claims).
+    4.  **Pairing:** Each claim is paired with the retrieved evidence.
+*   **Output:** A dictionary containing the `draft_response` and a list of `ClaimEvidencePair` objects.
+
+**Code Example (`src/pipelines/baseline_rag.py`):**
+```python
+def run(self, query: str, top_k: int = 5) -> Dict:
+    # 1. Retrieve
+    evidence_chunks = self.retriever.retrieve(query, top_k=top_k)
+    
+    # 2. Generate with metadata (logits)
+    gen_output = self.generator.generate_with_metadata(
+        prompt=query, evidence_chunks=evidence_chunks
+    )
+    
+    # 3. Extract Claims
+    claims = extract_claims(gen_output['text'])
+    
+    # 4. Pair & Return
+    return {
+        'draft_response': gen_output['text'],
+        'claim_evidence_pairs': [
+            ClaimEvidencePair(claim, evidence_chunks) for claim in claims
+        ]
+    }
+```
 
 ### C. Verifier Module - Part 1 (In Progress/Completed)
--   **Intrinsic Uncertainty Detector:** Implemented in `src/verification/intrinsic_uncertainty.py`.
-    -   **Token Alignment:** We developed a robust algorithm to map the character spans of extracted claims back to the specific tokens generated by the LLM, handling tokenizer idiosyncrasies and special tokens.
-    -   **Entropy Calculation:** The module extracts the raw logits for the aligned tokens and computes the mean Shannon entropy. We implemented the **log-sum-exp trick** to ensure numerical stability and prevent underflow errors.
--   **Retrieval-Grounded Heuristics:** Implemented in `src/verification/retrieval_grounded.py`.
-    -   **Entity & Number Coverage:** We utilize **spaCy's NER (Named Entity Recognition)** to identify entities and numbers in the claim. The system then checks for their presence in the evidence text, supporting both exact and fuzzy matching (case-insensitive).
-    -   **Token Overlap:** We implemented a custom **Longest Common Subsequence (LCS)** algorithm to compute the ROUGE-L F1 score, providing a robust measure of how much of the claim's phrasing is derived directly from the source.
+
+The Verifier Module is the core innovation of our project, designed to assess the factual reliability of generated claims without relying on expensive, black-box "LLM-as-a-Judge" calls. In this first phase, we have implemented two complementary signal detectors: one that looks "inward" at the model's own confidence (Intrinsic Uncertainty) and one that looks "outward" at the alignment between the claim and the source text (Retrieval-Grounded Heuristics). These signals provide the initial layers of our multi-signal verification strategy.
+
+#### 1. Intrinsic Uncertainty Detector
+*   **Input:** Extracted `Claim` object and the `generator_metadata` (containing token logits).
+*   **Method:**
+    1.  **Alignment:** Maps the claim's character span (e.g., chars 0-50) to the specific tokens generated by the LLM.
+    2.  **Entropy Calculation:** Computes the Shannon Entropy ($H$) for each token's probability distribution.
+    $$ H(x) = - \sum p(x) \log p(x) $$
+    3.  **Aggregation:** Returns the mean entropy over the claim's tokens.
+*   **Output:** A dictionary `{'mean_entropy': float}`.
+
+**Code Example (`src/verification/intrinsic_uncertainty.py`):**
+```python
+def _calculate_entropy(self, logits: np.ndarray) -> float:
+    # Softmax with log-sum-exp stability
+    max_logit = np.max(logits)
+    exp_logits = np.exp(logits - max_logit)
+    probs = exp_logits / np.sum(exp_logits)
+    
+    # Shannon Entropy
+    entropy = -np.sum(probs * np.log(probs + self.epsilon))
+    return float(entropy)
+```
+
+#### 2. Retrieval-Grounded Heuristics
+*   **Input:** `Claim` text and `EvidenceChunk` text.
+*   **Method:**
+    1.  **Entity Coverage:** Uses **spaCy NER** to find entities in the claim and checks if they exist in the evidence (fuzzy match).
+    2.  **Token Overlap:** Computes the **Longest Common Subsequence (LCS)** to calculate the ROUGE-L F1 score.
+*   **Output:** A dictionary with scores for `entities`, `numbers`, and `tokens_overlap`.
+
+**Code Example (`src/verification/retrieval_grounded.py`):**
+```python
+def _calculate_entity_coverage(self, claim, evidence) -> float:
+    # Extract entities
+    doc_claim = self.nlp(claim.text)
+    entities = [ent.text for ent in doc_claim.ents]
+    
+    # Check presence in evidence
+    matched = sum(1 for e in entities if self._fuzzy_match(e, evidence.text))
+    
+    return matched / len(entities) if entities else 1.0
+```
 
 ---
 
