@@ -151,6 +151,7 @@ def _calculate_entity_coverage(self, claim, evidence) -> float:
 
 ### Technical Challenges
 -   **Token Alignment Complexity:** Mapping the character offsets of a sentence (e.g., "The Eiffel Tower is tall") back to the specific tokens produced by the LLM (e.g., `["The", " E", "iffel", " Tower"]`) proved difficult due to sub-word tokenization and special characters (like SentencePiece's ` `). We had to implement a fuzzy matching logic with tolerance to ensure accurate logit extraction.
+-   **Entity Normalization Challenge:** A significant limitation identified in the Retrieval-Grounded Detector is the "Entity Surface Form Variation" problem. The current system uses fuzzy substring matching, which fails to recognize that different textual representations (e.g., "USA" vs. "United States", "WHO" vs. "World Health Organization") refer to the same real-world entity. This leads to false negatives in the entity coverage metric, where valid evidence is rejected because the surface forms do not match. We plan to address this by implementing a tiered matching approach including acronym expansion and an alias dictionary.
 -   **Resource Constraints:** Processing the entire English Wikipedia dump was highly resource-intensive. Generating embeddings for millions of chunks required significant GPU time. Our development environment (RTX 3070Ti) imposes limits on the batch size and the size of the LLM we can run locally, requiring careful memory management (e.g., `load_in_8bit`).
 
 ### System Limitations
@@ -168,10 +169,13 @@ The next phase of the project (Months 4-6) will focus on completing the verifier
 -   **Zero-Shot NLI:** Implement the NLI signal using the `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` model. This will allow us to detect logical contradictions even when lexical overlap is low.
 -   **Self-Agreement:** Implement the self-consistency check by sampling multiple responses (e.g., with `temperature > 0.7`) and measuring the semantic variance between them.
 
+
 ### Evaluation & Refinement (Month 5)
 -   **Rule-Based Aggregation:** Develop the logic to combine the four signals (Entropy, Heuristics, NLI, Consistency) into a single confidence score. We will need to tune the thresholds for each signal based on validation data.
 -   **Ragas Integration:** Integrate the **Ragas** framework to systematically evaluate `faithfulness` and `answer_relevancy`. This will provide an external benchmark to validate our custom verifier's performance.
--   **Benchmarking:** Run the full system on **TruthfulQA** and **RAGTruth** benchmarks to quantify detection accuracy, precision, and recall.
+-   **Benchmarking:** Run the full system on **CiteBench** and **RAGTruth** benchmarks to quantify detection accuracy, precision, and recall.
+-   **Hallucination Mitigation:** Beyond detection, we aim to implement active mitigation strategies. This involves using the verifier's negative feedback to trigger corrective actions, such as re-ranking retrieved documents, re-prompting the LLM to self-correct, or filtering out unsupported claims from the final response.
+
 
 ### Optimization
 -   **Hybrid Retrieval:** Investigate adding a **BM25 sparse retriever** to complement the dense retriever (Hybrid Search) to address the lexical gap.
