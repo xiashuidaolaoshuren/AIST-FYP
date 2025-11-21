@@ -45,15 +45,15 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] Research and document best practices for implementing retrieval-grounded heuristics, analyzing trade-offs between different overlap metrics (e.g., lexical vs. semantic).
     -   [ ] Begin drafting the methodology section of the first term report.
 -   **Member 2 (Development & Experimentation Focus):**
-    -   [ ] **Intrinsic Uncertainty Detector:**
-        -   [ ] Implement a function to extract token-level logits/probabilities from the generator's output.
-        -   [ ] Implement a module to calculate token-level entropy and length-normalized perplexity for each claim.
-    -   [ ] **Retrieval-Grounded Heuristics:**
-        -   [ ] Implement an `evidence_coverage` function that calculates the percentage of named entities and noun phrases from a claim that appear in the evidence.
-        -   [ ] Implement a `citation_span_integrity` function that measures the token overlap between a claim and its direct citation.
-    -   [ ] **Integration:**
-        -   [ ] Integrate these two detectors into the main pipeline to process claims after generation.
-        -   [ ] Run initial tests to ensure signals are being generated correctly.
+    -   [x] **Intrinsic Uncertainty Detector:**
+        -   [x] Implement a function to extract token-level logits/probabilities from the generator's output.
+        -   [x] Implement a module to calculate token-level entropy and length-normalized perplexity for each claim.
+    -   [x] **Retrieval-Grounded Heuristics:**
+        -   [x] Implement an `evidence_coverage` function that calculates the percentage of named entities and noun phrases from a claim that appear in the evidence.
+        -   [x] Implement a `citation_span_integrity` function that measures the token overlap between a claim and its direct citation.
+    -   [x] **Integration:**
+        -   [x] Integrate these two detectors into the main pipeline to process claims after generation.
+        -   [x] Run initial tests to ensure signals are being generated correctly.
 -   **Team (End of Month):**
     -   [ ] **First Term Presentation Preparation:**
         -   [ ] Prepare presentation slides covering project introduction, literature review, system architecture, and progress to date.
