@@ -116,11 +116,14 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] Integrate the Ragas framework into the evaluation pipeline.
         -   [ ] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
     -   [ ] **End-to-End Detector Evaluation:**
-        -   [ ] Set up an evaluation harness to run the full system on the `TruthfulQA` and `RAGTruth` benchmarks.
+        -   [ ] Set up an evaluation harness to run the full system on the `RAGTruth` and `CiteBench` benchmarks.
         -   [ ] Run the evaluation and collect the results.
         -   [ ] Calculate key metrics for the verifier (e.g., detection accuracy, precision, recall, F1-score).
-    -   [ ] **(Optional) Simple Mitigation:**
-        -   [ ] If time permits, implement a simple `Flagging` module that adds warnings to low-confidence or contradictory claims in the final output.
+    -   [ ] **(Optional) Mitigation Strategies:**
+        -   [ ] If time permits, implement active mitigation logic based on verifier feedback.
+        -   [ ] **Re-ranking:** Implement logic to re-order retrieved documents based on verification scores.
+        -   [ ] **Re-prompting:** Implement a feedback loop to ask the LLM to self-correct when low confidence is detected.
+        -   [ ] **Filtering:** Implement a module to suppress or flag claims that are unsupported or contradictory.
 
 ---
 
