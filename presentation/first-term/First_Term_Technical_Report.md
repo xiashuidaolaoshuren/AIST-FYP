@@ -101,9 +101,18 @@ def run(self, query: str, top_k: int = 5) -> Dict:
     }
 ```
 
-**Result Demo:**
-!
-
+**Pipeline Demo:**
+- Sample Query:
+![Demo Query](../weekly/demo-1.png)
+- Retrieve
+1. Top k Evidence
+![Demo Top k-1](../weekly/demo-2-1.png)
+![Demo Top k-2](../weekly/demo-2-2.png)
+![Demo Top k-3](../weekly/demo-2-3.png)
+2. Claims
+![Demo Claims](../weekly/demo-3.png)
+- Generate
+![Demo Generate](../weekly/demo-4.png)
 ### C. Verifier Module - Part 1 (In Progress/Completed)
 
 The Verifier Module is the core innovation of our project, designed to assess the factual reliability of generated claims without relying on expensive, black-box "LLM-as-a-Judge" calls. In this first phase, we have implemented two complementary signal detectors: one that looks "inward" at the model's own confidence (Intrinsic Uncertainty) and one that looks "outward" at the alignment between the claim and the source text (Retrieval-Grounded Heuristics). These signals provide the initial layers of our multi-signal verification strategy.
