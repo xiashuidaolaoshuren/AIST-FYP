@@ -10,6 +10,8 @@
 
 Our project aims to address the critical issue of factual hallucinations in Large Language Models (LLMs), particularly in Retrieval-Augmented Generation (RAG) scenarios. We have designed a modular, **trainless verifier system** that operates as a post-hoc safety layer.
 
+![System Architecture](../../System_Architecture_Design%20_%20Mermaid%20Chart-2025-10-03-081957.png)
+
 ### Core Architecture: Generator-Retriever-Verifier
 The system follows a three-stage pipeline designed to ensure that every generated claim is grounded in retrieved evidence:
 
@@ -98,6 +100,9 @@ def run(self, query: str, top_k: int = 5) -> Dict:
         ]
     }
 ```
+
+**Result Demo:**
+!
 
 ### C. Verifier Module - Part 1 (In Progress/Completed)
 
