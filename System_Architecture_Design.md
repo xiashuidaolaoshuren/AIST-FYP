@@ -28,7 +28,7 @@ graph TD
         D4 --> D_Aggregator;
     end
     D --> E["Verified Claims with Confidence Breakdown"];
-    E --> F["Flagging & Suppression Module"];
+    E --> F["Active Mitigation Module (Filter/Re-rank/Re-prompt)"];
     E --> G["Minimal Confidence UI (Table/Badges)"];
     F --> H[Final Verified Response];
     G --> I((Final Output));
@@ -86,23 +86,29 @@ This module is redesigned as a hub for calculating multiple, parallel, trainless
         -   `confidence_breakdown`: (dict) A structured dictionary containing all raw signals (e.g., `entropy_score`, `nli_results`, `coverage_score`).
         -   `final_verdict`: (string) A final verdict (e.g., "Supported", "Contradictory", "Low Confidence") derived from the rule-based aggregator.
 
-### 3. Flagging & Suppression Module (Simplified Mitigation)
+### 3. Active Mitigation Module (Simplified Mitigation)
 
-This module applies simple, rule-based actions based on the final verdict from the verifier.
+This module applies rule-based actions based on the final verdict from the verifier to improve the final output quality.
 
 -   **Inputs:**
     -   `draft_response`: (string) The original draft.
     -   `verified_claims`: (List[dict]) The output from the Verifier Module.
+    -   `retrieved_evidence`: (List[dict]) The original retrieved chunks (needed for re-ranking).
 
 -   **Process:**
-    1.  Iterates through the `verified_claims` and assembles the final response.
-    2.  Applies simple rules based on the `final_verdict`:
-        -   **If "Contradictory"**: The claim is suppressed or replaced with a warning (e.g., "[Warning: The following claim contradicts the source]"). No complex rewrite loop is implemented.
-        -   **If "Low Confidence"**: The claim is flagged with a visual indicator.
-        -   **If "Supported"**: The claim is included as is, with its citation.
+    1.  **Strategy Selection:** Based on the aggregate confidence score and specific claim verdicts, one of the following strategies is applied:
+        -   **Filtering (Default):**
+            -   **If "Contradictory"**: The claim is suppressed or replaced with a warning (e.g., "[Warning: The following claim contradicts the source]").
+            -   **If "Low Confidence"**: The claim is flagged with a visual indicator.
+            -   **If "Supported"**: The claim is included as is.
+        -   **Re-ranking (Optional):**
+            -   If the verifier finds that lower-ranked evidence better supports the generated claims (e.g., via NLI entailment), the evidence list is re-ordered for the final citation output.
+        -   **Re-prompting (Optional/Advanced):**
+            -   If the overall hallucination rate exceeds a threshold (e.g., > 50% claims are contradictory), a new prompt is constructed containing the verification feedback, asking the LLM to self-correct.
 
 -   **Outputs:**
-    -   `final_response`: (string) The final text with flags and (optional) suppressions.
+    -   `final_response`: (string) The final text with flags, suppressions, or the result of a re-generation.
+    -   `mitigation_log`: (dict) A record of actions taken (e.g., "filtered_claim_3", "re-ranked_evidence").
 
 ### 4. Minimal Confidence UI (Table/Badges)
 
@@ -274,5 +280,26 @@ The final output object, containing the full answer annotated with decisions for
   },
   "mitigation_actions": ["removed_contradicted_claims"],
   "version": "pipeline_v0.3"
+}
+```
+
+### MitigationOutput
+The result of the mitigation process, detailing what actions were taken to improve the response.
+```json
+{
+  "original_answer_id": "ans_001",
+  "final_text": "The FEVER dataset was introduced in 2018. [1] [Warning: Claim about 2019 removed]",
+  "actions_taken": [
+    {
+      "type": "filter",
+      "target_claim_id": "c_0008",
+      "reason": "Contradictory verdict"
+    },
+    {
+      "type": "re-rank",
+      "details": "Promoted evidence enwiki_12345#17 to rank 1"
+    }
+  ],
+  "requires_regeneration": false
 }
 ```
