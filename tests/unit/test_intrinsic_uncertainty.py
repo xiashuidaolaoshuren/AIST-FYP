@@ -10,7 +10,7 @@ import numpy as np
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.verification.intrinsic_uncertainty import IntrinsicUncertaintyDetector
 from src.utils.data_structures import Claim, EvidenceChunk

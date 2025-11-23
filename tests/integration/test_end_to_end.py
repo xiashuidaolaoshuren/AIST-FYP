@@ -11,7 +11,7 @@ import numpy as np
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.utils.data_structures import EvidenceChunk, Claim, ClaimEvidencePair
 from src.generation import GeneratorWrapper, extract_claims
