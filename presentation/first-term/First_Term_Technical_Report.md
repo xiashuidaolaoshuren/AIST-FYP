@@ -109,15 +109,17 @@ def run(self, query: str, top_k: int = 5) -> Dict:
 **Pipeline Demo:**
 - Sample Query:
 ![Demo Query](../weekly/demo-1.png)
-- Retrieve
-1. Top k Evidence
+- Retrieved Top-k Evidence (k=3):
 ![Demo Top k-1](../weekly/demo-2-1.png)
 ![Demo Top k-2](../weekly/demo-2-2.png)
 ![Demo Top k-3](../weekly/demo-2-3.png)
-2. Claims
-![Demo Claims](../weekly/demo-3.png)
-- Generate
+2. Generate
 ![Demo Generate](../weekly/demo-4.png)
+3. Extracted Claims
+![Demo Claims](../weekly/demo-3.png)
+4. Claim-Evidence Pairs
+![Demo Pairs](../weekly/demo-5.png)
+
 
 ### C. Verifier Module - Part 1 (In Progress/Completed)
 
@@ -148,7 +150,7 @@ def _calculate_entropy(self, logits: np.ndarray) -> float:
 ```
 
 #### 2. Retrieval-Grounded Heuristics
-This module implements classic verification metrics grounded in the principle that a factual claim should share significant lexical and entity-level overlap with its source evidence. The **Entity Coverage** metric draws inspiration from the **FEVER** shared task [2], which established entity matching as a critical component of fact verification. The **Token Overlap** metric adapts standard summarization evaluation methods (like ROUGE [5]) to quantify the textual similarity between the generated claim and the retrieved context.
+This module implements classic verification metrics grounded in the principle that a factual claim should share significant lexical and entity-level overlap with its source evidence. The **Entity Coverage** metric, inspired by the **FEVER** shared task [2], calculates the proportion of named entities (e.g., people, organizations) in the generated claim that are also present in the retrieved evidence. The **Token Overlap** metric, adapting standard summarization evaluation methods like **ROUGE** [5], calculates the lexical similarity (specifically ROUGE-L F1) between the claim and the evidence to capture verbatim matches.
 
 *   **Input:** `Claim` text and `EvidenceChunk` text.
 *   **Method:**
