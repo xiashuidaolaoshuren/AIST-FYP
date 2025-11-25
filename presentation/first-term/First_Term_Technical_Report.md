@@ -20,7 +20,7 @@ The system follows a three-stage pipeline designed to ensure that every generate
 3.  **Verification:** A dedicated "Verifier Module" analyzes the generated claims against the retrieved evidence. This module decomposes the response into atomic claims and assigns a confidence score to each based on multiple signals.
 
 ### The Trainless Verifier
-Unlike traditional approaches that require training massive "judge" models [12], our verifier aggregates multiple zero-shot signals to assess factuality without fine-tuning. The four key signals are:
+Unlike traditional approaches that require training massive "judge" models [12], our verifier aggregates multiple zero-shot signals to assess factuality without fine-tuning.   :
 
 1.  **Intrinsic Uncertainty:** Measures the model's internal confidence using token-level statistics. We specifically calculate **Shannon Entropy** ($H = -\sum p \log p$) over the probability distribution of the generated tokens. High entropy indicates the model was "unsure" about its output, which correlates with hallucination [9].
 2.  **Retrieval-Grounded Heuristics:** Quantifies the overlap between the generated claim and the evidence using three sub-metrics:
@@ -150,12 +150,13 @@ def _calculate_entropy(self, logits: np.ndarray) -> float:
 ```
 
 #### 2. Retrieval-Grounded Heuristics
-This module implements classic verification metrics grounded in the principle that a factual claim should share significant lexical and entity-level overlap with its source evidence. The **Entity Coverage** metric, inspired by the **FEVER** shared task [2], calculates the proportion of named entities (e.g., people, organizations) in the generated claim that are also present in the retrieved evidence. The **Token Overlap** metric, adapting standard summarization evaluation methods like **ROUGE** [5], calculates the lexical similarity (specifically ROUGE-L F1) between the claim and the evidence to capture verbatim matches.
+This module implements classic verification metrics grounded in the principle that a factual claim should share significant lexical and entity-level overlap with its source evidence. The **Entity Coverage** metric, inspired by the **FEVER** shared task [2], calculates the proportion of named entities (e.g., people, organizations) in the generated claim that are also present in the retrieved evidence. The **Number Coverage** metric specifically targets quantitative hallucinations by verifying that numeric values (e.g., dates, statistics) in the claim are supported by the source text. The **Token Overlap** metric, adapting standard summarization evaluation methods like **ROUGE** [5], calculates the lexical similarity (specifically ROUGE-L F1) between the claim and the evidence to capture verbatim matches.
 
 *   **Input:** `Claim` text and `EvidenceChunk` text.
 *   **Method:**
     1.  **Entity Coverage:** Uses **spaCy NER** to find entities in the claim and checks if they exist in the evidence (fuzzy match).
-    2.  **Token Overlap:** Computes the **Longest Common Subsequence (LCS)** to calculate the ROUGE-L F1 score.
+    2.  **Number Coverage:** Extracts numeric tokens from the claim and checks for their presence in the evidence.
+    3.  **Token Overlap:** Computes the **Longest Common Subsequence (LCS)** to calculate the ROUGE-L F1 score.
 *   **Output:** A dictionary with scores for `entities`, `numbers`, and `tokens_overlap`.
 
 **Code Example (`src/verification/retrieval_grounded.py`):**
@@ -169,6 +170,16 @@ def _calculate_entity_coverage(self, claim, evidence) -> float:
     matched = sum(1 for e in entities if self._fuzzy_match(e, evidence.text))
     
     return matched / len(entities) if entities else 1.0
+
+def _calculate_number_coverage(self, claim, evidence) -> float:
+    # Extract numeric tokens
+    doc_claim = self.nlp(claim.text)
+    numbers = [token.text for token in doc_claim if token.like_num]
+    
+    # Check presence in evidence
+    matched = sum(1 for num in numbers if num in evidence.text)
+    
+    return matched / len(numbers) if numbers else 1.0
 ```
 
 ---
