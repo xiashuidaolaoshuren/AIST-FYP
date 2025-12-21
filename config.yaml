@@ -99,6 +99,16 @@ verification:
   # Enable/disable verification module (default: false for backward compatibility)
   enabled: false
   
+  # Multi-evidence verification (Month 4, Task 2)
+  # If True, verify claims against ALL retrieved evidence chunks and aggregate results
+  # If False, verify only against top-ranked chunk (backward compatible)
+  verify_all_evidence: false
+  
+  # Aggregation method for multi-evidence verification
+  # "max": Optimistic - take best match (max coverage, min entropy)
+  # "mean": Average - mean of all scores
+  aggregation_method: "max"
+  
   # spaCy model for NER and noun phrase extraction
   spacy_model: "en_core_web_sm"
   

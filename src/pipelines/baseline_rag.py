@@ -210,18 +210,32 @@ class BaselineRAGPipeline:
         # Uses VerifierHub to orchestrate all verification detectors
         # Month 3: IntrinsicUncertaintyDetector + RetrievalGroundedDetector
         # Month 4: + NLI + Self-Agreement (managed by hub)
+        # Task 2: Multi-evidence verification with aggregation
         verifier_signals = []
         if self.verifier_enabled and evidence_chunks:
             self.logger.debug("Computing verifier signals via VerifierHub")
             
+            # Read verify_all_evidence flag from hub configuration
+            verify_all = self.verifier_hub.verify_all_evidence
+            
             for claim, pair in zip(claims, claim_evidence_pairs):
-                # Use top-ranked evidence chunk for verification
-                # Month 4 TODO (Task 2): Extend to verify each claim against all evidence chunks
-                top_chunk = evidence_chunks[0]
+                # Choose evidence: all chunks or top-1 based on config
+                if verify_all:
+                    # Multi-evidence verification (Task 2)
+                    evidence_input = evidence_chunks
+                    self.logger.debug(
+                        f"Multi-evidence verification for claim {claim.claim_id}: {len(evidence_chunks)} chunks"
+                    )
+                else:
+                    # Single-chunk verification (backward compatible)
+                    evidence_input = evidence_chunks[0]
+                    self.logger.debug(
+                        f"Single-chunk verification for claim {claim.claim_id}"
+                    )
                 
                 # Call VerifierHub to compute all signals
                 signal = self.verifier_hub.verify_claim(
-                    claim, top_chunk, generation_output
+                    claim, evidence_input, generation_output
                 )
                 
                 if signal:
