@@ -87,7 +87,7 @@ class TestVerifierHub:
         assert hub.enabled is True
         assert hub.uncertainty_detector is not None
         assert hub.grounded_detector is not None
-        assert hub.nli_detector is None  # Not implemented yet (Month 4)
+        assert hub.nli_detector is not None  # Implemented in Month 4
         assert hub.self_agreement_detector is None  # Not implemented yet (Month 4)
     
     def test_initialization_disabled(self, sample_config_disabled):
@@ -112,8 +112,8 @@ class TestVerifierHub:
         assert status['enabled'] is True
         assert status['intrinsic'] is True
         assert status['grounded'] is True
-        assert status['nli'] is False  # Month 4
-        assert status['self_agreement'] is False  # Month 4
+        assert status['nli'] is True  # Implemented in Month 4
+        assert status['self_agreement'] is False  # Not implemented yet (Month 4)
     
     def test_get_detector_status_disabled(self, sample_config_disabled):
         """Test get_detector_status() with disabled hub."""
@@ -142,8 +142,13 @@ class TestVerifierHub:
         assert 'numbers' in signal.coverage
         assert 'tokens_overlap' in signal.coverage
         
-        # Check Month 4 signals are None (not implemented yet)
-        assert signal.nli is None
+        # Check Month 4 NLI signal is present (implemented)
+        assert signal.nli is not None
+        assert 'entailment' in signal.nli
+        assert 'neutral' in signal.nli
+        assert 'contradiction' in signal.nli
+        
+        # Check self-agreement is None (not implemented yet)
         assert signal.consistency == {'variance': None}
     
     def test_verify_claim_disabled(self, sample_config_disabled, sample_claim, sample_evidence, sample_metadata):

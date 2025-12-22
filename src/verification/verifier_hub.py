@@ -20,6 +20,7 @@ from src.utils.config import Config
 from src.utils.logger import setup_logger
 from src.verification.intrinsic_uncertainty import IntrinsicUncertaintyDetector
 from src.verification.retrieval_grounded import RetrievalGroundedDetector
+from src.verification.nli_detector import NLIDetector
 
 
 class VerifierHub:
@@ -99,8 +100,16 @@ class VerifierHub:
             self.grounded_detector = RetrievalGroundedDetector(config)
             self.logger.info("✓ RetrievalGroundedDetector initialized")
             
-            # Future: NLI and Self-Agreement detectors (Month 4)
-            self.nli_detector = None  # TODO: Initialize in Task 3
+            # Initialize NLI Detector (Month 4, Task 3)
+            try:
+                self.nli_detector = NLIDetector(config)
+                self.logger.info("✓ NLIDetector initialized")
+            except Exception as e:
+                self.logger.warning(f"NLIDetector initialization failed: {str(e)}")
+                self.logger.warning("Continuing without NLI detector")
+                self.nli_detector = None
+            
+            # Future: Self-Agreement detector (Month 4, Task 4)
             self.self_agreement_detector = None  # TODO: Initialize in Task 4
             
             self.logger.info("VerifierHub initialization complete")
@@ -245,8 +254,34 @@ class VerifierHub:
                     'tokens_overlap': 0.0
                 }
             
-            # Future: Compute NLI signal (Month 4, Task 3)
-            nli_signal = None  # TODO: self.nli_detector.compute_signal(claim, evidence)
+            # Compute NLI signal (Month 4, Task 3)
+            nli_signal = None
+            if self.nli_detector is not None:
+                try:
+                    nli_scores = self.nli_detector.detect(
+                        claim_text=claim.text,
+                        evidence_text=evidence.text
+                    )
+                    nli_signal = nli_scores  # Dict with entailment, neutral, contradiction
+                    self.logger.debug(
+                        f"NLI signal computed for claim {claim.claim_id}: "
+                        f"entailment={nli_signal.get('entailment', 0.0):.2f}, "
+                        f"contradiction={nli_signal.get('contradiction', 0.0):.2f}, "
+                        f"neutral={nli_signal.get('neutral', 0.0):.2f}"
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"NLIDetector failed for claim {claim.claim_id}: {str(e)}"
+                    )
+                    self.logger.debug(traceback.format_exc())
+                    # Use default fallback values (neutral)
+                    nli_signal = {
+                        'entailment': 0.33,
+                        'neutral': 0.34,
+                        'contradiction': 0.33
+                    }
+            else:
+                self.logger.debug("NLI detector not available, skipping NLI signal")
             
             # Future: Compute self-agreement signal (Month 4, Task 4)
             consistency_signal = {'variance': None}  # TODO: self.self_agreement_detector.compute_signal(...)
@@ -308,29 +343,48 @@ class VerifierHub:
                         claim, chunk, metadata
                     )
                     
+                    # Compute NLI signal if detector available
+                    nli_signal = None
+                    if self.nli_detector is not None:
+                        try:
+                            nli_signal = self.nli_detector.detect(
+                                claim_text=claim.text,
+                                evidence_text=chunk.text
+                            )
+                        except Exception as e:
+                            self.logger.warning(f"NLI detection failed for chunk: {str(e)}")
+                            nli_signal = {'entailment': 0.33, 'neutral': 0.34, 'contradiction': 0.33}
+                    
                     # Store per-chunk details
-                    per_chunk_signals.append({
+                    chunk_data = {
                         'doc_id': chunk.doc_id,
                         'sent_id': chunk.sent_id,
                         'coverage': grounded_signal,
                         'uncertainty': uncertainty_signal,
                         'citation_span_match': grounded_signal.get('tokens_overlap', 0.0),
                         'numeric_check': grounded_signal.get('numbers', 0.0) == 1.0
-                    })
+                    }
+                    if nli_signal is not None:
+                        chunk_data['nli'] = nli_signal
+                    
+                    per_chunk_signals.append(chunk_data)
                     
                 except Exception as e:
                     self.logger.warning(
                         f"Failed to compute signal for chunk {chunk.doc_id}#{chunk.sent_id}: {str(e)}"
                     )
                     # Add fallback values for failed chunk
-                    per_chunk_signals.append({
+                    fallback = {
                         'doc_id': chunk.doc_id,
                         'sent_id': chunk.sent_id,
                         'coverage': {'entities': 0.0, 'numbers': 0.0, 'tokens_overlap': 0.0},
                         'uncertainty': {'mean_entropy': 0.0},
                         'citation_span_match': 0.0,
                         'numeric_check': False
-                    })
+                    }
+                    if self.nli_detector is not None:
+                        fallback['nli'] = {'entailment': 0.33, 'neutral': 0.34, 'contradiction': 0.33}
+                    per_chunk_signals.append(fallback)
             
             # Aggregate signals
             if not per_chunk_signals:
@@ -347,7 +401,7 @@ class VerifierHub:
                 claim_id=claim.claim_id,
                 doc_id=top_chunk.doc_id,
                 sent_id=top_chunk.sent_id,
-                nli=None,  # Future: Task 3
+                nli=aggregated.get('nli', None),  # Task 3: Include aggregated NLI scores
                 coverage=aggregated['coverage'],
                 uncertainty=aggregated['uncertainty'],
                 consistency={'variance': None},  # Future: Task 4
@@ -392,9 +446,16 @@ class VerifierHub:
         citations = [s['citation_span_match'] for s in per_chunk_signals]
         numeric_checks = [s['numeric_check'] for s in per_chunk_signals]
         
+        # Extract NLI scores if available
+        nli_available = any('nli' in s for s in per_chunk_signals)
+        if nli_available:
+            entailments = [s.get('nli', {}).get('entailment', 0.33) for s in per_chunk_signals]
+            neutrals = [s.get('nli', {}).get('neutral', 0.33) for s in per_chunk_signals]
+            contradictions = [s.get('nli', {}).get('contradiction', 0.33) for s in per_chunk_signals]
+        
         if self.aggregation_method == 'max':
-            # Optimistic: best coverage, lowest uncertainty
-            return {
+            # Optimistic: best coverage, lowest uncertainty, highest entailment
+            result = {
                 'coverage': {
                     'entities': max(entities),
                     'numbers': max(numbers),
@@ -406,9 +467,16 @@ class VerifierHub:
                 'citation_span_match': max(citations),
                 'numeric_check': any(numeric_checks)  # True if any chunk has numeric match
             }
+            if nli_available:
+                result['nli'] = {
+                    'entailment': max(entailments),  # Best entailment
+                    'neutral': min(neutrals),  # Least neutral (most decisive)
+                    'contradiction': min(contradictions)  # Least contradiction
+                }
+            return result
         else:  # mean
             # Average all scores
-            return {
+            result = {
                 'coverage': {
                     'entities': sum(entities) / len(entities),
                     'numbers': sum(numbers) / len(numbers),
@@ -420,6 +488,13 @@ class VerifierHub:
                 'citation_span_match': sum(citations) / len(citations),
                 'numeric_check': sum(numeric_checks) / len(numeric_checks) >= 0.5  # True if majority match
             }
+            if nli_available:
+                result['nli'] = {
+                    'entailment': sum(entailments) / len(entailments),
+                    'neutral': sum(neutrals) / len(neutrals),
+                    'contradiction': sum(contradictions) / len(contradictions)
+                }
+            return result
     
     def is_enabled(self) -> bool:
         """

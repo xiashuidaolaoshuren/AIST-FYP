@@ -135,6 +135,19 @@ verification:
     
     # ROUGE method for token overlap calculation
     rouge_method: "rouge-l"
+  
+  # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
+  nli:
+    # Pre-trained NLI model from Hugging Face
+    # DeBERTa-v3-base fine-tuned on MNLI, FEVER, and ANLI datasets
+    model_name: "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"
+    
+    # Device for model inference (strictly use config value)
+    # Options: "cuda" (GPU), "cpu"
+    device: "cuda"
+    
+    # Batch size for inference (currently single-claim, prepared for future batching)
+    batch_size: 1
 
 # Checkpointing
 checkpointing:
