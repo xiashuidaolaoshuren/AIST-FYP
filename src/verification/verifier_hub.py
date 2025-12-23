@@ -21,6 +21,7 @@ from src.utils.logger import setup_logger
 from src.verification.intrinsic_uncertainty import IntrinsicUncertaintyDetector
 from src.verification.retrieval_grounded import RetrievalGroundedDetector
 from src.verification.nli_detector import NLIDetector
+from src.verification.self_agreement import SelfAgreementDetector
 
 
 class VerifierHub:
@@ -55,18 +56,20 @@ class VerifierHub:
         >>> print(f"Uncertainty: {signal.uncertainty['mean_entropy']:.3f}")
     """
     
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, generator=None):
         """
         Initialize the VerifierHub with all detectors.
         
         Args:
             config: Configuration object with verification settings
+            generator: Optional GeneratorWrapper for self-agreement detection
         
         Raises:
             ValueError: If config is invalid or missing required fields
             RuntimeError: If detector initialization fails
         """
         self.config = config
+        self.generator = generator
         self.logger = setup_logger(__name__)
         
         # Check if verification is enabled
@@ -109,8 +112,18 @@ class VerifierHub:
                 self.logger.warning("Continuing without NLI detector")
                 self.nli_detector = None
             
-            # Future: Self-Agreement detector (Month 4, Task 4)
-            self.self_agreement_detector = None  # TODO: Initialize in Task 4
+            # Initialize Self-Agreement Detector (Month 4, Task 4)
+            try:
+                if generator is not None:
+                    self.self_agreement_detector = SelfAgreementDetector(config, generator)
+                    self.logger.info("✓ SelfAgreementDetector initialized")
+                else:
+                    self.self_agreement_detector = None
+                    self.logger.warning("Generator not provided, Self-Agreement detector disabled")
+            except Exception as e:
+                self.logger.warning(f"SelfAgreementDetector initialization failed: {str(e)}")
+                self.logger.warning("Continuing without Self-Agreement detector")
+                self.self_agreement_detector = None
             
             self.logger.info("VerifierHub initialization complete")
             
@@ -283,8 +296,35 @@ class VerifierHub:
             else:
                 self.logger.debug("NLI detector not available, skipping NLI signal")
             
-            # Future: Compute self-agreement signal (Month 4, Task 4)
-            consistency_signal = {'variance': None}  # TODO: self.self_agreement_detector.compute_signal(...)
+            # Compute self-agreement signal (Month 4, Task 4)
+            consistency_signal = {'variance': None}
+            if self.self_agreement_detector is not None:
+                try:
+                    # Extract query from metadata
+                    query = metadata.get('original_query', None)
+                    if query:
+                        self.logger.debug(f"Computing self-agreement for claim {claim.claim_id}")
+                        sa_result = self.self_agreement_detector.detect(
+                            claim_text=claim.text,
+                            query=query,
+                            evidence_chunks=[evidence] if isinstance(evidence, EvidenceChunk) else evidence
+                        )
+                        consistency_signal = sa_result
+                        self.logger.debug(
+                            f"Self-agreement signal computed for claim {claim.claim_id}: "
+                            f"score={sa_result.get('score', 0.0):.3f}, "
+                            f"variance={sa_result.get('variance', 0.0):.3f}"
+                        )
+                    else:
+                        self.logger.warning(f"No original_query in metadata for claim {claim.claim_id}, skipping self-agreement")
+                except Exception as e:
+                    self.logger.error(
+                        f"SelfAgreementDetector failed for claim {claim.claim_id}: {str(e)}"
+                    )
+                    self.logger.debug(traceback.format_exc())
+                    consistency_signal = {'variance': None}
+            else:
+                self.logger.debug("Self-agreement detector not available, skipping consistency signal")
             
             # Construct VerifierSignal
             signal = VerifierSignal(

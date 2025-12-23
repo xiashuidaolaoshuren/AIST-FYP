@@ -148,6 +148,20 @@ verification:
     
     # Batch size for inference (currently single-claim, prepared for future batching)
     batch_size: 1
+  
+  # Self-Agreement Detector Configuration (Month 4, Task 4)
+  self_agreement:
+    # Sentence-transformer model for semantic similarity measurement
+    model_name: "sentence-transformers/all-MiniLM-L6-v2"
+    
+    # Number of stochastic samples to generate for consistency check
+    k_samples: 5
+    
+    # Temperature for stochastic sampling (higher = more diversity)
+    temperature: 1.5
+    
+    # Device for model inference
+    device: "cuda"
 
 # Checkpointing
 checkpointing:

@@ -68,7 +68,7 @@ class BaselineRAGPipeline:
         # Hub manages all verification detectors (Intrinsic, Grounded, and future NLI/Self-Agreement)
         if config and hasattr(config, 'verification') and hasattr(config.verification, 'enabled') and config.verification.enabled:
             try:
-                self.verifier_hub = VerifierHub(config)
+                self.verifier_hub = VerifierHub(config, generator)
                 self.verifier_enabled = True
                 self.logger.info("BaselineRAGPipeline initialized with VerifierHub enabled")
             except Exception as e:
@@ -160,6 +160,9 @@ class BaselineRAGPipeline:
             evidence_chunks=evidence_chunks,
             **gen_params
         )
+        
+        # Add original query to metadata for self-agreement detector
+        generation_output['original_query'] = query
         
         self.logger.info(
             f"Generated response: {len(generation_output['text'])} chars, "
