@@ -162,6 +162,10 @@ verification:
     
     # Device for model inference
     device: "cuda"
+    
+    # Aggregation method for multi-evidence consistency scores
+    # Options: "max" (optimistic), "mean" (average), "min" (pessimistic), "inherit" (use global aggregation_method)
+    aggregation_method: "inherit"
 
 # Checkpointing
 checkpointing:

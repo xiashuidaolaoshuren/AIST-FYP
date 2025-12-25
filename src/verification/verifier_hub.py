@@ -433,6 +433,29 @@ class VerifierHub:
             
             aggregated = self._aggregate_signals(per_chunk_signals)
             
+            # Compute self-agreement consistency (Task 4)
+            consistency_signal = {'variance': None}
+            if self.self_agreement_detector is not None:
+                try:
+                    query = metadata.get('original_query', None)
+                    if query:
+                        self.logger.debug(f"Computing self-agreement for claim {claim.claim_id} (multi-evidence)")
+                        sa_result = self.self_agreement_detector.detect(
+                            claim_text=claim.text,
+                            query=query,
+                            evidence_chunks=evidence_list
+                        )
+                        consistency_signal = sa_result
+                        self.logger.debug(
+                            f"Self-agreement computed: score={sa_result.get('score', 0.0):.3f}, "
+                            f"variance={sa_result.get('variance', 0.0):.3f}"
+                        )
+                    else:
+                        self.logger.warning(f"No original_query in metadata, skipping self-agreement")
+                except Exception as e:
+                    self.logger.error(f"Self-agreement failed: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            
             # Use the top-ranked chunk's identifiers for the aggregated signal
             top_chunk = evidence_list[0]
             
@@ -444,7 +467,7 @@ class VerifierHub:
                 nli=aggregated.get('nli', None),  # Task 3: Include aggregated NLI scores
                 coverage=aggregated['coverage'],
                 uncertainty=aggregated['uncertainty'],
-                consistency={'variance': None},  # Future: Task 4
+                consistency=consistency_signal,  # Task 4: Self-agreement consistency
                 citation_span_match=aggregated['citation_span_match'],
                 numeric_check=aggregated['numeric_check'],
                 per_chunk_signals=per_chunk_signals  # Store detailed breakdown
