@@ -65,31 +65,31 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 ### **Month 4: Verifier Module - Signal Implementation (Part 2)**
 
 -   **Team (Beginning of Month):**
-    -   [ ] Deliver First Term Presentation.
+    -   [x] Deliver First Term Presentation.
 
 -   **Member 1 (Research & Presentation Focus):**
     -   [ ] Research advanced NLI models and their application in fact-checking beyond the baseline DeBERTa model.
     -   [ ] Analyze different approaches to self-agreement and consistency checking (e.g., SelfCheckGPT variants).
     -   [ ] Consolidate findings from all four signals and prepare for the integration analysis.
 -   **Member 2 (Development & Experimentation Focus):**
-    -   [ ] **Architecture Refactoring:**
-        -   [ ] Implement `VerifierHub` class in `src/verification/verifier_hub.py` to centralize all detector orchestration.
-        -   [ ] Refactor `baseline_rag.py` to use VerifierHub instead of calling detectors directly.
-    -   [ ] **Evidence Strategy Enhancement:**
-        -   [ ] Extend verification from top-ranked evidence only to verify each claim against ALL evidence chunks.
-        -   [ ] Update VerifierHub to support both strategies via configuration flag (e.g., `verification.verify_all_evidence: bool`).
-        -   [ ] Implement signal aggregation when multiple signals per claim exist (e.g., max, mean, or weighted average).
-        -   [ ] Add performance optimization to avoid redundant detector calls if needed.
-        -   [ ] **Note:** Month 3 uses top-ranked evidence for all claims - this task extends to comprehensive verification.
-    -   [ ] **Zero-Shot NLI Contradiction Detector:**
-        -   [ ] Load the pre-trained `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` model from Hugging Face.
-        -   [ ] Implement a module that takes a (claim, evidence) pair and returns the probabilities for "entailment," "contradiction," and "neutral."
-    -   [ ] **Self-Agreement Detector:**
-        -   [ ] Implement a function to generate `k` different responses for the same query using stochastic sampling (e.g., temperature > 0).
-        -   [ ] Implement a module to measure the semantic consistency or claim variability across the `k` responses.
-    -   [ ] **Integration:**
-        -   [ ] Add NLI and self-consistency detectors to VerifierHub.
-        -   [ ] Update VerifierSignal construction to populate `nli` and `consistency` fields (currently None in Month 3).
+    -   [x] **Architecture Refactoring:**
+        -   [x] Implement `VerifierHub` class in `src/verification/verifier_hub.py` to centralize all detector orchestration.
+        -   [x] Refactor `baseline_rag.py` to use VerifierHub instead of calling detectors directly.
+    -   [x] **Evidence Strategy Enhancement:**
+        -   [x] Extend verification from top-ranked evidence only to verify each claim against ALL evidence chunks.
+        -   [x] Update VerifierHub to support both strategies via configuration flag (e.g., `verification.verify_all_evidence: bool`).
+        -   [x] Implement signal aggregation when multiple signals per claim exist (e.g., max, mean, or weighted average).
+        -   [x] Add performance optimization to avoid redundant detector calls if needed.
+        -   [x] **Note:** Month 3 uses top-ranked evidence for all claims - this task extends to comprehensive verification.
+    -   [x] **Zero-Shot NLI Contradiction Detector:**
+        -   [x] Load the pre-trained `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` model from Hugging Face.
+        -   [x] Implement a module that takes a (claim, evidence) pair and returns the probabilities for "entailment," "contradiction," and "neutral."
+    -   [x] **Self-Agreement Detector:**
+        -   [x] Implement a function to generate `k` different responses for the same query using stochastic sampling (e.g., temperature > 0).
+        -   [x] Implement a module to measure the semantic consistency or claim variability across the `k` responses.
+    -   [x] **Integration:**
+        -   [x] Add NLI and self-consistency detectors to VerifierHub.
+        -   [x] Update VerifierSignal construction to populate `nli` and `consistency` fields (currently None in Month 3).
 
 ---
 
@@ -119,7 +119,7 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] Set up an evaluation harness to run the full system on the `RAGTruth` and `CiteBench` benchmarks.
         -   [ ] Run the evaluation and collect the results.
         -   [ ] Calculate key metrics for the verifier (e.g., detection accuracy, precision, recall, F1-score).
-    -   [ ] **(Optional) Mitigation Strategies:**
+    -   [ ] **Mitigation Strategies:**
         -   [ ] If time permits, implement active mitigation logic based on verifier feedback.
         -   [ ] **Re-ranking:** Implement logic to re-order retrieved documents based on verification scores.
         -   [ ] **Re-prompting:** Implement a feedback loop to ask the LLM to self-correct when low confidence is detected.
