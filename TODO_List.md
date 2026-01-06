@@ -45,15 +45,15 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] Research and document best practices for implementing retrieval-grounded heuristics, analyzing trade-offs between different overlap metrics (e.g., lexical vs. semantic).
     -   [ ] Begin drafting the methodology section of the first term report.
 -   **Member 2 (Development & Experimentation Focus):**
-    -   [ ] **Intrinsic Uncertainty Detector:**
-        -   [ ] Implement a function to extract token-level logits/probabilities from the generator's output.
-        -   [ ] Implement a module to calculate token-level entropy and length-normalized perplexity for each claim.
-    -   [ ] **Retrieval-Grounded Heuristics:**
-        -   [ ] Implement an `evidence_coverage` function that calculates the percentage of named entities and noun phrases from a claim that appear in the evidence.
-        -   [ ] Implement a `citation_span_integrity` function that measures the token overlap between a claim and its direct citation.
-    -   [ ] **Integration:**
-        -   [ ] Integrate these two detectors into the main pipeline to process claims after generation.
-        -   [ ] Run initial tests to ensure signals are being generated correctly.
+    -   [x] **Intrinsic Uncertainty Detector:**
+        -   [x] Implement a function to extract token-level logits/probabilities from the generator's output.
+        -   [x] Implement a module to calculate token-level entropy and length-normalized perplexity for each claim.
+    -   [x] **Retrieval-Grounded Heuristics:**
+        -   [x] Implement an `evidence_coverage` function that calculates the percentage of named entities and noun phrases from a claim that appear in the evidence.
+        -   [x] Implement a `citation_span_integrity` function that measures the token overlap between a claim and its direct citation.
+    -   [x] **Integration:**
+        -   [x] Integrate these two detectors into the main pipeline to process claims after generation.
+        -   [x] Run initial tests to ensure signals are being generated correctly.
 -   **Team (End of Month):**
     -   [ ] **First Term Presentation Preparation:**
         -   [ ] Prepare presentation slides covering project introduction, literature review, system architecture, and progress to date.
@@ -65,31 +65,31 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 ### **Month 4: Verifier Module - Signal Implementation (Part 2)**
 
 -   **Team (Beginning of Month):**
-    -   [ ] Deliver First Term Presentation.
+    -   [x] Deliver First Term Presentation.
 
 -   **Member 1 (Research & Presentation Focus):**
     -   [ ] Research advanced NLI models and their application in fact-checking beyond the baseline DeBERTa model.
     -   [ ] Analyze different approaches to self-agreement and consistency checking (e.g., SelfCheckGPT variants).
     -   [ ] Consolidate findings from all four signals and prepare for the integration analysis.
 -   **Member 2 (Development & Experimentation Focus):**
-    -   [ ] **Architecture Refactoring:**
-        -   [ ] Implement `VerifierHub` class in `src/verification/verifier_hub.py` to centralize all detector orchestration.
-        -   [ ] Refactor `baseline_rag.py` to use VerifierHub instead of calling detectors directly.
-    -   [ ] **Evidence Strategy Enhancement:**
-        -   [ ] Extend verification from top-ranked evidence only to verify each claim against ALL evidence chunks.
-        -   [ ] Update VerifierHub to support both strategies via configuration flag (e.g., `verification.verify_all_evidence: bool`).
-        -   [ ] Implement signal aggregation when multiple signals per claim exist (e.g., max, mean, or weighted average).
-        -   [ ] Add performance optimization to avoid redundant detector calls if needed.
-        -   [ ] **Note:** Month 3 uses top-ranked evidence for all claims - this task extends to comprehensive verification.
-    -   [ ] **Zero-Shot NLI Contradiction Detector:**
-        -   [ ] Load the pre-trained `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` model from Hugging Face.
-        -   [ ] Implement a module that takes a (claim, evidence) pair and returns the probabilities for "entailment," "contradiction," and "neutral."
-    -   [ ] **Self-Agreement Detector:**
-        -   [ ] Implement a function to generate `k` different responses for the same query using stochastic sampling (e.g., temperature > 0).
-        -   [ ] Implement a module to measure the semantic consistency or claim variability across the `k` responses.
-    -   [ ] **Integration:**
-        -   [ ] Add NLI and self-consistency detectors to VerifierHub.
-        -   [ ] Update VerifierSignal construction to populate `nli` and `consistency` fields (currently None in Month 3).
+    -   [x] **Architecture Refactoring:**
+        -   [x] Implement `VerifierHub` class in `src/verification/verifier_hub.py` to centralize all detector orchestration.
+        -   [x] Refactor `baseline_rag.py` to use VerifierHub instead of calling detectors directly.
+    -   [x] **Evidence Strategy Enhancement:**
+        -   [x] Extend verification from top-ranked evidence only to verify each claim against ALL evidence chunks.
+        -   [x] Update VerifierHub to support both strategies via configuration flag (e.g., `verification.verify_all_evidence: bool`).
+        -   [x] Implement signal aggregation when multiple signals per claim exist (e.g., max, mean, or weighted average).
+        -   [x] Add performance optimization to avoid redundant detector calls if needed.
+        -   [x] **Note:** Month 3 uses top-ranked evidence for all claims - this task extends to comprehensive verification.
+    -   [x] **Zero-Shot NLI Contradiction Detector:**
+        -   [x] Load the pre-trained `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` model from Hugging Face.
+        -   [x] Implement a module that takes a (claim, evidence) pair and returns the probabilities for "entailment," "contradiction," and "neutral."
+    -   [x] **Self-Agreement Detector:**
+        -   [x] Implement a function to generate `k` different responses for the same query using stochastic sampling (e.g., temperature > 0).
+        -   [x] Implement a module to measure the semantic consistency or claim variability across the `k` responses.
+    -   [x] **Integration:**
+        -   [x] Add NLI and self-consistency detectors to VerifierHub.
+        -   [x] Update VerifierSignal construction to populate `nli` and `consistency` fields (currently None in Month 3).
 
 ---
 
@@ -110,17 +110,24 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] Implement an exporter to produce CiteEval System Evaluation JSON: `{id, query, passages:[{text,title?}], pred}`.
         -   [ ] Smoke test CiteEval in `Full` mode (no citations required), then `Cited` mode (with `[i]` markers).
         -   [ ] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
-    -   [ ] **Confidence UI Display:**
-        -   [ ] Implement a simple UI to visualize the confidence score for each generated claim.
     -   [ ] **Ragas Integration:**
         -   [ ] Integrate the Ragas framework into the evaluation pipeline.
         -   [ ] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
     -   [ ] **End-to-End Detector Evaluation:**
-        -   [ ] Set up an evaluation harness to run the full system on the `TruthfulQA` and `RAGTruth` benchmarks.
+        -   [ ] Set up an evaluation harness to run the full system on the `RAGTruth` and `CiteBench` benchmarks.
         -   [ ] Run the evaluation and collect the results.
         -   [ ] Calculate key metrics for the verifier (e.g., detection accuracy, precision, recall, F1-score).
-    -   [ ] **(Optional) Simple Mitigation:**
-        -   [ ] If time permits, implement a simple `Flagging` module that adds warnings to low-confidence or contradictory claims in the final output.
+    -   [ ] **Mitigation Strategies:**
+        -   [ ] If time permits, implement active mitigation logic based on verifier feedback.
+        -   [ ] **Re-ranking:** Implement logic to re-order retrieved documents based on verification scores.
+        -   [ ] **Re-prompting:** Implement a feedback loop to ask the LLM to self-correct when low confidence is detected.
+        -   [ ] **Filtering:** Implement a module to suppress or flag claims that are unsupported or contradictory.
+    -   [ ] **Confidence UI Display:**
+        -   [ ] Implement a lightweight web UI (e.g., Streamlit or Gradio) that runs on top of the existing demo pipeline.
+        -   [ ] Display the user query and final answer text, with inline color highlighting for each claim based on its verdict (e.g., green = Supported, yellow = Low Confidence, red = Contradictory).
+        -   [ ] Add a per-claim table view showing: short claim snippet, final verdict badge, overall confidence band, and key signal scores (entropy, entity/number coverage, NLI contradiction, self-agreement).
+        -   [ ] Provide a simple drill-down interaction (e.g., expandable row or details panel) to inspect full claim text, top evidence sentences, and the raw confidence_breakdown for debugging.
+        -   [ ] Normalize and bucket raw scores into interpretable ranges (e.g., 0–1 or 0–100% with High/Medium/Low labels) so the UI emphasizes qualitative bands rather than raw floats.
 
 ---
 

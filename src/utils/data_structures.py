@@ -121,6 +121,8 @@ class VerifierSignal:
         consistency: Self-agreement metrics (variance across samples)
         citation_span_match: Citation integrity score (0.0 to 1.0)
         numeric_check: Boolean indicating if numeric facts match
+        per_chunk_signals: Optional list of per-chunk signal details for multi-evidence verification
+                          Each entry contains {doc_id, sent_id, coverage, uncertainty, ...}
     """
     claim_id: str
     doc_id: str
@@ -131,6 +133,7 @@ class VerifierSignal:
     consistency: Dict[str, Optional[float]]  # {"variance": Optional[float]}
     citation_span_match: float
     numeric_check: bool
+    per_chunk_signals: Optional[List[Dict[str, Any]]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the dataclass to a dictionary."""

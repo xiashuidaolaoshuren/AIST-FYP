@@ -14,7 +14,7 @@ import time
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.pipelines.baseline_rag import BaselineRAGPipeline
 from src.utils.config import Config

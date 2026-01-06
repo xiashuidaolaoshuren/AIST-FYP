@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.retrieval import DenseRetriever
 from src.utils.data_structures import EvidenceChunk
@@ -22,7 +22,7 @@ class TestDenseRetriever:
     @pytest.fixture
     def retriever(self):
         """Create a DenseRetriever instance with development index."""
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         index_dir = project_root / 'data' / 'indexes' / 'development'
         
         retriever = DenseRetriever(
@@ -52,7 +52,7 @@ class TestDenseRetriever:
     
     def test_initialization_missing_metadata(self):
         """Test initialization with missing metadata file."""
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         index_dir = project_root / 'data' / 'indexes' / 'development'
         
         with pytest.raises(FileNotFoundError, match="Metadata not found"):

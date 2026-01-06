@@ -2,7 +2,7 @@
 Date: 2025-11-10
 
 ## Part 1: System Architecture Design Snippets
-![System Architecture Diagram](../../System_Architecture_Design%20_%20Mermaid%20Chart-2025-10-03-081957.png)
+![System Architecture Diagram](../../System_Architecture_Design%20_%20Mermaid%20Chart-2025-11-22-041757.png)
 
 ## Part 2: RAG Pipeline & Demo
 

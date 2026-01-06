@@ -99,6 +99,16 @@ verification:
   # Enable/disable verification module (default: false for backward compatibility)
   enabled: false
   
+  # Multi-evidence verification (Month 4, Task 2)
+  # If True, verify claims against ALL retrieved evidence chunks and aggregate results
+  # If False, verify only against top-ranked chunk (backward compatible)
+  verify_all_evidence: false
+  
+  # Aggregation method for multi-evidence verification
+  # "max": Optimistic - take best match (max coverage, min entropy)
+  # "mean": Average - mean of all scores
+  aggregation_method: "max"
+  
   # spaCy model for NER and noun phrase extraction
   spacy_model: "en_core_web_sm"
   
@@ -125,6 +135,37 @@ verification:
     
     # ROUGE method for token overlap calculation
     rouge_method: "rouge-l"
+  
+  # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
+  nli:
+    # Pre-trained NLI model from Hugging Face
+    # DeBERTa-v3-base fine-tuned on MNLI, FEVER, and ANLI datasets
+    model_name: "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"
+    
+    # Device for model inference (strictly use config value)
+    # Options: "cuda" (GPU), "cpu"
+    device: "cuda"
+    
+    # Batch size for inference (currently single-claim, prepared for future batching)
+    batch_size: 1
+  
+  # Self-Agreement Detector Configuration (Month 4, Task 4)
+  self_agreement:
+    # Sentence-transformer model for semantic similarity measurement
+    model_name: "sentence-transformers/all-MiniLM-L6-v2"
+    
+    # Number of stochastic samples to generate for consistency check
+    k_samples: 5
+    
+    # Temperature for stochastic sampling (higher = more diversity)
+    temperature: 1.5
+    
+    # Device for model inference
+    device: "cuda"
+    
+    # Aggregation method for multi-evidence consistency scores
+    # Options: "max" (optimistic), "mean" (average), "min" (pessimistic), "inherit" (use global aggregation_method)
+    aggregation_method: "inherit"
 
 # Checkpointing
 checkpointing:
