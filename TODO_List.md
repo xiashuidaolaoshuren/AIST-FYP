@@ -110,8 +110,6 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] Implement an exporter to produce CiteEval System Evaluation JSON: `{id, query, passages:[{text,title?}], pred}`.
         -   [ ] Smoke test CiteEval in `Full` mode (no citations required), then `Cited` mode (with `[i]` markers).
         -   [ ] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
-    -   [ ] **Confidence UI Display:**
-        -   [ ] Implement a simple UI to visualize the confidence score for each generated claim.
     -   [ ] **Ragas Integration:**
         -   [ ] Integrate the Ragas framework into the evaluation pipeline.
         -   [ ] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
@@ -124,6 +122,12 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] **Re-ranking:** Implement logic to re-order retrieved documents based on verification scores.
         -   [ ] **Re-prompting:** Implement a feedback loop to ask the LLM to self-correct when low confidence is detected.
         -   [ ] **Filtering:** Implement a module to suppress or flag claims that are unsupported or contradictory.
+    -   [ ] **Confidence UI Display:**
+        -   [ ] Implement a lightweight web UI (e.g., Streamlit or Gradio) that runs on top of the existing demo pipeline.
+        -   [ ] Display the user query and final answer text, with inline color highlighting for each claim based on its verdict (e.g., green = Supported, yellow = Low Confidence, red = Contradictory).
+        -   [ ] Add a per-claim table view showing: short claim snippet, final verdict badge, overall confidence band, and key signal scores (entropy, entity/number coverage, NLI contradiction, self-agreement).
+        -   [ ] Provide a simple drill-down interaction (e.g., expandable row or details panel) to inspect full claim text, top evidence sentences, and the raw confidence_breakdown for debugging.
+        -   [ ] Normalize and bucket raw scores into interpretable ranges (e.g., 0–1 or 0–100% with High/Medium/Low labels) so the UI emphasizes qualitative bands rather than raw floats.
 
 ---
 
