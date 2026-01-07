@@ -362,6 +362,62 @@ class TestSignalNormalizer:
         # Verify behavior changes with new threshold
         confidence = normalizer.normalize_entropy(3.0)
         assert abs(confidence - 0.5) < 0.01  # Should be at midpoint now
+    
+    # ==================== Additional Edge Cases ====================
+    
+    def test_normalize_entropy_overflow_error(self, normalizer):
+        """Test entropy normalization handles overflow error gracefully."""
+        # Extremely large value that might cause overflow
+        result = normalizer.normalize_entropy(1e308)
+        
+        # Should return valid value (either clipped or fallback)
+        assert 0.0 <= result <= 1.0
+    
+    def test_normalize_coverage_none_values_in_dict(self, normalizer):
+        """Test coverage normalization when dict contains None values."""
+        coverage_dict = {
+            'entities': None,
+            'numbers': 0.5,
+            'tokens_overlap': None
+        }
+        
+        result = normalizer.normalize_coverage(coverage_dict)
+        
+        # Should handle None values (treat as 0.0)
+        assert 0.0 <= result <= 1.0
+    
+    def test_normalize_nli_neutral_only(self, normalizer):
+        """Test NLI normalization when only neutral is present."""
+        nli_dict = {
+            'neutral': 1.0
+        }
+        
+        entail, contradict = normalizer.normalize_nli(nli_dict)
+        
+        # Should return neutral values
+        assert entail == 0.5
+        assert contradict == 0.5
+    
+    def test_normalize_nli_out_of_range_clamping(self, normalizer):
+        """Test NLI normalization clamps out-of-range values."""
+        nli_dict = {
+            'entail': 2.5,      # > 1.0
+            'contradict': -0.5,  # < 0.0
+            'neutral': 0.0
+        }
+        
+        entail, contradict = normalizer.normalize_nli(nli_dict)
+        
+        # Should clamp to [0, 1]
+        assert 0.0 <= entail <= 1.0
+        assert 0.0 <= contradict <= 1.0
+    
+    def test_normalize_entropy_negative_inf(self, normalizer):
+        """Test that negative infinity entropy returns 1.0 (impossible entropy)."""
+        result = normalizer.normalize_entropy(float('-inf'))
+        
+        # Negative infinity entropy is impossible, returns 1.0 confidence
+        assert result == 1.0
 
 
 if __name__ == '__main__':

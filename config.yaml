@@ -166,6 +166,43 @@ verification:
     # Aggregation method for multi-evidence consistency scores
     # Options: "max" (optimistic), "mean" (average), "min" (pessimistic), "inherit" (use global aggregation_method)
     aggregation_method: "inherit"
+  
+  # Rule-Based Aggregator Configuration (Month 5)
+  aggregator:
+    # Entropy normalization parameters (from SelfCheckGPT research)
+    # Entropy threshold: Value at sigmoid midpoint for uncertainty-to-confidence mapping
+    entropy_threshold: 2.0
+    
+    # K entropy: Sigmoid steepness parameter (higher = sharper transition)
+    k_entropy: 2.0
+    
+    # NLI thresholds for claim classification
+    # Contradiction threshold: Minimum NLI contradiction score to flag as contradictory
+    contradiction_threshold: 0.5
+    
+    # Entailment threshold: Minimum NLI entailment score required for "Supported" status
+    entailment_threshold: 0.7
+    
+    # Coverage threshold: Minimum coverage score required for "Supported" status
+    # (used in combination with entailment)
+    coverage_threshold: 0.6
+    
+    # Low confidence detection thresholds
+    # Entropy confidence threshold: Below this indicates high uncertainty
+    entropy_confidence_threshold: 0.4
+    
+    # Consistency confidence threshold: Below this indicates inconsistency
+    consistency_confidence_threshold: 0.4
+    
+    # Low coverage threshold: Below this indicates poor grounding
+    low_coverage_threshold: 0.3
+    
+    # Coverage weights for signal normalization
+    # These weights determine relative importance of different coverage metrics
+    coverage_weights:
+      entities: 0.4      # Named entity coverage (highest weight)
+      numbers: 0.3       # Numeric value coverage
+      tokens_overlap: 0.3  # Lexical token overlap (ROUGE-L)
 
 # Checkpointing
 checkpointing:

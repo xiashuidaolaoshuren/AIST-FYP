@@ -22,12 +22,14 @@ Reference:
 - Coverage weights: Based on empirical importance (entities > numbers > tokens)
 """
 
+import re
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 import warnings
 
 from src.utils.config import Config
 from src.utils.logger import setup_logger
+from src.utils.data_structures import VerifierSignal, ClaimDecision
 
 
 class SignalNormalizer:
@@ -399,3 +401,349 @@ class SignalNormalizer:
                 f"Error extracting NLI scores {nli_dict}: {e}, returning (0.5, 0.5)"
             )
             return (0.5, 0.5)
+
+
+class RuleBasedAggregator:
+    """
+    Applies hierarchical rules to classify claims as 'Supported', 'Contradictory', or 'Low Confidence'.
+    
+    This class combines all normalized verification signals to make final claim decisions
+    using a hierarchical rule system:
+    1. **Contradictory** (highest priority): High NLI contradiction OR numeric mismatch
+    2. **Supported** (medium priority): High NLI support AND good coverage
+    3. **Low Confidence** (fallback): Weak signals across multiple dimensions
+    
+    The aggregator produces ClaimDecision objects with:
+    - Status classification ('Supported', 'Contradictory', 'Low Confidence')
+    - Human-readable rationale explaining the decision
+    - Comprehensive confidence breakdown for transparency
+    
+    Attributes:
+        config: Configuration object
+        normalizer: SignalNormalizer instance for signal normalization
+        thresholds: Dictionary of classification thresholds
+        logger: Logger instance
+    
+    Example:
+        >>> config = Config()
+        >>> aggregator = RuleBasedAggregator(config)
+        >>> decision = aggregator.aggregate(verifier_signal)
+        >>> print(f"Status: {decision.status}")
+        >>> print(f"Rationale: {decision.rationale}")
+    """
+    
+    def __init__(self, config: Config):
+        """
+        Initialize the RuleBasedAggregator with config and normalizer.
+        
+        Loads all classification thresholds from config.verification.aggregator.
+        If not present, uses research-backed defaults.
+        
+        Args:
+            config: Configuration object with aggregator settings
+        """
+        self.config = config
+        self.logger = setup_logger(__name__)
+        
+        # Initialize SignalNormalizer
+        self.normalizer = SignalNormalizer(config)
+        
+        # Load classification thresholds
+        if (hasattr(config, 'verification') and 
+            hasattr(config.verification, 'aggregator')):
+            agg_config = config.verification.aggregator
+            
+            self.thresholds = {
+                'contradiction': float(getattr(agg_config, 'contradiction_threshold', 0.5)),
+                'entailment': float(getattr(agg_config, 'entailment_threshold', 0.7)),
+                'coverage': float(getattr(agg_config, 'coverage_threshold', 0.6)),
+                'entropy_conf': float(getattr(agg_config, 'entropy_confidence_threshold', 0.4)),
+                'consistency_conf': float(getattr(agg_config, 'consistency_confidence_threshold', 0.4)),
+                'low_coverage': float(getattr(agg_config, 'low_coverage_threshold', 0.3)),
+            }
+        else:
+            # Defaults from research (SelfCheckGPT, CiteEval)
+            self.thresholds = {
+                'contradiction': 0.5,
+                'entailment': 0.7,
+                'coverage': 0.6,
+                'entropy_conf': 0.4,
+                'consistency_conf': 0.4,
+                'low_coverage': 0.3,
+            }
+            self.logger.warning(
+                "No aggregator config found, using defaults: "
+                f"{self.thresholds}"
+            )
+        
+        self.logger.info(
+            f"RuleBasedAggregator initialized with thresholds: {self.thresholds}"
+        )
+    
+    def aggregate(self, signal: VerifierSignal) -> ClaimDecision:
+        """
+        Aggregate verification signals into final claim decision using hierarchical rules.
+        
+        Applies three-tier rule system:
+        1. **Rule 1 (Contradictory)**: NLI contradiction > threshold OR numeric mismatch
+        2. **Rule 2 (Supported)**: NLI support > threshold AND coverage > threshold
+        3. **Rule 3 (Low Confidence)**: Fallback when neither rule applies
+        
+        Args:
+            signal: VerifierSignal containing all detector outputs for the claim
+        
+        Returns:
+            ClaimDecision with status, rationale, and confidence breakdown
+        
+        Example:
+            >>> decision = aggregator.aggregate(signal)
+            >>> if decision.status == 'Contradictory':
+            ...     print(f"Warning: {decision.rationale}")
+        """
+        try:
+            # Step 1: Normalize all signals
+            entropy_conf = self.normalizer.normalize_entropy(
+                signal.uncertainty.get('mean_entropy')
+            )
+            consistency_conf = self.normalizer.normalize_consistency(
+                signal.consistency.get('variance')
+            )
+            coverage_score = self.normalizer.normalize_coverage(signal.coverage)
+            support_conf, contradict_conf = self.normalizer.normalize_nli(signal.nli)
+            
+            self.logger.debug(
+                f"Claim {signal.claim_id} normalized signals: "
+                f"entropy={entropy_conf:.3f}, consistency={consistency_conf:.3f}, "
+                f"coverage={coverage_score:.3f}, support={support_conf:.3f}, "
+                f"contradict={contradict_conf:.3f}"
+            )
+            
+            # Step 2: Apply hierarchical classification rules
+            status, rationale = self._apply_classification_rules(
+                signal, contradict_conf, support_conf, coverage_score,
+                entropy_conf, consistency_conf
+            )
+            
+            # Step 3: Compute confidence breakdown
+            confidence_breakdown = self._compute_confidence_breakdown(
+                status, support_conf, contradict_conf, coverage_score,
+                entropy_conf, consistency_conf
+            )
+            
+            # Step 4: Build evidence reference
+            primary_evidence = f"{signal.doc_id}#{signal.sent_id}"
+            signals_ref = [f"{signal.claim_id}_{signal.doc_id}_{signal.sent_id}"]
+            
+            # Step 5: Create ClaimDecision
+            decision = ClaimDecision(
+                claim_id=signal.claim_id,
+                status=status,
+                rationale=rationale,
+                primary_evidence=primary_evidence,
+                signals_ref=signals_ref,
+                confidence=confidence_breakdown
+            )
+            
+            self.logger.info(
+                f"Claim {signal.claim_id} classified as '{status}' "
+                f"with confidence {confidence_breakdown['overall_confidence']:.1f}"
+            )
+            
+            return decision
+        
+        except Exception as e:
+            self.logger.error(
+                f"Error aggregating signal for claim {signal.claim_id}: {e}",
+                exc_info=True
+            )
+            # Return safe fallback decision
+            return ClaimDecision(
+                claim_id=signal.claim_id,
+                status='Low Confidence',
+                rationale=f'Error during aggregation: {str(e)}',
+                primary_evidence=f"{signal.doc_id}#{signal.sent_id}",
+                signals_ref=[],
+                confidence={
+                    'support_prob': 0.5,
+                    'contradict_prob': 0.5,
+                    'coverage_score': 0.0,
+                    'entropy_conf': 0.0,
+                    'consistency_conf': 0.0,
+                    'overall_confidence': 0.0,
+                    'band': 'Low'
+                }
+            )
+    
+    def _apply_classification_rules(
+        self,
+        signal: VerifierSignal,
+        contradict_conf: float,
+        support_conf: float,
+        coverage_score: float,
+        entropy_conf: float,
+        consistency_conf: float
+    ) -> Tuple[str, str]:
+        """
+        Apply hierarchical classification rules to determine claim status.
+        
+        Rule Priority:
+        1. Contradictory: High contradiction OR numeric mismatch with numbers present
+        2. Supported: High support AND high coverage
+        3. Low Confidence: Everything else (fallback)
+        
+        Args:
+            signal: Original VerifierSignal
+            contradict_conf: Normalized contradiction confidence
+            support_conf: Normalized support confidence
+            coverage_score: Normalized coverage score
+            entropy_conf: Normalized entropy confidence
+            consistency_conf: Normalized consistency confidence
+        
+        Returns:
+            Tuple of (status: str, rationale: str)
+        """
+        # Rule 1: Contradictory Detection (highest priority)
+        # Check NLI contradiction
+        if contradict_conf > self.thresholds['contradiction']:
+            return (
+                'Contradictory',
+                f"High NLI contradiction detected ({contradict_conf:.2f} > "
+                f"{self.thresholds['contradiction']:.2f}). Evidence contradicts claim."
+            )
+        
+        # Check numeric mismatch (if claim contains numbers)
+        if self._has_numeric_claims(signal) and not signal.numeric_check:
+            return (
+                'Contradictory',
+                f"Numeric fact mismatch: Claim contains numbers but they don't match "
+                f"evidence (numeric_check=False)."
+            )
+        
+        # Rule 2: Supported Detection (medium priority)
+        if (support_conf > self.thresholds['entailment'] and 
+            coverage_score > self.thresholds['coverage']):
+            return (
+                'Supported',
+                f"Strong NLI support ({support_conf:.2f} > {self.thresholds['entailment']:.2f}) "
+                f"with high evidence coverage ({coverage_score:.2f} > "
+                f"{self.thresholds['coverage']:.2f}). Claim well-grounded."
+            )
+        
+        # Rule 3: Low Confidence (fallback)
+        # Build detailed rationale listing weak signals
+        reasons = []
+        
+        if entropy_conf < self.thresholds['entropy_conf']:
+            reasons.append(
+                f"high model uncertainty (entropy_conf={entropy_conf:.2f} < "
+                f"{self.thresholds['entropy_conf']:.2f})"
+            )
+        
+        if consistency_conf < self.thresholds['consistency_conf']:
+            reasons.append(
+                f"low consistency (consistency_conf={consistency_conf:.2f} < "
+                f"{self.thresholds['consistency_conf']:.2f})"
+            )
+        
+        if coverage_score < self.thresholds['low_coverage']:
+            reasons.append(
+                f"poor evidence coverage (coverage={coverage_score:.2f} < "
+                f"{self.thresholds['low_coverage']:.2f})"
+            )
+        
+        if support_conf <= self.thresholds['entailment']:
+            reasons.append(
+                f"weak NLI support (support={support_conf:.2f} <= "
+                f"{self.thresholds['entailment']:.2f})"
+            )
+        
+        if not reasons:
+            reasons.append(
+                "signals do not meet thresholds for 'Supported' classification"
+            )
+        
+        rationale = "Low confidence: " + "; ".join(reasons) + "."
+        
+        return ('Low Confidence', rationale)
+    
+    def _compute_confidence_breakdown(
+        self,
+        status: str,
+        support_conf: float,
+        contradict_conf: float,
+        coverage_score: float,
+        entropy_conf: float,
+        consistency_conf: float
+    ) -> Dict[str, float]:
+        """
+        Compute comprehensive confidence breakdown for transparency.
+        
+        Calculates:
+        - Individual signal confidences
+        - Overall confidence score (0-100 scale)
+        - Confidence band ('High', 'Medium', 'Low')
+        
+        Args:
+            status: Classification status
+            support_conf: Normalized support confidence
+            contradict_conf: Normalized contradiction confidence
+            coverage_score: Normalized coverage score
+            entropy_conf: Normalized entropy confidence
+            consistency_conf: Normalized consistency confidence
+        
+        Returns:
+            Dictionary with confidence metrics
+        """
+        # Compute overall confidence based on status
+        if status == 'Supported':
+            # Average of support and coverage, scaled to 0-100
+            overall = min(100.0, ((support_conf + coverage_score) / 2.0) * 100.0)
+        elif status == 'Contradictory':
+            # Contradiction confidence scaled to 0-100
+            overall = contradict_conf * 100.0
+        else:  # Low Confidence
+            # Neutral score
+            overall = 50.0
+        
+        # Determine confidence band
+        if contradict_conf > 0.7 or support_conf > 0.8:
+            band = 'High'
+        elif status == 'Low Confidence':
+            band = 'Low'
+        else:
+            band = 'Medium'
+        
+        return {
+            'support_prob': float(support_conf),
+            'contradict_prob': float(contradict_conf),
+            'coverage_score': float(coverage_score),
+            'entropy_conf': float(entropy_conf),
+            'consistency_conf': float(consistency_conf),
+            'overall_confidence': float(overall),
+            'band': band
+        }
+    
+    def _has_numeric_claims(self, signal: VerifierSignal) -> bool:
+        """
+        Check if the claim contains numeric values.
+        
+        Uses the coverage['numbers'] metric from RetrievalGroundedDetector,
+        which indicates the proportion of numbers in the claim. If > 0,
+        the claim contains numbers.
+        
+        Args:
+            signal: VerifierSignal to check
+        
+        Returns:
+            True if claim contains numbers, False otherwise
+        """
+        try:
+            # Check if numbers coverage exists and is > 0
+            numbers_coverage = signal.coverage.get('numbers', 0.0)
+            return numbers_coverage > 0.0
+        
+        except (AttributeError, KeyError, TypeError) as e:
+            self.logger.warning(
+                f"Error checking numeric claims for {signal.claim_id}: {e}"
+            )
+            return False
