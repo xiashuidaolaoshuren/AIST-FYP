@@ -167,6 +167,13 @@ verification:
     # Options: "max" (optimistic), "mean" (average), "min" (pessimistic), "inherit" (use global aggregation_method)
     aggregation_method: "inherit"
   
+  # Citation Formatter Configuration (Month 5)
+  citation:
+    # Maximum number of citations to add per claim
+    # Limits citation density to avoid cluttering the output
+    # Default: 3 (recommended for readability)
+    max_citations_per_claim: 3
+  
   # Rule-Based Aggregator Configuration (Month 5)
   aggregator:
     # Entropy normalization parameters (from SelfCheckGPT research)
