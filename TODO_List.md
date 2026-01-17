@@ -112,9 +112,9 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [ ] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
     -   [ ] **Ragas Integration:**
         -   [ ] Integrate the Ragas framework into the evaluation pipeline.
-        -   [ ] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
-    -   [ ] **End-to-End Detector Evaluation:**
-        -   [ ] Set up an evaluation harness to run the full system on the `RAGTruth` and `CiteBench` benchmarks.
+        -   [x] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
+    -   [x] **End-to-End Detector Evaluation:**
+        -   [x] Set up an evaluation harness to run the full system on the `RAGTruth` and `CiteBench` benchmarks.
         -   [ ] Run the evaluation and collect the results.
         -   [ ] Calculate key metrics for the verifier (e.g., detection accuracy, precision, recall, F1-score).
     -   [ ] **Mitigation Strategies:**

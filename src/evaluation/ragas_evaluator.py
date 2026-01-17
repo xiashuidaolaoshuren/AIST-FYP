@@ -51,7 +51,6 @@ try:
         AnswerRelevancy,
         ContextPrecision,
         ContextRecall,
-        ContextRelevance,
         AnswerCorrectness
     )
     from ragas.llms import LangchainLLMWrapper
@@ -59,7 +58,7 @@ try:
 except ImportError as e:
     raise ImportError(
         "Ragas dependencies not installed. "
-        "Please run: pip install ragas>=0.1.0 langchain-openai>=0.1.0"
+        "Please run: pip install ragas==0.1.17 langchain==0.2.16 langchain-openai>=0.1.0"
     ) from e
 
 
@@ -75,7 +74,6 @@ class RagasEvaluator:
         - AnswerRelevancy: Measures how relevant the answer is to the question
         - ContextPrecision: Measures how well retrieved contexts match ground truth
         - ContextRecall: Measures how much of ground truth is covered by contexts
-        - ContextRelevance: Measures relevance of retrieved contexts to question
         - AnswerCorrectness: Measures semantic and factual similarity to ground truth
     
     Configuration:
@@ -116,7 +114,6 @@ class RagasEvaluator:
         'answer_relevancy': AnswerRelevancy,
         'context_precision': ContextPrecision,
         'context_recall': ContextRecall,
-        'context_relevance': ContextRelevance,
         'answer_correctness': AnswerCorrectness
     }
     

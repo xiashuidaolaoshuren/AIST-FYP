@@ -249,11 +249,19 @@ logging:
 
 # Evaluation (for future use)
 evaluation:
-  # Benchmark datasets
+  # Benchmark datasets configuration
   benchmarks:
-    - "truthful_qa"
-    - "rag_truth"
-    - "fever"
+    # RAGTruth hallucination benchmark
+    ragtruth:
+      dataset_path: "benchmark/RAGTruth/dataset"
+      output_dir: "outputs/ragtruth_eval/"
+      batch_size: 10  # Process samples in batches for memory efficiency
+    
+    # Future benchmarks
+    truthful_qa:
+      enabled: false
+    fever:
+      enabled: false
   
-  # Evaluation batch size
+  # Evaluation batch size (default for all benchmarks)
   eval_batch_size: 8
