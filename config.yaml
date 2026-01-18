@@ -228,6 +228,38 @@ verification:
       numbers: 0.3       # Numeric value coverage
       tokens_overlap: 0.3  # Lexical token overlap (ROUGE-L)
 
+# Mitigation Strategies Configuration (Month 5)
+mitigation:
+  # Enable/disable mitigation module for independent evaluation
+  # Set to false to evaluate base system performance without mitigation
+  enabled: true
+  
+  # Evidence Re-Ranker Configuration
+  reranker:
+    # Enable/disable evidence re-ranking
+    enabled: true
+    
+    # Weight for retrieval score (semantic similarity from FAISS)
+    # Higher alpha prioritizes original retrieval quality
+    alpha: 0.6
+    
+    # Weight for verification score (coverage + NLI entailment)
+    # Higher beta prioritizes verification feedback
+    beta: 0.4
+    
+    # Fallback verification score when signal is missing
+    # Used for evidence chunks without verification signals
+    # 0.5 = neutral (neither good nor bad)
+    fallback_score: 0.5
+  
+  # Claim Filter Configuration
+  filter:
+    # Enable/disable claim filtering
+    enabled: true
+    
+    # Placeholder text for removed contradictory claims
+    placeholder: "[CLAIM REMOVED: Contradictory]"
+
 # Checkpointing
 checkpointing:
   # Save checkpoint every N chunks during embedding generation
