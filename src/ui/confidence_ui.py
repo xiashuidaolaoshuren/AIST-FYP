@@ -120,7 +120,8 @@ class ConfidenceUI:
                 
                 if not claim_evidence_pairs:
                     self.logger.warning("No claims extracted from answer")
-                    return [(answer_text, None)], pd.DataFrame()
+                    # Return empty DataFrame with proper columns
+                    return [(answer_text, None)], self._build_details_table([], [])
                 
                 # Extract evidence chunks from the first claim_evidence_pair
                 # All claims share the same evidence in baseline implementation
@@ -137,6 +138,15 @@ class ConfidenceUI:
                 # Since pipeline doesn't return claim objects directly, we need to re-extract them
                 from src.generation.claim_extractor import extract_claims
                 claims = extract_claims(answer_text, method='auto')
+                
+                self.logger.info(f"Re-extracted {len(claims)} claims for UI visualization")
+                
+                if len(claims) != len(claim_evidence_pairs):
+                    self.logger.warning(
+                        f"Mismatch in claim counts: Pipeline found {len(claim_evidence_pairs)}, "
+                        f"UI re-extraction found {len(claims)}. "
+                        "Highlighting alignment may be incorrect."
+                    )
                 
                 # Create mapping from claim_id in pairs to actual Claim objects
                 # Note: The claim_ids might not match, so we'll align by position
@@ -166,7 +176,7 @@ class ConfidenceUI:
                 
                 if not decisions:
                     self.logger.warning("No decisions generated")
-                    return [(answer_text, None)], pd.DataFrame()
+                    return [(answer_text, None)], self._build_details_table([], [])
                 
                 # Step 4: Build highlighted output
                 highlighted_text = self._build_highlighted_output(answer_text, claims, decisions)
@@ -361,7 +371,16 @@ class ConfidenceUI:
             
             rows.append(row)
         
-        df = pd.DataFrame(rows)
+        # Define columns explicitely to ensure headers are always present
+        columns = [
+            'Claim', 'Verdict', 'Confidence', 'Band', 
+            'NLI Entailment', 'NLI Contradiction', 'Coverage', 'Entropy Conf'
+        ]
+        
+        if not rows:
+            return pd.DataFrame(columns=columns)
+            
+        df = pd.DataFrame(rows, columns=columns)
         self.logger.debug(f"Built details table with {len(rows)} rows")
         
         return df

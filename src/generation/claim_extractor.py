@@ -85,6 +85,18 @@ def extract_claims_spacy(
         
         claims.append(claim)
     
+    # Fallback: If no claims extracted but text is not empty, treat whole text as one claim
+    if not claims and text.strip():
+        logger.info("No sentences detected by spaCy, falling back to whole text as claim")
+        claim = Claim(
+            claim_id=str(uuid.uuid4()),
+            answer_id=answer_id,
+            text=text.strip(),
+            answer_char_span=[0, len(text)],
+            extraction_method='spacy_fallback'
+        )
+        claims.append(claim)
+    
     logger.info(f"Extracted {len(claims)} claims using spaCy from {len(text)} chars")
     
     return claims
