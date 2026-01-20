@@ -2,11 +2,12 @@
 Build FAISS index from embeddings.
 
 This script loads pre-computed embeddings and builds a FAISS index for
-efficient similarity search. Supports different strategies (development, production)
+efficient similarity search. Supports different strategies (development, validation, production)
 and index types (FLAT, IVFFLAT, HNSW).
 
 Usage:
     python scripts/build_faiss_index.py --strategy development
+    python scripts/build_faiss_index.py --strategy validation
     python scripts/build_faiss_index.py --strategy production --index-type IVFFLAT --nlist 8192
 """
 
@@ -54,9 +55,9 @@ def main():
     parser.add_argument(
         '--strategy',
         type=str,
-        choices=['development', 'production'],
+        choices=['development', 'validation', 'production'],
         default='development',
-        help='Build strategy (development or production)'
+        help='Build strategy (development, validation, or production)'
     )
     parser.add_argument(
         '--index-type',
