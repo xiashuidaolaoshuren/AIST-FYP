@@ -135,6 +135,16 @@ verification:
     
     # ROUGE method for token overlap calculation
     rouge_method: "rouge-l"
+    
+    # Enhanced Entity Matching Configuration (Month 2 Enhancement)
+    matching:
+      # Enable Tier 2: Acronym extraction and matching
+      # Handles acronyms like USA, WHO, MIT, FBI with various punctuation styles
+      acronym_matching: true
+      
+      # Enable Tier 3: Dictionary-based alias matching
+      # Uses entity_aliases.py for canonical form and surface variation matching
+      alias_dictionary: true
   
   # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
   nli:
