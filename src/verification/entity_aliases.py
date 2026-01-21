@@ -33,7 +33,7 @@ ENTITY_ALIASES = {
     # -------------------------------------------------------------------------
     # Countries (ISO 3166 + Common Names) - Top 50 by frequency
     # -------------------------------------------------------------------------
-    "united states of america": ["usa", "u.s.a", "u.s.", "us", "united states", "america", "the states"],
+    "united states of america": ["usa", "u.s.a", "u.s.", "us", "united states", "the united states", "america", "the states"],
     "united kingdom": ["uk", "u.k.", "britain", "great britain", "england", "gb"],
     "people's republic of china": ["china", "prc", "mainland china", "中国"],
     "russian federation": ["russia", "russian", "россия"],
