@@ -97,7 +97,7 @@ generation:
 # Verification Configuration (Month 3)
 verification:
   # Enable/disable verification module (default: false for backward compatibility)
-  enabled: false
+  enabled: true
   
   # Multi-evidence verification (Month 4, Task 2)
   # If True, verify claims against ALL retrieved evidence chunks and aggregate results
@@ -232,7 +232,7 @@ verification:
 mitigation:
   # Enable/disable mitigation module for independent evaluation
   # Set to false to evaluate base system performance without mitigation
-  enabled: true
+  enabled: false
   
   # Evidence Re-Ranker Configuration
   reranker:

@@ -3,6 +3,7 @@ Demo script for Full Pipeline with Gradio UI.
 
 Launches the complete hallucination detection system with a web interface
 for interactive visualization of claim verification results.
+Supports multiple data strategies (development, validation, production).
 """
 
 import sys
@@ -16,6 +17,63 @@ from src.verification.rule_based_aggregator import RuleBasedAggregator
 from src.ui import ConfidenceUI
 from src.utils.config import Config
 from src.utils.logger import setup_logger
+
+
+def detect_available_strategies() -> list:
+    """
+    Detect which data strategies have available FAISS indices.
+    
+    Returns:
+        List of strategy names that have valid FAISS indices
+    """
+    strategies = ['development', 'validation', 'production']
+    available = []
+    
+    for strategy in strategies:
+        index_path = Path(f"data/indexes/{strategy}/faiss.index")
+        if index_path.exists():
+            available.append(strategy)
+            print(f"  ✓ {strategy.upper()}: FAISS index found at {index_path}")
+        else:
+            print(f"  ✗ {strategy.upper()}: No FAISS index at {index_path}")
+    
+    return available
+
+
+def ask_user_to_choose_strategy(strategies: list) -> str:
+    """
+    Ask user to choose a strategy from available options.
+    
+    Args:
+        strategies: List of available strategy names
+    
+    Returns:
+        Chosen strategy name
+    """
+    print("\n" + "=" * 80)
+    print("STRATEGY SELECTION")
+    print("=" * 80)
+    print(f"\nAvailable strategies: {', '.join([s.upper() for s in strategies])}\n")
+    
+    for i, strategy in enumerate(strategies, 1):
+        print(f"  {i}. {strategy.upper()}")
+    
+    while True:
+        try:
+            choice = input("\nChoose a strategy (enter number): ").strip()
+            choice_idx = int(choice) - 1
+            
+            if 0 <= choice_idx < len(strategies):
+                chosen = strategies[choice_idx]
+                print(f"\n✓ Selected: {chosen.upper()}")
+                return chosen
+            else:
+                print(f"Invalid choice. Please enter a number between 1 and {len(strategies)}")
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user")
+            sys.exit(0)
 
 
 def main():
@@ -34,13 +92,37 @@ def main():
     print("=" * 80)
     print()
     
-    logger = setup_logger(__name__)
+    # Step 0: Detect available strategies
+    print("🔍 Detecting available FAISS indices...\n")
+    available_strategies = detect_available_strategies()
+    
+    if not available_strategies:
+        print("\n❌ ERROR: No FAISS indices found!")
+        print("\nPlease ensure you have created indices for at least one strategy:")
+        print("  1. python scripts/prepare_wikipedia_chunks.py")
+        print("  2. python scripts/generate_embeddings.py")
+        print("  3. python scripts/build_faiss_index.py")
+        return
+    
+    # Step 0.5: Ask user to choose strategy if multiple available
+    if len(available_strategies) == 1:
+        strategy = available_strategies[0]
+        print(f"\n✓ Only one strategy available, using: {strategy.upper()}")
+    else:
+        strategy = ask_user_to_choose_strategy(available_strategies)
     
     # Step 1: Load configuration
-    print("📋 Loading configuration...")
+    print("\n📋 Loading configuration...")
     try:
         config = Config("config.yaml")
         print("✓ Configuration loaded successfully\n")
+        
+        if 'aggregator' not in config.get('verification', {}):
+            print("\n⚠️  WARNING: verification.aggregator section missing in config.yaml")
+            print("   The full pipeline requires aggregator configuration.")
+            return
+        
+        print("✓ Verification configuration validated\n")
     except Exception as e:
         print(f"❌ ERROR loading configuration: {e}")
         print("\nPlease ensure config.yaml exists in the project root.")
@@ -57,7 +139,7 @@ def main():
     try:
         pipeline = BaselineRAGPipeline.from_config(
             config_path="config.yaml",
-            strategy="development"
+            strategy=strategy
         )
         print("✓ RAG Pipeline initialized successfully\n")
     except FileNotFoundError as e:
@@ -119,6 +201,8 @@ def main():
     print("=" * 80)
     print("🚀 LAUNCHING WEB INTERFACE")
     print("=" * 80)
+    print()
+    print(f"Data Strategy: {strategy.upper()}")
     print()
     print("The interface will open in your browser at:")
     print("   http://localhost:7860")
