@@ -7,6 +7,8 @@ Supports multiple data strategies (development, validation, production).
 """
 
 import sys
+import json
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -17,6 +19,85 @@ from src.verification.rule_based_aggregator import RuleBasedAggregator
 from src.ui import ConfidenceUI
 from src.utils.config import Config
 from src.utils.logger import setup_logger
+
+
+class LoggingUIWrapper:
+    """
+    Wrapper around ConfidenceUI to log all queries and results to JSON.
+    """
+    def __init__(self, ui: ConfidenceUI, log_filepath: str):
+        self.ui = ui
+        self.log_filepath = log_filepath
+        self.query_logs = []
+        
+    def create_interface(self):
+        """Create Gradio interface with logging wrapper."""
+        demo = self.ui.create_interface()
+        
+        # Wrap the process_query function to intercept calls
+        original_fn = demo.fns[0].fn  # Get the original process_query function
+        
+        def logged_process_query(query, *args, **kwargs):
+            # Call original function
+            result = original_fn(query, *args, **kwargs)
+            
+            # Log the query and metadata only (exclude HTML output)
+            log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "query": query,
+                "metadata": result[1] if len(result) > 1 else None
+            }
+            self.query_logs.append(log_entry)
+            
+            return result
+        
+        # Replace the function
+        demo.fns[0].fn = logged_process_query
+        return demo
+    
+    def _serialize_obj(self, obj):
+        """Convert non-serializable objects to serializable format."""
+        import pandas as pd
+        
+        if isinstance(obj, pd.DataFrame):
+            return obj.to_dict(orient='records')
+        elif isinstance(obj, pd.Series):
+            return obj.to_dict()
+        elif hasattr(obj, '__dict__'):
+            return str(obj)
+        elif isinstance(obj, dict):
+            return {k: self._serialize_obj(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._serialize_obj(item) for item in obj]
+        else:
+            return obj
+    
+    def save_logs(self):
+        """Save accumulated logs to JSON file."""
+        try:
+            output_dir = Path("outputs")
+            output_dir.mkdir(exist_ok=True)
+            
+            # Serialize all objects in logs to JSON-compatible format
+            serialized_logs = []
+            for log_entry in self.query_logs:
+                serialized_entry = {
+                    "timestamp": log_entry["timestamp"],
+                    "query": log_entry["query"],
+                    "result": {
+                        "html_output": log_entry["result"]["html_output"],
+                        "metadata": self._serialize_obj(log_entry["result"]["metadata"])
+                    }
+                }
+                serialized_logs.append(serialized_entry)
+            
+            with open(self.log_filepath, 'w', encoding='utf-8') as f:
+                json.dump(serialized_logs, f, indent=2, ensure_ascii=False)
+            
+            print(f"\n✓ Query logs saved to: {self.log_filepath}")
+            print(f"   Total queries logged: {len(self.query_logs)}")
+        except Exception as e:
+            print(f"\n⚠️  Warning: Could not save logs: {e}")
 
 
 def detect_available_strategies() -> list:
@@ -181,16 +262,23 @@ def main():
         traceback.print_exc()
         return
     
-    # Step 5: Create ConfidenceUI
-    print("🎨 Creating Gradio UI...")
+    # Step 5: Create ConfidenceUI with logging
+    print("🎨 Creating Gradio UI with logging...")
     try:
         ui = ConfidenceUI(
             rag_pipeline=pipeline,
             verifier_hub=verifier_hub,
             aggregator=aggregator
         )
-        demo = ui.create_interface()
-        print("✓ Gradio UI created successfully\n")
+        
+        # Wrap UI with logging functionality
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filepath = f"outputs/full_pipeline_queries_{timestamp}.json"
+        logging_ui = LoggingUIWrapper(ui, log_filepath)
+        demo = logging_ui.create_interface()
+        
+        print("✓ Gradio UI created successfully")
+        print(f"✓ Query logging enabled -> {log_filepath}\n")
     except Exception as e:
         print(f"❌ ERROR creating UI: {e}")
         import traceback
@@ -225,10 +313,15 @@ def main():
         )
     except KeyboardInterrupt:
         print("\n\n👋 Shutting down...")
+        logging_ui.save_logs()
     except Exception as e:
         print(f"\n❌ ERROR launching UI: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Save logs on any exit
+        if 'logging_ui' in locals():
+            logging_ui.save_logs()
 
 
 if __name__ == "__main__":
