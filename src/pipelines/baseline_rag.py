@@ -80,6 +80,64 @@ class BaselineRAGPipeline:
             self.verifier_enabled = False
             self.logger.info("BaselineRAGPipeline initialized (verification disabled)")
     
+    def _split_query_by_questions(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Split input query by question marks into sub-questions.
+        
+        Each question mark followed by optional whitespace is treated as a boundary.
+        Returns a list of sub-question dictionaries.
+        
+        Args:
+            query: User's input query (potentially multi-question)
+        
+        Returns:
+            List of dicts with keys:
+                - text: Sub-question text
+                - sub_query_id: Sequential ID (0, 1, 2, ...)
+        
+        Example:
+            >>> query = "What is AI? How does it work?"
+            >>> result = self._split_query_by_questions(query)
+            >>> len(result)
+            2
+            >>> result[0]['text']
+            'What is AI?'
+        """
+        import re
+        
+        if not query or not query.strip():
+            return [{'text': '', 'sub_query_id': 0}]
+        
+        # Pattern: match text ending with '?' (optionally followed by whitespace)
+        pattern = r'[^?]+\?'
+        matches = list(re.finditer(pattern, query))
+        
+        if not matches:
+            # No question marks found, return entire query as single sub-question
+            return [{
+                'text': query.strip(),
+                'sub_query_id': 0
+            }]
+        
+        sub_queries = []
+        for idx, match in enumerate(matches):
+            sub_text = match.group(0).strip()
+            if sub_text:
+                sub_queries.append({
+                    'text': sub_text,
+                    'sub_query_id': idx
+                })
+        
+        # If no valid sub-queries extracted, return whole query
+        if not sub_queries:
+            sub_queries = [{
+                'text': query.strip(),
+                'sub_query_id': 0
+            }]
+        
+        self.logger.debug(f"Split query into {len(sub_queries)} sub-questions")
+        return sub_queries
+    
     def run(
         self,
         query: str,
@@ -93,14 +151,16 @@ class BaselineRAGPipeline:
         Run the complete RAG pipeline on a query.
         
         Executes the following steps:
-        1. Retrieve top-k evidence chunks using DenseRetriever
-        2. Generate response with metadata using GeneratorWrapper
-        3. Extract atomic claims from generated text
-        4. Create ClaimEvidencePair objects pairing claims with evidence
-        5. Format output matching System_Architecture_Design.md specification
+        1. Split query into sub-questions (if multiple questions present)
+        2. For each sub-question:
+           a. Retrieve top-k evidence chunks using DenseRetriever
+           b. Generate response with metadata using GeneratorWrapper
+           c. Extract atomic claims from generated text
+        3. Create ClaimEvidencePair objects pairing claims with evidence
+        4. Format output matching System_Architecture_Design.md specification
         
         Args:
-            query: User's input question
+            query: User's input question (can be multiple questions)
             top_k: Number of evidence chunks to retrieve (default: 5)
             max_new_tokens: Max tokens to generate (uses config if None)
             temperature: Sampling temperature (uses config if None)
@@ -110,35 +170,25 @@ class BaselineRAGPipeline:
         Returns:
             Dictionary containing:
                 - query: Original query string
-                - draft_response: Generated text response
+                - draft_response: Combined generated text response
+                - sub_answers: List of sub-answer dicts
+                - claims_by_sub_answer: Claims grouped by sub-answer
                 - claim_evidence_pairs: List of ClaimEvidencePair dicts
                 - generator_metadata: Full metadata from generation (for Month 3)
                 - retrieval_metadata: Metadata about retrieved evidence
         
         Example:
-            >>> result = pipeline.run("What is machine learning?", top_k=3)
+            >>> result = pipeline.run("What is machine learning? How does it work?", top_k=3)
             >>> print(result['draft_response'])
-            >>> for pair in result['claim_evidence_pairs']:
-            ...     print(f"Claim: {pair['claim_id']}")
-            ...     print(f"Evidence: {pair['top_evidence']}")
+            >>> print(f"Sub-answers: {len(result['sub_answers'])}")
         """
         self.logger.info(f"Running RAG pipeline for query: {query[:50]}...")
         
-        # Step 1: Retrieve evidence
-        self.logger.debug(f"Retrieving top-{top_k} evidence chunks")
-        evidence_chunks = self.retriever.retrieve(query, top_k=top_k)
+        # Step 0: Split query into sub-questions
+        sub_queries = self._split_query_by_questions(query)
+        self.logger.info(f"Split into {len(sub_queries)} sub-question(s)")
         
-        if not evidence_chunks:
-            self.logger.warning("No evidence retrieved for query")
-        else:
-            self.logger.info(
-                f"Retrieved {len(evidence_chunks)} evidence chunks, "
-                f"top score: {evidence_chunks[0].score_dense:.4f}"
-            )
-        
-        # Step 2: Generate response with metadata
-        # Use config values if not explicitly provided
-        gen_params = {}
+        # Prepare generation parameters
         if self.config:
             gen_params = {
                 'max_new_tokens': max_new_tokens or self.config.generation.max_new_tokens,
@@ -154,80 +204,122 @@ class BaselineRAGPipeline:
                 'do_sample': do_sample if do_sample is not None else True
             }
         
-        self.logger.debug(f"Generating response with params: {gen_params}")
-        generation_output = self.generator.generate_with_metadata(
-            prompt=query,
-            evidence_chunks=evidence_chunks,
-            **gen_params
-        )
-        
-        # Add original query to metadata for self-agreement detector
-        generation_output['original_query'] = query
-        
-        self.logger.info(
-            f"Generated response: {len(generation_output['text'])} chars, "
-            f"{len(generation_output['tokens'])} tokens, "
-            f"{len(generation_output.get('sub_answers', []))} sub-answers"
-        )
-        
-        # Step 3: Extract claims from generated text
-        # Process each sub-answer separately to get claims per sub-answer
-        self.logger.debug("Extracting claims from sub-answers")
-        sub_answers = generation_output.get('sub_answers', [])
-        
-        # Fallback to single answer if sub_answers is empty or not present
-        if not sub_answers:
-            sub_answers = [{'text': generation_output['text'], 'char_span': [0, len(generation_output['text'])], 'sub_answer_id': 0}]
-        
+        # Process each sub-question separately
+        all_sub_answers = []
+        all_claims_by_sub_answer = []
         all_claims = []
-        claims_by_sub_answer = []  # Track which claims belong to which sub-answer
+        combined_response_parts = []
+        all_evidence_chunks = []  # Track all evidence for final metadata
         
-        for sub_ans in sub_answers:
-            sub_text = sub_ans['text']
-            sub_char_span = sub_ans['char_span']
-            sub_id = sub_ans['sub_answer_id']
+        for sub_query_data in sub_queries:
+            sub_query_text = sub_query_data['text']
+            sub_query_id = sub_query_data['sub_query_id']
             
-            # Extract claims from this sub-answer
-            sub_claims = extract_claims(
-                text=sub_text,
-                method='auto'  # Use auto method selection (spaCy if available, else regex)
+            self.logger.info(f"Processing sub-question {sub_query_id + 1}: {sub_query_text[:50]}...")
+            
+            # Step 1: Retrieve evidence for this sub-question
+            self.logger.debug(f"Retrieving top-{top_k} evidence chunks")
+            evidence_chunks = self.retriever.retrieve(sub_query_text, top_k=top_k)
+            
+            if not evidence_chunks:
+                self.logger.warning(f"No evidence retrieved for sub-question {sub_query_id}")
+            else:
+                self.logger.info(
+                    f"Retrieved {len(evidence_chunks)} evidence chunks, "
+                    f"top score: {evidence_chunks[0].score_dense:.4f}"
+                )
+            
+            # Track evidence for metadata
+            all_evidence_chunks.extend(evidence_chunks)
+            
+            # Step 2: Generate response for this sub-question
+            self.logger.debug(f"Generating response with params: {gen_params}")
+            generation_output = self.generator.generate_with_metadata(
+                prompt=sub_query_text,
+                evidence_chunks=evidence_chunks,
+                **gen_params
             )
             
-            # Adjust claim char spans to be relative to full answer text
+            # Add original sub-query to metadata
+            generation_output['original_query'] = sub_query_text
+            
+            generated_text = generation_output['text']
+            self.logger.info(
+                f"Generated response for sub-question {sub_query_id + 1}: "
+                f"{len(generated_text)} chars, {len(generation_output['tokens'])} tokens"
+            )
+            
+            # Step 3: Extract claims from this sub-answer
+            self.logger.debug(f"Extracting claims from sub-answer {sub_query_id}")
+            sub_claims = extract_claims(
+                text=generated_text,
+                method='auto'
+            )
+            
+            self.logger.info(f"Extracted {len(sub_claims)} claims from sub-answer {sub_query_id}")
+            
+            # Calculate char span for this sub-answer in combined response
+            char_start = len(' '.join(combined_response_parts) + (' ' if combined_response_parts else ''))
+            combined_response_parts.append(generated_text)
+            char_end = len(' '.join(combined_response_parts))
+            
+            # Adjust claim char spans to be relative to combined response
             for claim in sub_claims:
-                # Offset char span by sub-answer start position
                 original_span = claim.answer_char_span
                 claim.answer_char_span = [
-                    original_span[0] + sub_char_span[0],
-                    original_span[1] + sub_char_span[0]
+                    original_span[0] + char_start,
+                    original_span[1] + char_start
                 ]
             
-            claims_by_sub_answer.append({
-                'sub_answer_id': sub_id,
-                'sub_text': sub_text,
+            # Store sub-answer data
+            sub_answer_dict = {
+                'text': generated_text,
+                'char_span': [char_start, char_end],
+                'sub_answer_id': sub_query_id,
+                'sub_query': sub_query_text
+            }
+            all_sub_answers.append(sub_answer_dict)
+            
+            # Store claims for this sub-answer
+            claims_by_sub_answer_dict = {
+                'sub_answer_id': sub_query_id,
+                'sub_text': generated_text,
+                'sub_query': sub_query_text,
                 'claims': sub_claims
-            })
+            }
+            all_claims_by_sub_answer.append(claims_by_sub_answer_dict)
+            
             all_claims.extend(sub_claims)
         
-        self.logger.info(f"Extracted {len(all_claims)} claims from {len(sub_answers)} sub-answers")
+        # Combine all responses
+        combined_response = ' '.join(combined_response_parts)
+        
+        self.logger.info(
+            f"Combined response: {len(combined_response)} chars, "
+            f"{len(all_sub_answers)} sub-answers, {len(all_claims)} total claims"
+        )
+        self.logger.info(
+            f"Combined response: {len(combined_response)} chars, "
+            f"{len(all_sub_answers)} sub-answers, {len(all_claims)} total claims"
+        )
         
         # Step 4: Create claim-evidence pairs
-        # Baseline: Pair each claim with all retrieved evidence
-        # Month 3 verifier will do more sophisticated claim-evidence matching
+        # For multi-question: use evidence from the corresponding sub-question
+        # For now, use all evidence chunks combined (can be refined later)
         claim_evidence_pairs = []
         
         for claim in all_claims:
-            # Create evidence candidate IDs in format "doc_id#sent_id"
+            # Create evidence candidate IDs from all evidence
             evidence_candidates = [
                 f"{chunk.doc_id}#{chunk.sent_id}"
-                for chunk in evidence_chunks
+                for chunk in all_evidence_chunks[:top_k]  # Use top_k from first retrieval
             ]
             
-            # Top evidence is the first (highest-ranked) chunk
+            # Top evidence is the first chunk
             top_evidence = evidence_candidates[0] if evidence_candidates else ""
             
             # Convert evidence chunks to dicts for serialization
-            evidence_spans = [chunk.to_dict() for chunk in evidence_chunks]
+            evidence_spans = [chunk.to_dict() for chunk in all_evidence_chunks[:top_k]]
             
             # Create ClaimEvidencePair
             pair = ClaimEvidencePair(
@@ -243,63 +335,77 @@ class BaselineRAGPipeline:
             )
         
         # Step 4.5: Compute verifier signals (Month 3+ functionality)
-        # Uses VerifierHub to orchestrate all verification detectors
-        # Month 3: IntrinsicUncertaintyDetector + RetrievalGroundedDetector
-        # Month 4: + NLI + Self-Agreement (managed by hub)
-        # Task 2: Multi-evidence verification with aggregation
+        # For multi-question, verify claims with their corresponding evidence
         verifier_signals = []
-        if self.verifier_enabled and evidence_chunks:
+        if self.verifier_enabled and all_evidence_chunks:
             self.logger.debug("Computing verifier signals via VerifierHub")
             
             # Read verify_all_evidence flag from hub configuration
             verify_all = self.verifier_hub.verify_all_evidence
             
+            # Use evidence from first sub-question for now (can be refined)
+            evidence_for_verification = all_evidence_chunks[:top_k]
+            
             for claim, pair in zip(all_claims, claim_evidence_pairs):
                 # Choose evidence: all chunks or top-1 based on config
                 if verify_all:
-                    # Multi-evidence verification (Task 2)
-                    evidence_input = evidence_chunks
+                    evidence_input = evidence_for_verification
                     self.logger.debug(
-                        f"Multi-evidence verification for claim {claim.claim_id}: {len(evidence_chunks)} chunks"
+                        f"Multi-evidence verification for claim {claim.claim_id}: "
+                        f"{len(evidence_for_verification)} chunks"
                     )
                 else:
-                    # Single-chunk verification (backward compatible)
-                    evidence_input = evidence_chunks[0]
-                    self.logger.debug(
-                        f"Single-chunk verification for claim {claim.claim_id}"
-                    )
+                    evidence_input = evidence_for_verification[0] if evidence_for_verification else None
+                    self.logger.debug(f"Single-chunk verification for claim {claim.claim_id}")
                 
-                # Call VerifierHub to compute all signals
-                signal = self.verifier_hub.verify_claim(
-                    claim, evidence_input, generation_output
-                )
-                
-                if signal:
-                    verifier_signals.append(signal.to_dict())
-                else:
-                    self.logger.warning(
-                        f"VerifierHub returned None for claim {claim.claim_id}, skipping signal"
+                if evidence_input:
+                    # Create minimal metadata for verification
+                    verification_metadata = {
+                        'text': combined_response,
+                        'original_query': query,
+                        'tokens': [],
+                        'scores': []
+                    }
+                    
+                    # Call VerifierHub to compute all signals
+                    signal = self.verifier_hub.verify_claim(
+                        claim, evidence_input, verification_metadata
                     )
+                    
+                    if signal:
+                        verifier_signals.append(signal.to_dict())
+                    else:
+                        self.logger.warning(
+                            f"VerifierHub returned None for claim {claim.claim_id}, skipping signal"
+                        )
             
             self.logger.info(f"Computed {len(verifier_signals)} verifier signals via VerifierHub")
-        elif self.verifier_enabled and not evidence_chunks:
+        elif self.verifier_enabled and not all_evidence_chunks:
             self.logger.warning(
                 "Verification enabled but no evidence retrieved - skipping verifier signals"
             )
         
         # Step 5: Format output
+        # Get unique evidence doc_ids for metadata
+        unique_evidence_doc_ids = list(dict.fromkeys([chunk.doc_id for chunk in all_evidence_chunks[:top_k * len(sub_queries)]]))
+        
         output = {
             'query': query,
-            'draft_response': generation_output['text'],
-            'sub_answers': sub_answers,  # New: list of sub-answer dicts
-            'claims_by_sub_answer': claims_by_sub_answer,  # New: claims grouped by sub-answer
+            'draft_response': combined_response,
+            'sub_answers': all_sub_answers,
+            'claims_by_sub_answer': all_claims_by_sub_answer,
             'claim_evidence_pairs': [pair.to_dict() for pair in claim_evidence_pairs],
-            'generator_metadata': generation_output,
+            'generator_metadata': {
+                'text': combined_response,
+                'sub_answers': all_sub_answers,
+                'original_query': query,
+                'num_sub_questions': len(sub_queries)
+            },
             'retrieval_metadata': {
                 'top_k': top_k,
-                'num_retrieved': len(evidence_chunks),
-                'top_score': evidence_chunks[0].score_dense if evidence_chunks else 0.0,
-                'evidence_doc_ids': [chunk.doc_id for chunk in evidence_chunks]
+                'num_retrieved': len(all_evidence_chunks[:top_k * len(sub_queries)]),
+                'top_score': all_evidence_chunks[0].score_dense if all_evidence_chunks else 0.0,
+                'evidence_doc_ids': unique_evidence_doc_ids[:10]  # Limit to top 10 for display
             }
         }
         
@@ -308,8 +414,8 @@ class BaselineRAGPipeline:
             output['verifier_signals'] = verifier_signals
         
         self.logger.info(
-            f"Pipeline complete: {len(all_claims)} claims from {len(sub_answers)} sub-answers, "
-            f"{len(evidence_chunks)} evidence chunks"
+            f"Pipeline complete: {len(all_claims)} claims from {len(all_sub_answers)} sub-answers, "
+            f"{len(all_evidence_chunks)} evidence chunks"
         )
         
         return output
