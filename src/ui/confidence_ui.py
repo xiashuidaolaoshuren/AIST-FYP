@@ -115,6 +115,8 @@ class ConfidenceUI:
                 result = self.rag_pipeline.run(query, top_k=5)
                 
                 answer_text = result['draft_response']
+                sub_answers = result.get('sub_answers', [])
+                claims_by_sub_answer = result.get('claims_by_sub_answer', [])
                 claim_evidence_pairs = result.get('claim_evidence_pairs', [])
                 metadata = result.get('generator_metadata', {})
                 
@@ -132,29 +134,28 @@ class ConfidenceUI:
                     for span in evidence_spans:
                         evidence_chunks.append(EvidenceChunk(**span))
                 
-                self.logger.info(f"Extracted {len(claim_evidence_pairs)} claims from answer")
+                self.logger.info(
+                    f"Extracted {len(claim_evidence_pairs)} claims from "
+                    f"{len(sub_answers)} sub-answers"
+                )
                 
-                # Step 2: Extract claims from answer text using claim extractor
-                # Since pipeline doesn't return claim objects directly, we need to re-extract them
-                from src.generation.claim_extractor import extract_claims
-                claims = extract_claims(answer_text, method='auto')
+                # Step 2: Collect all claims from claims_by_sub_answer
+                all_claims = []
+                for sub_ans_data in claims_by_sub_answer:
+                    all_claims.extend(sub_ans_data['claims'])
                 
-                self.logger.info(f"Re-extracted {len(claims)} claims for UI visualization")
+                self.logger.info(f"Collected {len(all_claims)} claims for verification")
                 
-                if len(claims) != len(claim_evidence_pairs):
+                if len(all_claims) != len(claim_evidence_pairs):
                     self.logger.warning(
-                        f"Mismatch in claim counts: Pipeline found {len(claim_evidence_pairs)}, "
-                        f"UI re-extraction found {len(claims)}. "
-                        "Highlighting alignment may be incorrect."
+                        f"Mismatch in claim counts: Pipeline collected {len(all_claims)}, "
+                        f"claim_evidence_pairs has {len(claim_evidence_pairs)}. "
+                        "Alignment may be incorrect."
                     )
-                
-                # Create mapping from claim_id in pairs to actual Claim objects
-                # Note: The claim_ids might not match, so we'll align by position
-                claim_map = {claim.claim_id: claim for claim in claims}
                 
                 # Step 3: Verify and aggregate each claim
                 decisions = []
-                for i, (claim, pair) in enumerate(zip(claims, claim_evidence_pairs)):
+                for i, (claim, pair) in enumerate(zip(all_claims, claim_evidence_pairs)):
                     # Verify claim using VerifierHub
                     signal = self.verifier_hub.verify_claim(
                         claim,
@@ -178,11 +179,13 @@ class ConfidenceUI:
                     self.logger.warning("No decisions generated")
                     return [(answer_text, None)], self._build_details_table([], [])
                 
-                # Step 4: Build highlighted output
-                highlighted_text = self._build_highlighted_output(answer_text, claims, decisions)
+                # Step 4: Build highlighted output with sub-answer headers
+                highlighted_text = self._build_highlighted_output_with_headers(
+                    answer_text, sub_answers, claims_by_sub_answer, decisions
+                )
                 
                 # Step 5: Build details table
-                details_df = self._build_details_table(claims, decisions)
+                details_df = self._build_details_table(all_claims, decisions)
                 
                 self.logger.info(f"Successfully processed query with {len(decisions)} decisions")
                 
@@ -231,6 +234,89 @@ class ConfidenceUI:
         
         self.logger.info("Gradio interface created successfully")
         return demo
+    
+    def _build_highlighted_output_with_headers(
+        self,
+        answer_text: str,
+        sub_answers: List[Dict],
+        claims_by_sub_answer: List[Dict],
+        decisions: List[ClaimDecision]
+    ) -> List[Tuple[str, Optional[str]]]:
+        """
+        Build highlighted text output with sub-answer headers.
+        
+        Inserts headers like "Sub-Answer 1:" before each sub-answer's claims,
+        making it clear which claims belong to which part of a multi-question response.
+        
+        Args:
+            answer_text: The full generated answer text
+            sub_answers: List of sub-answer dicts with text and char_span
+            claims_by_sub_answer: List of dicts with sub_answer_id and claims
+            decisions: List of ClaimDecision objects with statuses
+        
+        Returns:
+            List of (text, label) tuples for Gradio HighlightedText component
+        """
+        # Create a mapping from claim_id to decision
+        decision_map = {d.claim_id: d for d in decisions}
+        
+        # Build tokens with headers per sub-answer
+        tokens = []
+        
+        for idx, sub_ans_data in enumerate(claims_by_sub_answer):
+            sub_id = sub_ans_data['sub_answer_id']
+            sub_text = sub_ans_data['sub_text']
+            sub_claims = sub_ans_data['claims']
+            
+            # Add header for this sub-answer (if multiple sub-answers)
+            if len(claims_by_sub_answer) > 1:
+                header = f"[Sub-Answer {sub_id + 1}] "
+                tokens.append((header, None))
+            
+            # Sort claims within this sub-answer by position
+            sorted_items = []
+            for claim in sub_claims:
+                if claim.claim_id in decision_map:
+                    sorted_items.append((
+                        claim.answer_char_span[0],
+                        claim.answer_char_span[1],
+                        decision_map[claim.claim_id].status
+                    ))
+            
+            sorted_items.sort(key=lambda x: x[0])
+            
+            # Build highlighted segments for this sub-answer
+            if not sorted_items:
+                # No claims with decisions, just add the text unlabeled
+                tokens.append((sub_text, None))
+            else:
+                # Get the char_span of the sub-answer relative to full text
+                sub_start = sub_answers[idx]['char_span'][0]
+                sub_end = sub_answers[idx]['char_span'][1]
+                
+                current_pos = sub_start
+                
+                for start, end, status in sorted_items:
+                    # Add text before the claim (unlabeled)
+                    if current_pos < start:
+                        tokens.append((answer_text[current_pos:start], None))
+                    
+                    # Add the claim text with its status label
+                    claim_text = answer_text[start:end]
+                    tokens.append((claim_text, status))
+                    
+                    current_pos = end
+                
+                # Add any remaining text in this sub-answer
+                if current_pos < sub_end:
+                    tokens.append((answer_text[current_pos:sub_end], None))
+            
+            # Add spacing between sub-answers
+            if idx < len(claims_by_sub_answer) - 1:
+                tokens.append((" ", None))
+        
+        self.logger.debug(f"Built highlighted output with {len(tokens)} segments and headers")
+        return tokens
     
     def _build_highlighted_output(
         self,

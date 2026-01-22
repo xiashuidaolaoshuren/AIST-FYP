@@ -166,24 +166,57 @@ class BaselineRAGPipeline:
         
         self.logger.info(
             f"Generated response: {len(generation_output['text'])} chars, "
-            f"{len(generation_output['tokens'])} tokens"
+            f"{len(generation_output['tokens'])} tokens, "
+            f"{len(generation_output.get('sub_answers', []))} sub-answers"
         )
         
         # Step 3: Extract claims from generated text
-        self.logger.debug("Extracting claims from generated text")
-        claims = extract_claims(
-            text=generation_output['text'],
-            method='auto'  # Use auto method selection (spaCy if available, else regex)
-        )
+        # Process each sub-answer separately to get claims per sub-answer
+        self.logger.debug("Extracting claims from sub-answers")
+        sub_answers = generation_output.get('sub_answers', [])
         
-        self.logger.info(f"Extracted {len(claims)} claims")
+        # Fallback to single answer if sub_answers is empty or not present
+        if not sub_answers:
+            sub_answers = [{'text': generation_output['text'], 'char_span': [0, len(generation_output['text'])], 'sub_answer_id': 0}]
+        
+        all_claims = []
+        claims_by_sub_answer = []  # Track which claims belong to which sub-answer
+        
+        for sub_ans in sub_answers:
+            sub_text = sub_ans['text']
+            sub_char_span = sub_ans['char_span']
+            sub_id = sub_ans['sub_answer_id']
+            
+            # Extract claims from this sub-answer
+            sub_claims = extract_claims(
+                text=sub_text,
+                method='auto'  # Use auto method selection (spaCy if available, else regex)
+            )
+            
+            # Adjust claim char spans to be relative to full answer text
+            for claim in sub_claims:
+                # Offset char span by sub-answer start position
+                original_span = claim.answer_char_span
+                claim.answer_char_span = [
+                    original_span[0] + sub_char_span[0],
+                    original_span[1] + sub_char_span[0]
+                ]
+            
+            claims_by_sub_answer.append({
+                'sub_answer_id': sub_id,
+                'sub_text': sub_text,
+                'claims': sub_claims
+            })
+            all_claims.extend(sub_claims)
+        
+        self.logger.info(f"Extracted {len(all_claims)} claims from {len(sub_answers)} sub-answers")
         
         # Step 4: Create claim-evidence pairs
         # Baseline: Pair each claim with all retrieved evidence
         # Month 3 verifier will do more sophisticated claim-evidence matching
         claim_evidence_pairs = []
         
-        for claim in claims:
+        for claim in all_claims:
             # Create evidence candidate IDs in format "doc_id#sent_id"
             evidence_candidates = [
                 f"{chunk.doc_id}#{chunk.sent_id}"
@@ -221,7 +254,7 @@ class BaselineRAGPipeline:
             # Read verify_all_evidence flag from hub configuration
             verify_all = self.verifier_hub.verify_all_evidence
             
-            for claim, pair in zip(claims, claim_evidence_pairs):
+            for claim, pair in zip(all_claims, claim_evidence_pairs):
                 # Choose evidence: all chunks or top-1 based on config
                 if verify_all:
                     # Multi-evidence verification (Task 2)
@@ -258,6 +291,8 @@ class BaselineRAGPipeline:
         output = {
             'query': query,
             'draft_response': generation_output['text'],
+            'sub_answers': sub_answers,  # New: list of sub-answer dicts
+            'claims_by_sub_answer': claims_by_sub_answer,  # New: claims grouped by sub-answer
             'claim_evidence_pairs': [pair.to_dict() for pair in claim_evidence_pairs],
             'generator_metadata': generation_output,
             'retrieval_metadata': {
@@ -273,7 +308,7 @@ class BaselineRAGPipeline:
             output['verifier_signals'] = verifier_signals
         
         self.logger.info(
-            f"Pipeline complete: {len(claims)} claims, "
+            f"Pipeline complete: {len(all_claims)} claims from {len(sub_answers)} sub-answers, "
             f"{len(evidence_chunks)} evidence chunks"
         )
         

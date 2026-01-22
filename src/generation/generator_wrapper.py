@@ -8,7 +8,7 @@ capturing token-level logits and scores for downstream verifier modules.
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 import numpy as np
 
 from src.utils.data_structures import EvidenceChunk
@@ -118,6 +118,82 @@ class GeneratorWrapper:
         
         except Exception as e:
             raise ValueError(f"Failed to load model: {e}")
+    
+    def _split_by_question_marks(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Split generated text by question marks into sub-answers.
+        
+        Each question mark followed by whitespace is treated as a boundary.
+        Returns a list of sub-answer dictionaries with text and character spans.
+        
+        Args:
+            text: Generated answer text to split
+        
+        Returns:
+            List of dicts with keys:
+                - text: Sub-answer text
+                - char_span: [start, end] positions in original text
+                - sub_answer_id: Sequential ID (0, 1, 2, ...)
+        
+        Example:
+            >>> text = "AI is machine intelligence. How does it work? It uses algorithms."
+            >>> result = self._split_by_question_marks(text)
+            >>> len(result)
+            2
+            >>> result[0]['text']
+            'AI is machine intelligence. How does it work?'
+        """
+        import re
+        
+        if not text or not text.strip():
+            return [{'text': '', 'char_span': [0, 0], 'sub_answer_id': 0}]
+        
+        # Pattern: match text ending with '?' (optionally followed by whitespace)
+        # This keeps the '?' as part of each sub-answer
+        pattern = r'[^?]+\?'
+        matches = list(re.finditer(pattern, text))
+        
+        if not matches:
+            # No question marks found, return entire text as single sub-answer
+            return [{
+                'text': text.strip(),
+                'char_span': [0, len(text)],
+                'sub_answer_id': 0
+            }]
+        
+        sub_answers = []
+        last_end = 0
+        
+        for idx, match in enumerate(matches):
+            sub_text = text[last_end:match.end()].strip()
+            if sub_text:
+                sub_answers.append({
+                    'text': sub_text,
+                    'char_span': [last_end, match.end()],
+                    'sub_answer_id': idx
+                })
+            last_end = match.end()
+        
+        # Handle remaining text after last '?'
+        if last_end < len(text):
+            remaining = text[last_end:].strip()
+            if remaining:
+                sub_answers.append({
+                    'text': remaining,
+                    'char_span': [last_end, len(text)],
+                    'sub_answer_id': len(sub_answers)
+                })
+        
+        # If no valid sub-answers extracted, return whole text
+        if not sub_answers:
+            sub_answers = [{
+                'text': text.strip(),
+                'char_span': [0, len(text)],
+                'sub_answer_id': 0
+            }]
+        
+        self.logger.debug(f"Split text into {len(sub_answers)} sub-answers")
+        return sub_answers
     
     def _format_prompt(
         self,
@@ -298,9 +374,13 @@ class GeneratorWrapper:
         # Extract evidence usage
         evidence_used = [chunk.doc_id for chunk in evidence_chunks]
         
+        # Split generated text by question marks into sub-answers
+        sub_answers = self._split_by_question_marks(generated_text)
+        
         # Create metadata dictionary
         metadata = {
-            'text': generated_text,
+            'text': generated_text,  # Legacy: single string for backward compatibility
+            'sub_answers': sub_answers,  # New: list of sub-answer dicts
             'prompt_text': formatted_prompt,
             'tokens': generated_tokens,
             'token_ids': token_ids,
@@ -319,7 +399,8 @@ class GeneratorWrapper:
         
         self.logger.info(
             f"Generated {len(generated_tokens)} tokens, "
-            f"text length: {len(generated_text)} chars"
+            f"text length: {len(generated_text)} chars, "
+            f"split into {len(sub_answers)} sub-answers"
         )
         
         return metadata
