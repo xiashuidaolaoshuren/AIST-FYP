@@ -148,14 +148,24 @@ class SelfAgreementDetector:
                 )
                 
                 generated_text = result['text']
-                samples.append(generated_text)
-                self.logger.debug(f"Sample {i+1}/{k}: {generated_text[:50]}...")
+                
+                # Skip empty samples (can happen with high temperature)
+                if generated_text and generated_text.strip():
+                    samples.append(generated_text)
+                    self.logger.debug(f"Sample {i+1}/{k}: {generated_text[:50]}...")
+                else:
+                    self.logger.warning(f"Sample {i+1}/{k} is empty, skipping")
                 
             except Exception as e:
                 self.logger.error(f"Failed to generate sample {i+1}/{k}: {e}")
-                raise RuntimeError(f"Generation failed for sample {i+1}: {e}")
+                # Don't raise, just skip this sample
+                continue
         
-        self.logger.debug(f"Successfully generated {len(samples)} samples")
+        # Validate we have at least some samples
+        if len(samples) == 0:
+            raise RuntimeError(f"All {k} generation attempts produced empty samples")
+        
+        self.logger.debug(f"Successfully generated {len(samples)}/{k} valid samples")
         return samples
     
     def measure_consistency(
@@ -201,11 +211,6 @@ class SelfAgreementDetector:
         
         if not samples or len(samples) == 0:
             raise ValueError("samples list cannot be empty")
-        
-        # Check for empty samples
-        for i, sample in enumerate(samples):
-            if not sample or not sample.strip():
-                raise ValueError(f"Sample {i} is empty")
         
         self.logger.debug(f"Measuring consistency between original and {len(samples)} samples")
         

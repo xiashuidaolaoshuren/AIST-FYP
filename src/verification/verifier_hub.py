@@ -319,7 +319,8 @@ class VerifierHub:
                         self.logger.warning(f"No original_query in metadata for claim {claim.claim_id}, skipping self-agreement")
                 except Exception as e:
                     self.logger.error(
-                        f"SelfAgreementDetector failed for claim {claim.claim_id}: {str(e)}"
+                        "SelfAgreementDetector failed for claim %s: %s",
+                        claim.claim_id, str(e)
                     )
                     self.logger.debug(traceback.format_exc())
                     consistency_signal = {'variance': None}
