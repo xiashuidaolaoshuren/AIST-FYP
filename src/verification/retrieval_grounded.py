@@ -146,6 +146,19 @@ class RetrievalGroundedDetector:
                 f"Claim {claim.claim_id}: entities={entities_score:.2f}, "
                 f"numbers={numbers_score:.2f}, tokens_overlap={overlap_score:.2f}"
             )
+
+            self.logger.info(
+                "detector_retrieval_grounded",
+                extra={
+                    "event": "detector_retrieval_grounded",
+                    "data": {
+                        "claim_id": claim.claim_id,
+                        "entities": entities_score,
+                        "numbers": numbers_score,
+                        "tokens_overlap": overlap_score
+                    }
+                }
+            )
             
             return {
                 'entities': entities_score,

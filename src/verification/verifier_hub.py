@@ -235,6 +235,16 @@ class VerifierHub:
                     f"Uncertainty signal computed for claim {claim.claim_id}: "
                     f"mean_entropy={uncertainty_signal.get('mean_entropy', 0.0):.3f}"
                 )
+                self.logger.info(
+                    "verifier_uncertainty",
+                    extra={
+                        "event": "verifier_uncertainty",
+                        "data": {
+                            "claim_id": claim.claim_id,
+                            "mean_entropy": uncertainty_signal.get('mean_entropy', 0.0)
+                        }
+                    }
+                )
             except Exception as e:
                 self.logger.error(
                     f"IntrinsicUncertaintyDetector failed for claim {claim.claim_id}: {str(e)}"
@@ -254,6 +264,18 @@ class VerifierHub:
                     f"entities={grounded_signal.get('entities', 0.0):.2f}, "
                     f"numbers={grounded_signal.get('numbers', 0.0):.2f}, "
                     f"tokens={grounded_signal.get('tokens_overlap', 0.0):.2f}"
+                )
+                self.logger.info(
+                    "verifier_grounded",
+                    extra={
+                        "event": "verifier_grounded",
+                        "data": {
+                            "claim_id": claim.claim_id,
+                            "entities": grounded_signal.get('entities', 0.0),
+                            "numbers": grounded_signal.get('numbers', 0.0),
+                            "tokens_overlap": grounded_signal.get('tokens_overlap', 0.0)
+                        }
+                    }
                 )
             except Exception as e:
                 self.logger.error(
@@ -281,6 +303,18 @@ class VerifierHub:
                         f"entailment={nli_signal.get('entailment', 0.0):.2f}, "
                         f"contradiction={nli_signal.get('contradiction', 0.0):.2f}, "
                         f"neutral={nli_signal.get('neutral', 0.0):.2f}"
+                    )
+                    self.logger.info(
+                        "verifier_nli",
+                        extra={
+                            "event": "verifier_nli",
+                            "data": {
+                                "claim_id": claim.claim_id,
+                                "entailment": nli_signal.get('entailment', 0.0),
+                                "contradiction": nli_signal.get('contradiction', 0.0),
+                                "neutral": nli_signal.get('neutral', 0.0)
+                            }
+                        }
                     )
                 except Exception as e:
                     self.logger.error(
@@ -314,6 +348,18 @@ class VerifierHub:
                             f"Self-agreement signal computed for claim {claim.claim_id}: "
                             f"score={sa_result.get('score', 0.0):.3f}, "
                             f"variance={sa_result.get('variance', 0.0):.3f}"
+                        )
+                        self.logger.info(
+                            "verifier_self_agreement",
+                            extra={
+                                "event": "verifier_self_agreement",
+                                "data": {
+                                    "claim_id": claim.claim_id,
+                                    "score": sa_result.get('score', None),
+                                    "variance": sa_result.get('variance', None),
+                                    "samples_generated": sa_result.get('samples_generated', None)
+                                }
+                            }
                         )
                     else:
                         self.logger.warning(f"No original_query in metadata for claim {claim.claim_id}, skipping self-agreement")

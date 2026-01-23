@@ -318,6 +318,18 @@ class SelfAgreementDetector:
             
             # Measure consistency
             consistency_result = self.measure_consistency(claim_text, samples)
+
+            self.logger.info(
+                "detector_self_agreement",
+                extra={
+                    "event": "detector_self_agreement",
+                    "data": {
+                        "score": consistency_result.get('consistency_score', None),
+                        "variance": consistency_result.get('variance', None),
+                        "samples_generated": len(samples)
+                    }
+                }
+            )
             
             # Return formatted result for VerifierHub
             return {

@@ -183,10 +183,29 @@ class BaselineRAGPipeline:
             >>> print(f"Sub-answers: {len(result['sub_answers'])}")
         """
         self.logger.info(f"Running RAG pipeline for query: {query[:50]}...")
+        self.logger.info(
+            "rag_run_start",
+            extra={
+                "event": "rag_run_start",
+                "data": {
+                    "query_length": len(query) if query else 0,
+                    "top_k": top_k
+                }
+            }
+        )
         
         # Step 0: Split query into sub-questions
         sub_queries = self._split_query_by_questions(query)
         self.logger.info(f"Split into {len(sub_queries)} sub-question(s)")
+        self.logger.info(
+            "rag_query_split",
+            extra={
+                "event": "rag_query_split",
+                "data": {
+                    "num_sub_questions": len(sub_queries)
+                }
+            }
+        )
         
         # Prepare generation parameters
         if self.config:
@@ -228,6 +247,18 @@ class BaselineRAGPipeline:
                     f"Retrieved {len(evidence_chunks)} evidence chunks, "
                     f"top score: {evidence_chunks[0].score_dense:.4f}"
                 )
+
+            self.logger.info(
+                "rag_retrieval_result",
+                extra={
+                    "event": "rag_retrieval_result",
+                    "data": {
+                        "sub_query_id": sub_query_id,
+                        "retrieved_count": len(evidence_chunks),
+                        "top_score": evidence_chunks[0].score_dense if evidence_chunks else None
+                    }
+                }
+            )
             
             # Track evidence for metadata
             all_evidence_chunks.extend(evidence_chunks)
@@ -248,6 +279,17 @@ class BaselineRAGPipeline:
                 f"Generated response for sub-question {sub_query_id + 1}: "
                 f"{len(generated_text)} chars, {len(generation_output['tokens'])} tokens"
             )
+            self.logger.info(
+                "rag_generation_result",
+                extra={
+                    "event": "rag_generation_result",
+                    "data": {
+                        "sub_query_id": sub_query_id,
+                        "output_chars": len(generated_text),
+                        "token_count": len(generation_output.get('tokens', []))
+                    }
+                }
+            )
             
             # Step 3: Extract claims from this sub-answer
             self.logger.debug(f"Extracting claims from sub-answer {sub_query_id}")
@@ -257,6 +299,16 @@ class BaselineRAGPipeline:
             )
             
             self.logger.info(f"Extracted {len(sub_claims)} claims from sub-answer {sub_query_id}")
+            self.logger.info(
+                "rag_claims_extracted",
+                extra={
+                    "event": "rag_claims_extracted",
+                    "data": {
+                        "sub_query_id": sub_query_id,
+                        "claims_count": len(sub_claims)
+                    }
+                }
+            )
             
             # Calculate char span for this sub-answer in combined response
             char_start = len(' '.join(combined_response_parts) + (' ' if combined_response_parts else ''))
@@ -380,6 +432,15 @@ class BaselineRAGPipeline:
                         )
             
             self.logger.info(f"Computed {len(verifier_signals)} verifier signals via VerifierHub")
+            self.logger.info(
+                "rag_verifier_signals",
+                extra={
+                    "event": "rag_verifier_signals",
+                    "data": {
+                        "signals_count": len(verifier_signals)
+                    }
+                }
+            )
         elif self.verifier_enabled and not all_evidence_chunks:
             self.logger.warning(
                 "Verification enabled but no evidence retrieved - skipping verifier signals"
@@ -416,6 +477,17 @@ class BaselineRAGPipeline:
         self.logger.info(
             f"Pipeline complete: {len(all_claims)} claims from {len(all_sub_answers)} sub-answers, "
             f"{len(all_evidence_chunks)} evidence chunks"
+        )
+        self.logger.info(
+            "rag_run_complete",
+            extra={
+                "event": "rag_run_complete",
+                "data": {
+                    "claims_count": len(all_claims),
+                    "sub_answers_count": len(all_sub_answers),
+                    "evidence_chunks_count": len(all_evidence_chunks)
+                }
+            }
         )
         
         return output

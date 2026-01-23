@@ -147,6 +147,18 @@ class IntrinsicUncertaintyDetector:
                 f"Claim {claim.claim_id}: {len(entropies)} tokens, "
                 f"mean_entropy={mean_entropy:.3f}"
             )
+
+            self.logger.info(
+                "detector_intrinsic_uncertainty",
+                extra={
+                    "event": "detector_intrinsic_uncertainty",
+                    "data": {
+                        "claim_id": claim.claim_id,
+                        "mean_entropy": mean_entropy,
+                        "token_count": len(entropies)
+                    }
+                }
+            )
             
             return {'mean_entropy': mean_entropy}
         
