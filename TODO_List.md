@@ -100,34 +100,34 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [ ] Correlate the custom verifier's scores with the Ragas framework's metrics (`faithfulness`, `answer_relevancy`) to produce detailed comparison charts.
     -   [ ] Draft the results and discussion sections of the final report.
 -   **Member 2 (Development & Experimentation Focus):**
-    -   [ ] **Rule-Based Aggregation:**
-        -   [ ] Design and implement a `RuleBasedAggregator` that combines the outputs of all four signal detectors.
-        -   [ ] Define explicit rules and thresholds to classify each claim as "Supported," "Contradictory," or "Low Confidence."
-    -   [ ] **CitationFormatter (Enable CiteBench/CiteEval):**
-        -   [ ] Design a citation strategy that maps top-k retrieved evidence chunks to 1-based bracketed indices `[1]..[k]` in the answer.
-        -   [ ] Implement `CitationFormatter` to inject inline citations and return: formatted_text, citation_map (claim_id → [indices]), passage_list (ordered evidence for export).
-        -   [ ] Add a post-processor to align citation markers to claim character spans (uses `extract_claims` spans) and validate with `validate_claim_spans`.
-        -   [ ] Implement an exporter to produce CiteEval System Evaluation JSON: `{id, query, passages:[{text,title?}], pred}`.
-        -   [ ] Smoke test CiteEval in `Full` mode (no citations required), then `Cited` mode (with `[i]` markers).
-        -   [ ] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
-    -   [ ] **Ragas Integration:**
-        -   [ ] Integrate the Ragas framework into the evaluation pipeline.
+    -   [x] **Rule-Based Aggregation:**
+        -   [x] Design and implement a `RuleBasedAggregator` that combines the outputs of all four signal detectors.
+        -   [x] Define explicit rules and thresholds to classify each claim as "Supported," "Contradictory," or "Low Confidence."
+    -   [x] **CitationFormatter (Enable CiteBench/CiteEval):**
+        -   [x] Design a citation strategy that maps top-k retrieved evidence chunks to 1-based bracketed indices `[1]..[k]` in the answer.
+        -   [x] Implement `CitationFormatter` to inject inline citations and return: formatted_text, citation_map (claim_id → [indices]), passage_list (ordered evidence for export).
+        -   [x] Add a post-processor to align citation markers to claim character spans (uses `extract_claims` spans) and validate with `validate_claim_spans`.
+        -   [x] Implement an exporter to produce CiteEval System Evaluation JSON: `{id, query, passages:[{text,title?}], pred}`.
+        -   [x] Smoke test CiteEval in `Full` mode (no citations required), then `Cited` mode (with `[i]` markers).
+        -   [x] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
+    -   [x] **Ragas Integration:**
+        -   [x] Integrate the Ragas framework into the evaluation pipeline.
         -   [x] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
     -   [x] **End-to-End Detector Evaluation:**
         -   [x] Set up an evaluation harness to run the full system on the `RAGTruth` and `CiteBench` benchmarks.
         -   [ ] Run the evaluation and collect the results.
         -   [ ] Calculate key metrics for the verifier (e.g., detection accuracy, precision, recall, F1-score).
-    -   [ ] **Mitigation Strategies:**
-        -   [ ] If time permits, implement active mitigation logic based on verifier feedback.
-        -   [ ] **Re-ranking:** Implement logic to re-order retrieved documents based on verification scores.
+    -   [x] **Mitigation Strategies:**
+        -   [x] If time permits, implement active mitigation logic based on verifier feedback.
+        -   [x] **Re-ranking:** Implement logic to re-order retrieved documents based on verification scores.
         -   [ ] **Re-prompting:** Implement a feedback loop to ask the LLM to self-correct when low confidence is detected.
-        -   [ ] **Filtering:** Implement a module to suppress or flag claims that are unsupported or contradictory.
-    -   [ ] **Confidence UI Display:**
-        -   [ ] Implement a lightweight web UI (e.g., Streamlit or Gradio) that runs on top of the existing demo pipeline.
-        -   [ ] Display the user query and final answer text, with inline color highlighting for each claim based on its verdict (e.g., green = Supported, yellow = Low Confidence, red = Contradictory).
-        -   [ ] Add a per-claim table view showing: short claim snippet, final verdict badge, overall confidence band, and key signal scores (entropy, entity/number coverage, NLI contradiction, self-agreement).
-        -   [ ] Provide a simple drill-down interaction (e.g., expandable row or details panel) to inspect full claim text, top evidence sentences, and the raw confidence_breakdown for debugging.
-        -   [ ] Normalize and bucket raw scores into interpretable ranges (e.g., 0–1 or 0–100% with High/Medium/Low labels) so the UI emphasizes qualitative bands rather than raw floats.
+        -   [x] **Filtering:** Implement a module to suppress or flag claims that are unsupported or contradictory.
+    -   [x] **Confidence UI Display:**
+        -   [x] Implement a lightweight web UI (e.g., Streamlit or Gradio) that runs on top of the existing demo pipeline.
+        -   [x] Display the user query and final answer text, with inline color highlighting for each claim based on its verdict (e.g., green = Supported, yellow = Low Confidence, red = Contradictory).
+        -   [x] Add a per-claim table view showing: short claim snippet, final verdict badge, overall confidence band, and key signal scores (entropy, entity/number coverage, NLI contradiction, self-agreement).
+        -   [x] Provide a simple drill-down interaction (e.g., expandable row or details panel) to inspect full claim text, top evidence sentences, and the raw confidence_breakdown for debugging.
+        -   [x] Normalize and bucket raw scores into interpretable ranges (e.g., 0–1 or 0–100% with High/Medium/Low labels) so the UI emphasizes qualitative bands rather than raw floats.
 
 ---
 
