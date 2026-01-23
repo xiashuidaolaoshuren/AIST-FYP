@@ -84,10 +84,7 @@ class LoggingUIWrapper:
                 serialized_entry = {
                     "timestamp": log_entry["timestamp"],
                     "query": log_entry["query"],
-                    "result": {
-                        "html_output": log_entry["result"]["html_output"],
-                        "metadata": self._serialize_obj(log_entry["result"]["metadata"])
-                    }
+                    "metadata": self._serialize_obj(log_entry["metadata"])
                 }
                 serialized_logs.append(serialized_entry)
             
