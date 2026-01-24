@@ -371,15 +371,15 @@ class SignalNormalizer:
         
         try:
             # Extract components
-            entail = nli_dict.get('entail', None)
-            contradict = nli_dict.get('contradict', None)
+            entail = nli_dict.get('entailment', None)
+            contradict = nli_dict.get('contradiction', None)
             
             # Handle missing values
             if entail is None:
-                self.logger.debug("NLI entailment is None, using 0.5")
+                self.logger.warning("NLI 'entailment' key not found in dict, using neutral 0.5")
                 entail = 0.5
             if contradict is None:
-                self.logger.debug("NLI contradiction is None, using 0.5")
+                self.logger.warning("NLI 'contradiction' key not found in dict, using neutral 0.5")
                 contradict = 0.5
             
             # Handle NaN values

@@ -86,6 +86,12 @@ class IntrinsicUncertaintyDetector:
         3. Computing entropy for each token
         4. Averaging across the claim
         
+        **Note on seq2seq models (e.g., FLAN-T5):**
+        - Hugging Face returns (n-1) logit arrays for n generated tokens
+        - Token indices are filtered to valid logit range [0, len(logits)-1]
+        - EOS token (</s>) at position n-1 has no corresponding logits
+        - This is expected behavior and handled gracefully
+        
         Args:
             claim: Claim object with text and char span
             evidence: Evidence chunk (not used for intrinsic detection, but required for API)
@@ -116,13 +122,29 @@ class IntrinsicUncertaintyDetector:
             # Align claim to token indices
             token_indices = self._align_claim_tokens(claim, metadata)
             
+            # Important: For seq2seq models (e.g., FLAN-T5), output.scores has (n-1) entries
+            # for n generated tokens. The EOS token (</s>) at position n-1 has no logits.
+            # We need to cap token indices to valid logit range.
+            max_logit_idx = len(metadata['logits']) - 1
+            
             if not token_indices:
-                # Alignment failed - use full response as fallback
+                # Alignment failed - use valid range as fallback
                 self.logger.debug(
                     f"Token alignment failed for claim {claim.claim_id}, "
-                    f"using all tokens as fallback"
+                    f"using valid logit range as fallback (0-{max_logit_idx})"
                 )
-                token_indices = list(range(len(metadata['logits'])))
+                token_indices = list(range(min(len(metadata['logits']), len(metadata.get('tokens', [])))))
+            else:
+                # Filter token indices to stay within logit bounds
+                # This handles seq2seq models where last token has no logits
+                original_count = len(token_indices)
+                token_indices = [idx for idx in token_indices if idx <= max_logit_idx]
+                if len(token_indices) < original_count:
+                    self.logger.debug(
+                        f"Filtered token indices for claim {claim.claim_id}: "
+                        f"{original_count} → {len(token_indices)} "
+                        f"(seq2seq model: last token has no logits)"
+                    )
             
             # Calculate entropy for each aligned token
             entropies = []

@@ -256,7 +256,7 @@ class TestSignalNormalizer:
     
     def test_normalize_nli_extraction(self, normalizer):
         """Test that NLI extraction returns correct tuple."""
-        nli = {'entail': 0.8, 'contradict': 0.1, 'neutral': 0.1}
+        nli = {'entailment': 0.8, 'contradiction': 0.1, 'neutral': 0.1}
         support, contradict = normalizer.normalize_nli(nli)
         
         assert support == 0.8, f"Expected support 0.8, got {support}"
@@ -265,10 +265,10 @@ class TestSignalNormalizer:
     def test_normalize_nli_range(self, normalizer):
         """Test that NLI extraction returns values in [0, 1] range."""
         test_cases = [
-            {'entail': 0.0, 'contradict': 0.0, 'neutral': 1.0},
-            {'entail': 0.5, 'contradict': 0.3, 'neutral': 0.2},
-            {'entail': 1.0, 'contradict': 0.0, 'neutral': 0.0},
-            {'entail': 0.2, 'contradict': 0.7, 'neutral': 0.1},
+            {'entailment': 0.0, 'contradiction': 0.0, 'neutral': 1.0},
+            {'entailment': 0.5, 'contradiction': 0.3, 'neutral': 0.2},
+            {'entailment': 1.0, 'contradiction': 0.0, 'neutral': 0.0},
+            {'entailment': 0.2, 'contradiction': 0.7, 'neutral': 0.1},
         ]
         
         for nli in test_cases:
@@ -282,17 +282,17 @@ class TestSignalNormalizer:
     
     def test_normalize_nli_missing_keys(self, normalizer):
         """Test that missing NLI keys return neutral 0.5."""
-        # Missing entail
-        nli1 = {'contradict': 0.3, 'neutral': 0.7}
+        # Missing entailment
+        nli1 = {'contradiction': 0.3, 'neutral': 0.7}
         support1, contradict1 = normalizer.normalize_nli(nli1)
-        assert support1 == 0.5, f"Missing entail should give 0.5, got {support1}"
+        assert support1 == 0.5, f"Missing entailment should give 0.5, got {support1}"
         assert contradict1 == 0.3
         
-        # Missing contradict
-        nli2 = {'entail': 0.8, 'neutral': 0.2}
+        # Missing contradiction
+        nli2 = {'entailment': 0.8, 'neutral': 0.2}
         support2, contradict2 = normalizer.normalize_nli(nli2)
         assert support2 == 0.8
-        assert contradict2 == 0.5, f"Missing contradict should give 0.5, got {contradict2}"
+        assert contradict2 == 0.5, f"Missing contradiction should give 0.5, got {contradict2}"
     
     def test_normalize_nli_empty_dict(self, normalizer):
         """Test that empty NLI dict returns (0.5, 0.5)."""
@@ -302,24 +302,24 @@ class TestSignalNormalizer:
     
     def test_normalize_nli_nan_values(self, normalizer):
         """Test that NaN NLI values return neutral 0.5."""
-        nli = {'entail': np.nan, 'contradict': 0.3, 'neutral': 0.7}
+        nli = {'entailment': np.nan, 'contradiction': 0.3, 'neutral': 0.7}
         support, contradict = normalizer.normalize_nli(nli)
-        assert support == 0.5, f"NaN entail should return 0.5, got {support}"
+        assert support == 0.5, f"NaN entailment should return 0.5, got {support}"
         assert contradict == 0.3
     
     def test_normalize_nli_out_of_range(self, normalizer):
         """Test that out-of-range NLI values are clipped to [0, 1]."""
         # Values > 1.0 should be clipped
-        nli1 = {'entail': 1.5, 'contradict': 0.3, 'neutral': -0.8}
+        nli1 = {'entailment': 1.5, 'contradiction': 0.3, 'neutral': -0.8}
         support1, contradict1 = normalizer.normalize_nli(nli1)
-        assert support1 == 1.0, f"Entail > 1.0 should be clipped to 1.0, got {support1}"
+        assert support1 == 1.0, f"Entailment > 1.0 should be clipped to 1.0, got {support1}"
         assert contradict1 == 0.3
         
         # Negative values should be clipped to 0.0
-        nli2 = {'entail': 0.8, 'contradict': -0.5, 'neutral': 0.7}
+        nli2 = {'entailment': 0.8, 'contradiction': -0.5, 'neutral': 0.7}
         support2, contradict2 = normalizer.normalize_nli(nli2)
         assert support2 == 0.8
-        assert contradict2 == 0.0, f"Negative contradict should be clipped to 0.0, got {contradict2}"
+        assert contradict2 == 0.0, f"Negative contradiction should be clipped to 0.0, got {contradict2}"
     
     # ==================== Integration Tests ====================
     
@@ -401,8 +401,8 @@ class TestSignalNormalizer:
     def test_normalize_nli_out_of_range_clamping(self, normalizer):
         """Test NLI normalization clamps out-of-range values."""
         nli_dict = {
-            'entail': 2.5,      # > 1.0
-            'contradict': -0.5,  # < 0.0
+            'entailment': 2.5,      # > 1.0
+            'contradiction': -0.5,  # < 0.0
             'neutral': 0.0
         }
         
@@ -418,6 +418,39 @@ class TestSignalNormalizer:
         
         # Negative infinity entropy is impossible, returns 1.0 confidence
         assert result == 1.0
+    
+    def test_normalize_nli_real_detector_output(self, normalizer):
+        """
+        Regression test for key mismatch bug (Issue #2026-01-24).
+        
+        Ensures normalize_nli() correctly handles real NLI detector output
+        with full key names ('entailment', 'contradiction', 'neutral').
+        
+        Previously failed due to normalizer looking for truncated keys
+        ('entail', 'contradict'), causing all values to default to 0.5.
+        """
+        # Simulate real NLI detector output
+        real_nli_output = {
+            'entailment': 0.9933049082756042,
+            'neutral': 0.005021079909056425,
+            'contradiction': 0.0016740014543756843
+        }
+        
+        support, contradict = normalizer.normalize_nli(real_nli_output)
+        
+        # Should extract actual values, NOT default to 0.5
+        assert abs(support - 0.9933049082756042) < 0.001, (
+            f"Expected support ~0.993, got {support}. "
+            f"Key mismatch bug may have regressed."
+        )
+        assert abs(contradict - 0.0016740014543756843) < 0.001, (
+            f"Expected contradict ~0.002, got {contradict}. "
+            f"Key mismatch bug may have regressed."
+        )
+        
+        # Verify NOT stuck at 0.5
+        assert support != 0.5, "Support should NOT be 0.5 for high entailment"
+        assert contradict != 0.5, "Contradict should NOT be 0.5 for low contradiction"
 
 
 if __name__ == '__main__':
