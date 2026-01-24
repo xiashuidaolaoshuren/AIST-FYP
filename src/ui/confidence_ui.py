@@ -74,6 +74,11 @@ class ConfidenceUI:
             'Low Confidence': '#ffc107'    # Yellow
         }
         
+        # Evidence dataframe columns
+        self.evidence_columns = [
+            'Claim', 'Rank', 'Score Dense', 'Score BM25', 'Score Hybrid', 'Doc ID', 'Evidence'
+        ]
+        
         self.logger.info("ConfidenceUI initialized with color mapping: %s", self.color_map)
     
     def create_interface(self) -> gr.Interface:
@@ -93,20 +98,21 @@ class ConfidenceUI:
             >>> demo = ui.create_interface()
             >>> demo.launch()
         """
-        def process_query(query: str) -> Tuple[List[Tuple[str, Optional[str]]], pd.DataFrame]:
+        def process_query(query: str) -> Tuple[List[Tuple[str, Optional[str]]], pd.DataFrame, pd.DataFrame]:
             """
-            Process a query and return color-coded output and details table.
+            Process a query and return color-coded output and details tables.
             
             Args:
                 query: User's input question
             
             Returns:
-                Tuple of (highlighted_text, details_dataframe):
+                Tuple of (highlighted_text, details_dataframe, evidence_dataframe):
                 - highlighted_text: List of (text, label) tuples for HighlightedText
                 - details_dataframe: DataFrame with per-claim verification metrics
+                - evidence_dataframe: DataFrame with evidence pairs per claim
             """
             if not query.strip():
-                return [], pd.DataFrame()
+                return [], pd.DataFrame(), pd.DataFrame()
             
             try:
                 self.logger.info(f"Processing query: {query[:100]}")
@@ -122,8 +128,9 @@ class ConfidenceUI:
                 
                 if not claim_evidence_pairs:
                     self.logger.warning("No claims extracted from answer")
-                    # Return empty DataFrame with proper columns
-                    return [(answer_text, None)], self._build_details_table([], [])
+                    # Return empty DataFrames with proper columns
+                    empty_evidence_df = self._build_evidence_dataframe([], [])
+                    return [(answer_text, None)], self._build_details_table([], []), empty_evidence_df
                 
                 # Extract evidence chunks from the first claim_evidence_pair
                 # All claims share the same evidence in baseline implementation
@@ -177,7 +184,8 @@ class ConfidenceUI:
                 
                 if not decisions:
                     self.logger.warning("No decisions generated")
-                    return [(answer_text, None)], self._build_details_table([], [])
+                    empty_evidence_df = self._build_evidence_dataframe([], [])
+                    return [(answer_text, None)], self._build_details_table([], []), empty_evidence_df
                 
                 # Step 4: Build highlighted output with sub-answer headers
                 highlighted_text = self._build_highlighted_output_with_headers(
@@ -186,15 +194,18 @@ class ConfidenceUI:
                 
                 # Step 5: Build details table
                 details_df = self._build_details_table(all_claims, decisions)
+
+                # Step 6: Build evidence dataframe (per-claim grouped view)
+                evidence_df = self._build_evidence_dataframe(all_claims, claim_evidence_pairs)
                 
                 self.logger.info(f"Successfully processed query with {len(decisions)} decisions")
                 
-                return highlighted_text, details_df
+                return highlighted_text, details_df, evidence_df
                 
             except Exception as e:
                 self.logger.error(f"Error processing query: {str(e)}", exc_info=True)
                 error_msg = f"Error: {str(e)}"
-                return [(error_msg, None)], pd.DataFrame()
+                return [(error_msg, None)], pd.DataFrame(), pd.DataFrame()
         
         # Create Gradio interface
         demo = gr.Interface(
@@ -213,6 +224,10 @@ class ConfidenceUI:
                 ),
                 gr.Dataframe(
                     label='Claim-Level Details',
+                    wrap=True
+                ),
+                gr.Dataframe(
+                    label='Evidence (Per-Claim Grouped View)',
                     wrap=True
                 )
             ],
@@ -470,3 +485,156 @@ class ConfidenceUI:
         self.logger.debug(f"Built details table with {len(rows)} rows")
         
         return df
+
+    def _build_evidence_dataframe(
+        self,
+        claims: List[Any],
+        claim_evidence_pairs: List[Dict[str, Any]]
+    ) -> pd.DataFrame:
+        """
+        Build a DataFrame with evidence pairs grouped per claim with rank and scores.
+        
+        Args:
+            claims: List of Claim objects or dicts
+            claim_evidence_pairs: List of evidence pair dicts from pipeline output
+        
+        Returns:
+            DataFrame with columns: Claim, Rank, Score Dense, Score BM25, 
+            Score Hybrid, Doc ID, Evidence
+        """
+        if not claim_evidence_pairs:
+            return pd.DataFrame(columns=self.evidence_columns)
+
+        claim_map = self._build_claim_text_map(claims)
+        rows = []
+
+        for pair in claim_evidence_pairs:
+            claim_id = pair.get('claim_id')
+            claim_text = claim_map.get(claim_id, 'N/A')
+            display_claim = self._truncate_text(claim_text, 120)
+
+            evidence_spans = pair.get('evidence_spans', [])
+            if not evidence_spans:
+                row = {
+                    'Claim': display_claim,
+                    'Rank': 'N/A',
+                    'Score Dense': '-',
+                    'Score BM25': '-',
+                    'Score Hybrid': '-',
+                    'Doc ID': 'N/A',
+                    'Evidence': 'No evidence spans available'
+                }
+                rows.append(row)
+                continue
+
+            for span in evidence_spans:
+                rank = span.get('rank', 'N/A')
+                score_dense = self._format_score(span.get('score_dense', None))
+                score_bm25 = self._format_score(span.get('score_bm25', None))
+                score_hybrid = self._format_score(span.get('score_hybrid', None))
+                doc_id = span.get('doc_id', 'N/A')
+                sent_id = span.get('sent_id', 'N/A')
+                text = span.get('text', '')
+                text = text.replace("\n", " ").strip()
+                evidence_text = self._truncate_text(text, 150)
+
+                row = {
+                    'Claim': display_claim,
+                    'Rank': rank,
+                    'Score Dense': score_dense,
+                    'Score BM25': score_bm25,
+                    'Score Hybrid': score_hybrid,
+                    'Doc ID': f"{doc_id}#{sent_id}",
+                    'Evidence': evidence_text
+                }
+                rows.append(row)
+
+        if not rows:
+            return pd.DataFrame(columns=self.evidence_columns)
+        
+        df = pd.DataFrame(rows, columns=self.evidence_columns)
+        self.logger.debug(f"Built evidence dataframe with {len(rows)} rows")
+        
+        return df
+
+    def _build_evidence_markdown(
+        self,
+        claims: List[Any],
+        claim_evidence_pairs: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Build a per-claim grouped Markdown view of evidence pairs with rank and scores.
+        
+        Args:
+            claims: List of Claim objects or dicts
+            claim_evidence_pairs: List of evidence pair dicts from pipeline output
+        
+        Returns:
+            Markdown string with sections per claim and evidence tables
+        """
+        if not claim_evidence_pairs:
+            return ""
+
+        claim_map = self._build_claim_text_map(claims)
+        sections = ["## Evidence (Per-Claim Grouped View)"]
+
+        for idx, pair in enumerate(claim_evidence_pairs, start=1):
+            claim_id = pair.get('claim_id')
+            claim_text = claim_map.get(claim_id, 'N/A')
+            display_text = self._truncate_text(claim_text, 160)
+            sections.append(f"\n### Claim {idx}: {display_text}")
+
+            evidence_spans = pair.get('evidence_spans', [])
+            if not evidence_spans:
+                sections.append("_No evidence spans available._")
+                continue
+
+            sections.extend(self._build_evidence_table(evidence_spans))
+
+        return "\n".join(sections)
+
+    def _build_claim_text_map(self, claims: List[Any]) -> Dict[str, str]:
+        claim_map: Dict[str, str] = {}
+        for claim in claims:
+            if isinstance(claim, dict):
+                claim_map[claim['claim_id']] = claim['text']
+            else:
+                claim_map[claim.claim_id] = claim.text
+        return claim_map
+
+    def _build_evidence_table(self, evidence_spans: List[Dict[str, Any]]) -> List[str]:
+        rows = [
+            "| Rank | Score Dense | Score BM25 | Score Hybrid | Doc | Evidence |",
+            "| --- | --- | --- | --- | --- | --- |"
+        ]
+
+        for span in evidence_spans:
+            rank = span.get('rank', 'N/A')
+            score_dense = self._format_score(span.get('score_dense', None))
+            score_bm25 = self._format_score(span.get('score_bm25', None))
+            score_hybrid = self._format_score(span.get('score_hybrid', None))
+            doc_id = span.get('doc_id', 'N/A')
+            sent_id = span.get('sent_id', 'N/A')
+            text = span.get('text', '')
+            text = text.replace("\n", " ").strip()
+            evidence_text = self._truncate_text(text, 180)
+
+            rows.append(
+                f"| {rank} | {score_dense} | {score_bm25} | "
+                f"{score_hybrid} | {doc_id}#{sent_id} | {evidence_text} |"
+            )
+
+        return rows
+
+    def _format_score(self, value: Any) -> str:
+        if value is None:
+            return "-"
+        try:
+            return f"{float(value):.3f}"
+        except (TypeError, ValueError):
+            return "-"
+
+    def _truncate_text(self, text: str, max_len: int) -> str:
+        if len(text) > max_len:
+            return text[:max_len] + '...'
+        return text
