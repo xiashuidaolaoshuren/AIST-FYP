@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 from src.retrieval.dense_retriever import DenseRetriever
+from src.retrieval.bm25_retriever import BM25Retriever
+from src.retrieval.hybrid_retriever import HybridRetriever
 from src.generation.generator_wrapper import GeneratorWrapper
 from src.generation.claim_extractor import extract_claims
 from src.utils.data_structures import ClaimEvidencePair, EvidenceChunk, Claim, VerifierSignal
@@ -577,14 +579,72 @@ class BaselineRAGPipeline:
                 f"Please run the data processing pipeline first."
             )
         
-        # Initialize DenseRetriever
-        logger.info(f"Initializing DenseRetriever with {config.models.sentence_transformer}")
-        retriever = DenseRetriever(
-            index_path=str(index_path),
-            metadata_path=str(metadata_path),
-            encoder_model=config.models.sentence_transformer,
-            device=config.processing.device
-        )
+        # Get retrieval mode from config
+        retrieval_mode = config.retrieval.get('mode', 'dense')
+        logger.info(f"Retrieval mode: {retrieval_mode}")
+        
+        # Initialize retriever based on mode
+        if retrieval_mode == 'dense':
+            # Dense retrieval only (default)
+            logger.info(f"Initializing DenseRetriever with {config.models.sentence_transformer}")
+            retriever = DenseRetriever(
+                index_path=str(index_path),
+                metadata_path=str(metadata_path),
+                encoder_model=config.models.sentence_transformer,
+                device=config.processing.device
+            )
+        
+        elif retrieval_mode == 'bm25':
+            # BM25 sparse retrieval only
+            corpus_path = Path('data/processed') / f'wiki_chunks_{strategy}.jsonl'
+            bm25_index_path = Path('data/indexes') / strategy / 'bm25_index.pkl'
+            
+            logger.info(f"Initializing BM25Retriever")
+            retriever = BM25Retriever(
+                corpus_path=str(corpus_path),
+                index_path=str(bm25_index_path),
+                k1=config.retrieval.bm25.get('k1', 1.5),
+                b=config.retrieval.bm25.get('b', 0.75)
+            )
+        
+        elif retrieval_mode == 'hybrid':
+            # Hybrid: combine dense and BM25
+            # Initialize dense retriever
+            logger.info(f"Initializing DenseRetriever for hybrid mode")
+            dense_retriever = DenseRetriever(
+                index_path=str(index_path),
+                metadata_path=str(metadata_path),
+                encoder_model=config.models.sentence_transformer,
+                device=config.processing.device
+            )
+            
+            # Initialize BM25 retriever
+            corpus_path = Path('data/processed') / f'wiki_chunks_{strategy}.jsonl'
+            bm25_index_path = Path('data/indexes') / strategy / 'bm25_index.pkl'
+            
+            logger.info(f"Initializing BM25Retriever for hybrid mode")
+            bm25_retriever = BM25Retriever(
+                corpus_path=str(corpus_path),
+                index_path=str(bm25_index_path),
+                k1=config.retrieval.bm25.get('k1', 1.5),
+                b=config.retrieval.bm25.get('b', 0.75)
+            )
+            
+            # Initialize hybrid retriever
+            logger.info(f"Initializing HybridRetriever")
+            retriever = HybridRetriever(
+                dense_retriever=dense_retriever,
+                bm25_retriever=bm25_retriever,
+                alpha=config.retrieval.hybrid.get('alpha', 0.5),
+                fusion_method=config.retrieval.hybrid.get('fusion_method', 'rrf'),
+                rrf_k=config.retrieval.hybrid.get('rrf_k', 60)
+            )
+        
+        else:
+            raise ValueError(
+                f"Invalid retrieval mode: {retrieval_mode}. "
+                f"Must be 'dense', 'bm25', or 'hybrid'"
+            )
         
         # Initialize GeneratorWrapper
         logger.info(f"Initializing GeneratorWrapper with {config.models.generator}")

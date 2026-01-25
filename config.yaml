@@ -68,9 +68,14 @@ processing:
 
 # Retrieval Configuration
 retrieval:
+  # Retrieval mode: "dense" (embeddings only), "bm25" (sparse lexical only), 
+  # or "hybrid" (combine both)
+  mode: "dense"  # Options: "dense", "bm25", "hybrid"
+  
   # Number of evidence chunks to retrieve
   top_k: 5
   
+  # Dense Retrieval (FAISS) Configuration
   # FAISS index type: FLAT (exact), IVFFLAT (approximate), HNSW (best quality/speed)
   index_type: "IVFFLAT"
   
@@ -80,6 +85,18 @@ retrieval:
   
   # HNSW parameters (if using HNSW)
   hnsw_m: 32  # Number of connections per element
+  
+  # BM25 Sparse Retrieval Configuration
+  bm25:
+    k1: 1.5  # Term frequency saturation parameter (standard: 1.2-2.0)
+    b: 0.75  # Length normalization parameter (standard: 0.75)
+  
+  # Hybrid Retrieval Configuration
+  hybrid:
+    alpha: 0.5  # Weight for dense scores in linear fusion (0-1)
+                # alpha=1.0: dense only, alpha=0.0: BM25 only
+    fusion_method: "rrf"  # Fusion method: "linear" or "rrf" (reciprocal rank fusion)
+    rrf_k: 60  # RRF constant (only used if fusion_method="rrf")
 
 # Generation Configuration
 generation:
