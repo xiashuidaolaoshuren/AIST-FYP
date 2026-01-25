@@ -229,6 +229,7 @@ class BaselineRAGPipeline:
         all_claims = []
         combined_response_parts = []
         all_evidence_chunks = []  # Track all evidence for final metadata
+        all_generation_metadata = []  # Track per-sub-answer generation metadata
         
         for sub_query_data in sub_queries:
             sub_query_text = sub_query_data['text']
@@ -331,6 +332,14 @@ class BaselineRAGPipeline:
                 'sub_query': sub_query_text
             }
             all_sub_answers.append(sub_answer_dict)
+
+            # Store generation metadata for this sub-answer
+            all_generation_metadata.append({
+                'sub_answer_id': sub_query_id,
+                'char_span': [char_start, char_end],
+                'sub_query': sub_query_text,
+                'metadata': generation_output
+            })
             
             # Store claims for this sub-answer
             claims_by_sub_answer_dict = {
@@ -411,13 +420,29 @@ class BaselineRAGPipeline:
                     self.logger.debug(f"Single-chunk verification for claim {claim.claim_id}")
                 
                 if evidence_input:
-                    # Create minimal metadata for verification
-                    verification_metadata = {
-                        'text': combined_response,
-                        'original_query': query,
-                        'tokens': [],
-                        'scores': []
-                    }
+                    # Select generation metadata that matches the claim span
+                    verification_metadata = None
+                    for entry in all_generation_metadata:
+                        span = entry['char_span']
+                        if (
+                            claim.answer_char_span[0] >= span[0]
+                            and claim.answer_char_span[1] <= span[1]
+                        ):
+                            verification_metadata = dict(entry['metadata'])
+                            verification_metadata.setdefault('original_query', entry['sub_query'])
+                            break
+
+                    if verification_metadata is None:
+                        self.logger.warning(
+                            f"No generation metadata found for claim {claim.claim_id}; "
+                            f"using fallback metadata"
+                        )
+                        verification_metadata = {
+                            'text': combined_response,
+                            'original_query': query,
+                            'tokens': [],
+                            'scores': []
+                        }
                     
                     # Call VerifierHub to compute all signals
                     signal = self.verifier_hub.verify_claim(
@@ -459,6 +484,7 @@ class BaselineRAGPipeline:
             'generator_metadata': {
                 'text': combined_response,
                 'sub_answers': all_sub_answers,
+                'sub_answer_metadata': all_generation_metadata,
                 'original_query': query,
                 'num_sub_questions': len(sub_queries)
             },

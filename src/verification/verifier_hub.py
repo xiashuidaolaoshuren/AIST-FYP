@@ -83,9 +83,13 @@ class VerifierHub:
         if hasattr(config, 'verification'):
             self.verify_all_evidence = getattr(config.verification, 'verify_all_evidence', False)
             self.aggregation_method = getattr(config.verification, 'aggregation_method', 'max')
+            self.strict_logits = bool(
+                getattr(getattr(config.verification, 'intrinsic', None), 'strict_logits', False)
+            )
         else:
             self.verify_all_evidence = False
             self.aggregation_method = 'max'
+            self.strict_logits = False
         
         if not self.enabled:
             self.logger.warning("VerifierHub initialized but verification is disabled")
@@ -250,6 +254,8 @@ class VerifierHub:
                     f"IntrinsicUncertaintyDetector failed for claim {claim.claim_id}: {str(e)}"
                 )
                 self.logger.debug(traceback.format_exc())
+                if self.strict_logits:
+                    raise
                 # Use default fallback value
                 uncertainty_signal = {'mean_entropy': 0.0}
             

@@ -119,6 +119,9 @@ verification:
     
     # Uncertainty calculation method
     method: "entropy"
+
+    # Strict mode: raise error when logits are missing
+    strict_logits: true
   
   # Retrieval-Grounded Detector Configuration
   grounded:

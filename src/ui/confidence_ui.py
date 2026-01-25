@@ -125,6 +125,7 @@ class ConfidenceUI:
                 claims_by_sub_answer = result.get('claims_by_sub_answer', [])
                 claim_evidence_pairs = result.get('claim_evidence_pairs', [])
                 metadata = result.get('generator_metadata', {})
+                sub_answer_metadata = metadata.get('sub_answer_metadata', [])
                 
                 if not claim_evidence_pairs:
                     self.logger.warning("No claims extracted from answer")
@@ -163,11 +164,23 @@ class ConfidenceUI:
                 # Step 3: Verify and aggregate each claim
                 decisions = []
                 for i, (claim, pair) in enumerate(zip(all_claims, claim_evidence_pairs)):
+                    verification_metadata = metadata
+                    for entry in sub_answer_metadata:
+                        span = entry.get('char_span', [])
+                        if (
+                            len(span) == 2
+                            and claim.answer_char_span[0] >= span[0]
+                            and claim.answer_char_span[1] <= span[1]
+                        ):
+                            verification_metadata = dict(entry.get('metadata', {}))
+                            verification_metadata.setdefault('original_query', entry.get('sub_query'))
+                            break
+
                     # Verify claim using VerifierHub
                     signal = self.verifier_hub.verify_claim(
                         claim,
                         evidence_chunks,
-                        metadata
+                        verification_metadata
                     )
                     
                     if signal:

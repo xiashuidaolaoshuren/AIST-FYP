@@ -66,6 +66,13 @@ class IntrinsicUncertaintyDetector:
             if hasattr(config, 'verification') and hasattr(config.verification, 'intrinsic')
             else 1e-10
         )
+
+        # Strict mode: raise error when logits are missing
+        self.strict_logits = bool(
+            getattr(config.verification.intrinsic, 'strict_logits', False)
+            if hasattr(config, 'verification') and hasattr(config.verification, 'intrinsic')
+            else False
+        )
         
         self.logger.info(
             f"IntrinsicUncertaintyDetector initialized with epsilon={self.epsilon}"
@@ -113,9 +120,11 @@ class IntrinsicUncertaintyDetector:
         
         # Edge case: no logits in metadata
         if 'logits' not in metadata or not metadata['logits']:
-            self.logger.warning(
-                f"No logits in metadata for claim {claim.claim_id}, returning 0.0 entropy"
-            )
+            message = f"No logits in metadata for claim {claim.claim_id}"
+            if self.strict_logits:
+                self.logger.error(f"{message}; strict_logits enabled")
+                raise ValueError(message)
+            self.logger.warning(f"{message}, returning 0.0 entropy")
             return {'mean_entropy': 0.0}
         
         try:
