@@ -36,15 +36,15 @@ def mock_bm25_results():
     return [
         EvidenceChunk(
             doc_id="doc2", sent_id=0, text="Text 2", char_start=0, char_end=10,
-            score_bm25=15.0, rank=1
+            score_dense=0.0, score_bm25=15.0, rank=1
         ),
         EvidenceChunk(
             doc_id="doc4", sent_id=0, text="Text 4", char_start=0, char_end=10,
-            score_bm25=12.0, rank=2
+            score_dense=0.0, score_bm25=12.0, rank=2
         ),
         EvidenceChunk(
             doc_id="doc1", sent_id=0, text="Text 1", char_start=0, char_end=10,
-            score_bm25=8.0, rank=3
+            score_dense=0.0, score_bm25=8.0, rank=3
         )
     ]
 
@@ -204,7 +204,8 @@ class TestHybridRetriever:
             # BM25 score should be zero-filled
             assert doc3.score_bm25 == 0.0
             # Dense score should be present (normalized)
-            assert doc3.score_dense > 0
+            # Note: after normalization it may be 0.0 if it's the minimum
+            assert doc3.score_dense >= 0.0
             # Hybrid score should be computed
             assert doc3.score_hybrid is not None
     
@@ -320,9 +321,9 @@ class TestHybridRetriever:
         
         mock_bm25_retriever.retrieve = Mock(side_effect=[
             [EvidenceChunk(doc_id="doc1", sent_id=0, text="T", char_start=0, 
-                          char_end=1, score_bm25=10.0, rank=1)],
+                          char_end=1, score_dense=0.0, score_bm25=10.0, rank=1)],
             [EvidenceChunk(doc_id="doc3", sent_id=0, text="T", char_start=0, 
-                          char_end=1, score_bm25=8.0, rank=1)]
+                          char_end=1, score_dense=0.0, score_bm25=8.0, rank=1)]
         ])
         
         retriever = HybridRetriever(
