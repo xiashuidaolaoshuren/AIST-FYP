@@ -6,8 +6,8 @@ sparse (BM25), and hybrid retrieval by running the same queries through
 all three modes and displaying their results side-by-side.
 
 Usage:
-    python scripts/demo_hybrid_retrieval.py --strategy dev
-    python scripts/demo_hybrid_retrieval.py --strategy dev --query "What is machine learning?"
+    python scripts/demo_hybrid_retrieval.py --strategy devlopment
+    python scripts/demo_hybrid_retrieval.py --strategy devlopment --query "What is machine learning?"
 """
 
 import argparse
@@ -179,9 +179,9 @@ def main():
     parser.add_argument(
         '--strategy',
         type=str,
-        default='dev',
-        choices=['dev', 'validation', 'production'],
-        help='Dataset strategy to use (default: dev)'
+        default='development',
+        choices=['development', 'validation', 'production'],
+        help='Dataset strategy to use (default: development)'
     )
     parser.add_argument(
         '--query',

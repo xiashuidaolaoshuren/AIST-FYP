@@ -6,7 +6,7 @@ production) and caches them to disk. This allows the BM25Retriever to load
 instantly instead of rebuilding the index each time.
 
 Usage:
-    python scripts/build_bm25_index.py --strategy dev
+    python scripts/build_bm25_index.py --strategy development
     python scripts/build_bm25_index.py --strategy validation
     python scripts/build_bm25_index.py --strategy production
     python scripts/build_bm25_index.py --all  # Build all strategies
@@ -85,7 +85,7 @@ def main():
     parser.add_argument(
         '--strategy',
         type=str,
-        choices=['dev', 'validation', 'production'],
+        choices=['development', 'validation', 'production'],
         help='Dataset strategy to build index for'
     )
     parser.add_argument(
@@ -111,7 +111,7 @@ def main():
     
     # Build indexes
     if args.all:
-        strategies = ['dev', 'validation', 'production']
+        strategies = ['development', 'validation', 'production']
         success_count = 0
         
         for strategy in strategies:
