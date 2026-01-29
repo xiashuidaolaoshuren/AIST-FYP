@@ -70,7 +70,7 @@ processing:
 retrieval:
   # Retrieval mode: "dense" (embeddings only), "bm25" (sparse lexical only), 
   # or "hybrid" (combine both)
-  mode: "dense"  # Options: "dense", "bm25", "hybrid"
+  mode: "hybrid"  # Options: "dense", "bm25", "hybrid"
   
   # Number of evidence chunks to retrieve
   top_k: 5
