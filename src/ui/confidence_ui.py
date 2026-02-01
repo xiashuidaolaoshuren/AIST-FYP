@@ -16,6 +16,8 @@ from src.pipelines.baseline_rag import BaselineRAGPipeline
 from src.verification.verifier_hub import VerifierHub
 from src.verification.rule_based_aggregator import RuleBasedAggregator
 from src.utils.data_structures import Claim, ClaimDecision
+from src.mitigation.reprompt import RePrompter
+from src.generation.claim_extractor import extract_claims
 
 
 class ConfidenceUI:
@@ -52,7 +54,8 @@ class ConfidenceUI:
         self,
         rag_pipeline: BaselineRAGPipeline,
         verifier_hub: VerifierHub,
-        aggregator: RuleBasedAggregator
+        aggregator: RuleBasedAggregator,
+        repromptr: Optional['RePrompter'] = None
     ):
         """
         Initialize the confidence visualization UI.
@@ -61,10 +64,12 @@ class ConfidenceUI:
             rag_pipeline: RAG pipeline for generating answers
             verifier_hub: Verification hub for computing detector signals
             aggregator: Rule-based aggregator for final claim decisions
+            repromptr: Optional RePrompter for hallucination mitigation (default: None)
         """
         self.rag_pipeline = rag_pipeline
         self.verifier_hub = verifier_hub
         self.aggregator = aggregator
+        self.repromptr = repromptr
         self.logger = setup_logger(__name__)
         
         # Define color mapping for claim statuses
@@ -200,6 +205,102 @@ class ConfidenceUI:
                     empty_evidence_df = self._build_evidence_dataframe([], [])
                     return [(answer_text, None)], self._build_details_table([], []), empty_evidence_df
                 
+                # Step 3.5: Apply re-prompting mitigation if enabled
+                reprompt_metadata = None
+                if self.repromptr and self.repromptr.enabled:
+                    self.logger.info("Re-prompting enabled, checking hallucination rate")
+                    
+                    # Execute re-prompting
+                    reprompt_result = self.repromptr.reprompt(
+                        query=query,
+                        answer=answer_text,
+                        decisions=decisions,
+                        evidence=evidence_chunks,
+                        claims=all_claims
+                    )
+                    
+                    if reprompt_result['improved']:
+                        self.logger.info(
+                            f"Re-prompting triggered: {reprompt_result['iterations']} iteration(s), "
+                            f"initial rate: {reprompt_result['hallucination_rate_before']:.2%}"
+                        )
+                        
+                        # Update answer_text with corrected version
+                        corrected_answer = reprompt_result['final_answer']
+                        
+                        # Re-extract claims from corrected answer
+                        corrected_claims = extract_claims(
+                            text=corrected_answer,
+                            method='auto'
+                        )
+                        
+                        self.logger.info(
+                            f"Re-extracted {len(corrected_claims)} claims from corrected answer"
+                        )
+                        
+                        # Re-verify corrected claims
+                        corrected_decisions = []
+                        for claim in corrected_claims:
+                            signal = self.verifier_hub.verify_claim(
+                                claim,
+                                evidence_chunks,
+                                metadata
+                            )
+                            
+                            if signal:
+                                decision = self.aggregator.aggregate(signal)
+                                corrected_decisions.append(decision)
+                        
+                        # Compute final hallucination rate
+                        final_contradictory = sum(
+                            1 for d in corrected_decisions if d.status == "Contradictory"
+                        )
+                        final_rate = final_contradictory / len(corrected_decisions) if corrected_decisions else 0.0
+                        
+                        self.logger.info(
+                            f"Re-verification complete: {len(corrected_decisions)} claims, "
+                            f"final rate: {final_rate:.2%}"
+                        )
+                        
+                        # Update for display
+                        answer_text = corrected_answer
+                        all_claims = corrected_claims
+                        decisions = corrected_decisions
+                        
+                        # Update sub_answers structure for single-answer case
+                        # (Multi-question support can be added later)
+                        sub_answers = [{
+                            'text': corrected_answer,
+                            'char_span': [0, len(corrected_answer)],
+                            'sub_answer_id': 0,
+                            'sub_query': query
+                        }]
+                        claims_by_sub_answer = [{
+                            'sub_answer_id': 0,
+                            'sub_text': corrected_answer,
+                            'sub_query': query,
+                            'claims': corrected_claims
+                        }]
+                        
+                        # Store reprompt metadata
+                        reprompt_metadata = {
+                            'enabled': True,
+                            'triggered': True,
+                            'iterations': reprompt_result['iterations'],
+                            'hallucination_rate_before': reprompt_result['hallucination_rate_before'],
+                            'hallucination_rate_after': final_rate,
+                            'improvement': reprompt_result['hallucination_rate_before'] - final_rate
+                        }
+                    else:
+                        self.logger.info("Re-prompting not triggered (rate below threshold)")
+                        reprompt_metadata = {
+                            'enabled': True,
+                            'triggered': False,
+                            'hallucination_rate': reprompt_result['hallucination_rate_before']
+                        }
+                else:
+                    reprompt_metadata = {'enabled': False}
+                
                 # Step 4: Build highlighted output with sub-answer headers
                 highlighted_text = self._build_highlighted_output_with_headers(
                     answer_text, sub_answers, claims_by_sub_answer, decisions
@@ -211,7 +312,15 @@ class ConfidenceUI:
                 # Step 6: Build evidence dataframe (per-claim grouped view)
                 evidence_df = self._build_evidence_dataframe(all_claims, claim_evidence_pairs)
                 
-                self.logger.info(f"Successfully processed query with {len(decisions)} decisions")
+                # Log reprompt metadata if available
+                if reprompt_metadata and reprompt_metadata.get('triggered'):
+                    self.logger.info(
+                        f"Successfully processed query with re-prompting: "
+                        f"{len(decisions)} decisions, improvement: "
+                        f"{reprompt_metadata['improvement']:.2%}"
+                    )
+                else:
+                    self.logger.info(f"Successfully processed query with {len(decisions)} decisions")
                 
                 return highlighted_text, details_df, evidence_df
                 

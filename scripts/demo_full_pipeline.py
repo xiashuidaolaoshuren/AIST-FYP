@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.pipelines import BaselineRAGPipeline
 from src.verification.verifier_hub import VerifierHub
 from src.verification.rule_based_aggregator import RuleBasedAggregator
+from src.mitigation.reprompt import RePrompter
 from src.ui import ConfidenceUI
 from src.utils.config import Config
 from src.utils.logger import setup_logger
@@ -259,13 +260,32 @@ def main():
         traceback.print_exc()
         return
     
+    # Step 4.5: Initialize RePrompter (if enabled in config)
+    repromptr = None
+    reprompt_config = config.get('mitigation', {}).get('reprompt', {})
+    if reprompt_config.get('enabled', False):
+        print("🔄 Initializing RePrompter for hallucination mitigation...")
+        try:
+            repromptr = RePrompter(config, pipeline.generator)
+            print("✓ RePrompter initialized successfully")
+            print(f"   - Threshold: {repromptr.threshold:.2%}")
+            print(f"   - Max iterations: {repromptr.max_iterations}")
+            print(f"   - Strategy: {repromptr.strategy}\n")
+        except Exception as e:
+            print(f"⚠️  WARNING: Could not initialize RePrompter: {e}")
+            print("   Continuing without re-prompting...\n")
+            repromptr = None
+    else:
+        print("ℹ️  Re-prompting disabled in config (mitigation.reprompt.enabled: false)\n")
+    
     # Step 5: Create ConfidenceUI with logging
     print("🎨 Creating Gradio UI with logging...")
     try:
         ui = ConfidenceUI(
             rag_pipeline=pipeline,
             verifier_hub=verifier_hub,
-            aggregator=aggregator
+            aggregator=aggregator,
+            repromptr=repromptr
         )
         
         # Wrap UI with logging functionality

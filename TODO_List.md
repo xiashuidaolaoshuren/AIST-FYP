@@ -120,7 +120,7 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [x] **Mitigation Strategies:**
         -   [x] If time permits, implement active mitigation logic based on verifier feedback.
         -   [x] **Re-ranking:** Implement logic to re-order retrieved documents based on verification scores.
-        -   [ ] **Re-prompting:** Implement a feedback loop to ask the LLM to self-correct when low confidence is detected.
+        -   [x] **Re-prompting:** Implement a feedback loop to ask the LLM to self-correct when low confidence is detected.
         -   [x] **Filtering:** Implement a module to suppress or flag claims that are unsupported or contradictory.
     -   [x] **Confidence UI Display:**
         -   [x] Implement a lightweight web UI (e.g., Streamlit or Gradio) that runs on top of the existing demo pipeline.

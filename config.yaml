@@ -298,6 +298,28 @@ mitigation:
     
     # Placeholder text for removed contradictory claims
     placeholder: "[CLAIM REMOVED: Contradictory]"
+  
+  # Re-Prompting Configuration (Month 5/6)
+  reprompt:
+    # Enable/disable re-prompting for hallucination self-correction
+    # When enabled, triggers iterative refinement if hallucination rate is high
+    enabled: false
+    
+    # Hallucination rate threshold for triggering re-prompting
+    # If (contradictory_claims / total_claims) > threshold, trigger re-prompting
+    # Range: 0.0 to 1.0 (default: 0.5 = 50%)
+    threshold: 0.5
+    
+    # Maximum number of re-prompting iterations
+    # Prevents infinite loops while allowing iterative refinement
+    # Recommended: 1-2 iterations (default: 2)
+    max_iterations: 2
+    
+    # Re-prompting strategy
+    # - "full": Regenerate entire answer with verification feedback
+    # - "claim-specific": Create targeted verification questions (CoVe-inspired)
+    # Default: "full" (simpler, works well with smaller models)
+    strategy: "full"
 
 # Checkpointing
 checkpointing:
