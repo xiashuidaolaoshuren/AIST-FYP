@@ -119,7 +119,7 @@ verification:
   # Multi-evidence verification (Month 4, Task 2)
   # If True, verify claims against ALL retrieved evidence chunks and aggregate results
   # If False, verify only against top-ranked chunk (backward compatible)
-  verify_all_evidence: false
+  verify_all_evidence: true
   
   # Aggregation method for multi-evidence verification
   # "max": Optimistic - take best match (max coverage, min entropy)
