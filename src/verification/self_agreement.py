@@ -75,11 +75,14 @@ class SelfAgreementDetector:
         self.k_samples = sa_config.get('k_samples', 5)
         self.temperature = sa_config.get('temperature', 1.5)
         self.device = sa_config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+        self.deterministic = sa_config.get('deterministic', False)
+        self.random_seed = sa_config.get('random_seed', 42)
         
         self.logger.info(f"Initializing SelfAgreementDetector...")
         self.logger.info(f"Model: {self.model_name}")
         self.logger.info(f"k_samples: {self.k_samples}, temperature: {self.temperature}")
         self.logger.info(f"Device: {self.device}")
+        self.logger.info(f"Deterministic mode: {self.deterministic} (seed={self.random_seed})")
         
         # Load sentence-transformer model for similarity measurement
         try:
@@ -132,6 +135,14 @@ class SelfAgreementDetector:
         
         if evidence_chunks is None:
             evidence_chunks = []
+        
+        # Set random seed for deterministic mode
+        if self.deterministic:
+            torch.manual_seed(self.random_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(self.random_seed)
+            np.random.seed(self.random_seed)
+            self.logger.debug(f"Deterministic mode: seed set to {self.random_seed}")
         
         self.logger.debug(f"Generating {k} samples for query: {query[:50]}...")
         

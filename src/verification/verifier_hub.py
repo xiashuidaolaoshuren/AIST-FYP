@@ -12,7 +12,7 @@ Month 4 Architecture:
 - Supports gradual feature rollout (Month 3: Intrinsic + Grounded, Month 4: + NLI + Self-Agreement)
 """
 
-from typing import Dict, Optional, Union, List
+from typing import Dict, Optional, Union, List, Tuple
 import traceback
 
 from src.utils.data_structures import Claim, EvidenceChunk, VerifierSignal
@@ -484,7 +484,19 @@ class VerifierHub:
                 self.logger.error("No valid signals collected from evidence chunks")
                 return None
             
-            aggregated = self._aggregate_signals(per_chunk_signals)
+            aggregated, primary_chunk_idx = self._aggregate_signals(per_chunk_signals)
+            
+            # Determine which chunk to use for doc_id/sent_id stamping
+            # Use primary evidence chunk if available (max method), otherwise use top-ranked
+            if primary_chunk_idx is not None:
+                source_chunk = evidence_list[primary_chunk_idx]
+                self.logger.info(
+                    f"Using primary evidence chunk {primary_chunk_idx} "
+                    f"(doc_id={source_chunk.doc_id}, sent_id={source_chunk.sent_id})"
+                )
+            else:
+                source_chunk = evidence_list[0]
+                self.logger.debug("Using top-ranked chunk (mean aggregation method)")
             
             # Compute self-agreement consistency (Task 4)
             consistency_signal = {'variance': None}
@@ -509,14 +521,11 @@ class VerifierHub:
                     self.logger.error(f"Self-agreement failed: {str(e)}")
                     self.logger.debug(traceback.format_exc())
             
-            # Use the top-ranked chunk's identifiers for the aggregated signal
-            top_chunk = evidence_list[0]
-            
-            # Construct aggregated VerifierSignal
+            # Construct aggregated VerifierSignal using source chunk's identifiers
             signal = VerifierSignal(
                 claim_id=claim.claim_id,
-                doc_id=top_chunk.doc_id,
-                sent_id=top_chunk.sent_id,
+                doc_id=source_chunk.doc_id,
+                sent_id=source_chunk.sent_id,
                 nli=aggregated.get('nli', None),  # Task 3: Include aggregated NLI scores
                 coverage=aggregated['coverage'],
                 uncertainty=aggregated['uncertainty'],
@@ -538,7 +547,7 @@ class VerifierHub:
             self.logger.error(traceback.format_exc())
             return None
     
-    def _aggregate_signals(self, per_chunk_signals: List[Dict]) -> Dict:
+    def _aggregate_signals(self, per_chunk_signals: List[Dict]) -> Tuple[Dict, Optional[int]]:
         """
         Aggregate per-chunk signals using configured method.
         
@@ -546,13 +555,17 @@ class VerifierHub:
         - MAX method (optimistic): Take best-case values
           * Coverage (higher=better): MAX
           * Entropy (lower=better): MIN
-        - MEAN method: Average all values
+          * Tracks which chunk contributed the max entailment (primary evidence)
+        - MEAN method: Average all values (no primary evidence tracking)
         
         Args:
             per_chunk_signals: List of per-chunk signal dicts
         
         Returns:
-            Aggregated signal dict with coverage, uncertainty, etc.
+            Tuple of (aggregated_dict, primary_chunk_index)
+            - aggregated_dict: Aggregated signal dict with coverage, uncertainty, etc.
+            - primary_chunk_index: Index of chunk that contributed max entailment (MAX method only),
+                                   or None for MEAN method
         """
         # Extract values for aggregation
         entities = [s['coverage'].get('entities', 0.0) for s in per_chunk_signals]
@@ -569,8 +582,18 @@ class VerifierHub:
             neutrals = [s.get('nli', {}).get('neutral', 0.33) for s in per_chunk_signals]
             contradictions = [s.get('nli', {}).get('contradiction', 0.33) for s in per_chunk_signals]
         
+        primary_chunk_idx = None
+        
         if self.aggregation_method == 'max':
             # Optimistic: best coverage, lowest uncertainty, highest entailment
+            # Track which chunk contributed the max entailment (primary evidence)
+            if nli_available:
+                max_entailment = max(entailments)
+                primary_chunk_idx = entailments.index(max_entailment)
+                self.logger.debug(
+                    f"Primary evidence: chunk {primary_chunk_idx} with entailment={max_entailment:.3f}"
+                )
+            
             result = {
                 'coverage': {
                     'entities': max(entities),
@@ -585,13 +608,13 @@ class VerifierHub:
             }
             if nli_available:
                 result['nli'] = {
-                    'entailment': max(entailments),  # Best entailment
+                    'entailment': max_entailment,  # Best entailment
                     'neutral': min(neutrals),  # Least neutral (most decisive)
                     'contradiction': min(contradictions)  # Least contradiction
                 }
-            return result
+            return result, primary_chunk_idx
         else:  # mean
-            # Average all scores
+            # Average all scores (no primary evidence tracking for mean method)
             result = {
                 'coverage': {
                     'entities': sum(entities) / len(entities),
@@ -610,7 +633,7 @@ class VerifierHub:
                     'neutral': sum(neutrals) / len(neutrals),
                     'contradiction': sum(contradictions) / len(contradictions)
                 }
-            return result
+            return result, None
     
     def is_enabled(self) -> bool:
         """

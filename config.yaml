@@ -196,6 +196,15 @@ verification:
     # Aggregation method for multi-evidence consistency scores
     # Options: "max" (optimistic), "mean" (average), "min" (pessimistic), "inherit" (use global aggregation_method)
     aggregation_method: "inherit"
+    
+    # Deterministic mode for reproducible results
+    # If True, uses random_seed for reproducible sampling
+    # If False (default), uses stochastic sampling for robustness
+    deterministic: false
+    
+    # Random seed for deterministic mode (only used if deterministic=true)
+    # Set to any integer for reproducible results
+    random_seed: 42
   
   # Citation Formatter Configuration (Month 5)
   citation:
