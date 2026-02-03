@@ -165,6 +165,21 @@ verification:
       # Enable Tier 3: Dictionary-based alias matching
       # Uses entity_aliases.py for canonical form and surface variation matching
       alias_dictionary: true
+
+      # Enable Tier 4: LLM-based entity matching (DeepSeek API)
+      llm:
+        enabled: true
+        provider: "deepseek"
+        base_url: "https://api.deepseek.com"
+        model: "deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        timeout_s: 20
+        max_retries: 2
+        retry_backoff_s: 1.5
+        max_evidence_chars: 3000
+        cache_size: 2048
+        temperature: 0
+        max_tokens: 200
   
   # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
   nli:

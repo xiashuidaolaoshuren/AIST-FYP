@@ -41,7 +41,12 @@ References:
 """
 
 import re
-from typing import Optional, List
+import os
+import json
+import time
+import hashlib
+from collections import OrderedDict
+from typing import Optional, List, Dict, Any
 
 from src.utils.logger import setup_logger
 from .entity_aliases import get_all_forms
@@ -98,6 +103,21 @@ class EntityMatcher:
         # Load matching configuration with defaults
         self.use_acronym = True  # Default
         self.use_aliases = True  # Default
+        self.use_llm = False  # Default
+
+        # LLM matcher defaults (DeepSeek/OpenAI-compatible API)
+        self.llm_provider = "deepseek"
+        self.llm_base_url = "https://api.deepseek.com"
+        self.llm_model = "deepseek-chat"
+        self.llm_api_key_env = "DEEPSEEK_API_KEY"
+        self.llm_timeout_s = 20
+        self.llm_max_retries = 2
+        self.llm_retry_backoff_s = 1.5
+        self.llm_max_evidence_chars = 3000
+        self.llm_cache_size = 2048
+        self.llm_temperature = 0
+        self.llm_max_tokens = 200
+        self._llm_cache: "OrderedDict[str, bool]" = OrderedDict()
         
         # Try to read from config (graceful fallback if not present)
         try:
@@ -106,10 +126,42 @@ class EntityMatcher:
                 if isinstance(matching_config, dict):
                     self.use_acronym = matching_config.get('acronym_matching', True)
                     self.use_aliases = matching_config.get('alias_dictionary', True)
+                    llm_config = matching_config.get('llm', {})
                 elif matching_config is not None:
                     # Handle case where matching is an object with attributes
                     self.use_acronym = getattr(matching_config, 'acronym_matching', True)
                     self.use_aliases = getattr(matching_config, 'alias_dictionary', True)
+                    llm_config = getattr(matching_config, 'llm', {})
+                else:
+                    llm_config = {}
+
+                if llm_config:
+                    if isinstance(llm_config, dict):
+                        self.use_llm = llm_config.get('enabled', False)
+                        self.llm_provider = llm_config.get('provider', self.llm_provider)
+                        self.llm_base_url = llm_config.get('base_url', self.llm_base_url)
+                        self.llm_model = llm_config.get('model', self.llm_model)
+                        self.llm_api_key_env = llm_config.get('api_key_env', self.llm_api_key_env)
+                        self.llm_timeout_s = llm_config.get('timeout_s', self.llm_timeout_s)
+                        self.llm_max_retries = llm_config.get('max_retries', self.llm_max_retries)
+                        self.llm_retry_backoff_s = llm_config.get('retry_backoff_s', self.llm_retry_backoff_s)
+                        self.llm_max_evidence_chars = llm_config.get('max_evidence_chars', self.llm_max_evidence_chars)
+                        self.llm_cache_size = llm_config.get('cache_size', self.llm_cache_size)
+                        self.llm_temperature = llm_config.get('temperature', self.llm_temperature)
+                        self.llm_max_tokens = llm_config.get('max_tokens', self.llm_max_tokens)
+                    else:
+                        self.use_llm = getattr(llm_config, 'enabled', False)
+                        self.llm_provider = getattr(llm_config, 'provider', self.llm_provider)
+                        self.llm_base_url = getattr(llm_config, 'base_url', self.llm_base_url)
+                        self.llm_model = getattr(llm_config, 'model', self.llm_model)
+                        self.llm_api_key_env = getattr(llm_config, 'api_key_env', self.llm_api_key_env)
+                        self.llm_timeout_s = getattr(llm_config, 'timeout_s', self.llm_timeout_s)
+                        self.llm_max_retries = getattr(llm_config, 'max_retries', self.llm_max_retries)
+                        self.llm_retry_backoff_s = getattr(llm_config, 'retry_backoff_s', self.llm_retry_backoff_s)
+                        self.llm_max_evidence_chars = getattr(llm_config, 'max_evidence_chars', self.llm_max_evidence_chars)
+                        self.llm_cache_size = getattr(llm_config, 'cache_size', self.llm_cache_size)
+                        self.llm_temperature = getattr(llm_config, 'temperature', self.llm_temperature)
+                        self.llm_max_tokens = getattr(llm_config, 'max_tokens', self.llm_max_tokens)
         except Exception as e:
             self.logger.warning(
                 f"Could not load matching config, using defaults: {e}"
@@ -117,7 +169,7 @@ class EntityMatcher:
         
         self.logger.info(
             f"EntityMatcher initialized: acronym_matching={self.use_acronym}, "
-            f"alias_dictionary={self.use_aliases}"
+            f"alias_dictionary={self.use_aliases}, llm_enabled={self.use_llm}"
         )
     
     def match_entity(self, entity: str, evidence_text: str) -> bool:
@@ -179,10 +231,149 @@ class EntityMatcher:
         if self.use_aliases and self._match_aliases(entity, evidence_text):
             self.logger.debug(f"Tier 3 (aliases) matched: '{entity}'")
             return True
+
+        # Tier 4: LLM-based matching (DeepSeek/OpenAI-compatible API)
+        if self.use_llm and self._match_llm(entity, evidence_text):
+            self.logger.debug(f"Tier 4 (llm) matched: '{entity}'")
+            return True
         
         # No match found
         self.logger.debug(f"No match found for entity: '{entity}'")
         return False
+
+    # =========================================================================
+    # Tier 4: LLM-Based Matching (DeepSeek/OpenAI-compatible API)
+    # =========================================================================
+
+    def _match_llm(self, entity: str, text: str) -> bool:
+        """
+        Tier 4: LLM-based entity matching with strict quote verification.
+
+        Calls an OpenAI-compatible API (DeepSeek) to decide if an entity
+        appears in evidence. The model must return a verbatim evidence quote;
+        if the quote is not found in the evidence text, the match is rejected.
+        """
+        api_key = os.getenv(self.llm_api_key_env)
+        if not api_key:
+            self.logger.warning(
+                f"LLM matcher enabled but {self.llm_api_key_env} is not set; skipping"
+            )
+            return False
+
+        truncated_text = text[: self.llm_max_evidence_chars]
+        cache_key = self._llm_cache_key(entity, truncated_text)
+        cached = self._llm_cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+        system_prompt, user_prompt = self._build_llm_prompts(entity, truncated_text)
+        payload = {
+            "model": self.llm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": self.llm_temperature,
+            "max_tokens": self.llm_max_tokens
+        }
+
+        url = self.llm_base_url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        last_error = None
+        for attempt in range(self.llm_max_retries + 1):
+            try:
+                response = self._post_json(url, headers, payload, self.llm_timeout_s)
+                content = self._extract_llm_content(response)
+                result = self._parse_llm_result(content)
+                is_match = self._validate_llm_result(result, entity, truncated_text)
+                self._llm_cache_set(cache_key, is_match)
+                return is_match
+            except Exception as e:
+                last_error = e
+                if attempt < self.llm_max_retries:
+                    time.sleep(self.llm_retry_backoff_s)
+                continue
+
+        if last_error:
+            self.logger.warning(f"LLM matcher failed after retries: {last_error}")
+        self._llm_cache_set(cache_key, False)
+        return False
+
+    def _build_llm_prompts(self, entity: str, evidence_text: str) -> (str, str):
+        system_prompt = (
+            "You are an entity matching assistant. "
+            "You must not invent text. If you claim a match, you must quote the exact evidence substring."
+        )
+        user_prompt = (
+            "Task: Decide if the claim entity refers to the same real-world entity as something explicitly "
+            "mentioned in the evidence.\n"
+            f"Claim entity: \"{entity}\"\n"
+            f"Evidence text: \"{evidence_text}\"\n"
+            "Return JSON only with keys: match (true/false), matched_surface_form (string or null), "
+            "evidence_quote (string or null), confidence (0-1), rationale_short (<=20 words). "
+            "If match=false, set matched_surface_form and evidence_quote to null."
+        )
+        return system_prompt, user_prompt
+
+    def _post_json(self, url: str, headers: Dict[str, str], payload: Dict[str, Any], timeout_s: int) -> Dict[str, Any]:
+        import requests
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout_s)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _extract_llm_content(self, response: Dict[str, Any]) -> str:
+        try:
+            return response["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            raise ValueError(f"Unexpected LLM response format: {e}")
+
+    def _parse_llm_result(self, content: str) -> Dict[str, Any]:
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # Attempt to extract JSON object from text
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+        raise ValueError("LLM response is not valid JSON")
+
+    def _validate_llm_result(self, result: Dict[str, Any], entity: str, evidence_text: str) -> bool:
+        if not isinstance(result, dict):
+            return False
+        match = result.get("match", False)
+        if match is not True:
+            return False
+        evidence_quote = result.get("evidence_quote")
+        if not evidence_quote or not isinstance(evidence_quote, str):
+            return False
+        if evidence_quote not in evidence_text:
+            self.logger.debug(
+                f"LLM quote not found in evidence for entity '{entity}': '{evidence_quote[:50]}...'"
+            )
+            return False
+        return True
+
+    def _llm_cache_key(self, entity: str, evidence_text: str) -> str:
+        digest = hashlib.sha256(
+            (entity.strip().lower() + "||" + evidence_text).encode("utf-8")
+        ).hexdigest()
+        return digest
+
+    def _llm_cache_get(self, key: str) -> Optional[bool]:
+        if key in self._llm_cache:
+            value = self._llm_cache.pop(key)
+            self._llm_cache[key] = value
+            return value
+        return None
+
+    def _llm_cache_set(self, key: str, value: bool) -> None:
+        self._llm_cache[key] = value
+        if len(self._llm_cache) > self.llm_cache_size:
+            self._llm_cache.popitem(last=False)
     
     # =========================================================================
     # Tier 1: Substring Matching
@@ -495,10 +686,13 @@ class EntityMatcher:
             tiers.append('Tier 2 (Acronym)')
         if self.use_aliases:
             tiers.append('Tier 3 (Alias)')
+        if self.use_llm:
+            tiers.append('Tier 4 (LLM)')
         
         return {
             'acronym_matching': self.use_acronym,
             'alias_dictionary': self.use_aliases,
+            'llm_enabled': self.use_llm,
             'tiers_enabled': tiers
         }
 
