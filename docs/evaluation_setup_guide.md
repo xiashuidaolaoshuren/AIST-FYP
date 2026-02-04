@@ -72,4 +72,6 @@ Once the data is prepared, you can run evaluation scripts such as:
 ```bash
 python scripts/demo_ragtruth_eval.py
 ```
-Refer to [docs/ragtruth_evaluation_guide.md](docs/ragtruth_evaluation_guide.md) for detailed evaluation metrics and procedures.
+Refer to the following guides for detailed evaluation metrics and procedures:
+- [RAGTruth Evaluation Guide](docs/ragtruth_evaluation_guide.md)
+- [CiteEval (CiteBench) Evaluation Guide](docs/citeeval_evaluation_guide.md)
