@@ -260,7 +260,7 @@ class RePrompter:
                 feedback_lines = ["The following claims have verification issues:"]
                 
                 # Map decisions to claim text
-                claim_map = {c.claim_id: c.claim_text for c in claims}
+                claim_map = {c.claim_id: c.text for c in claims}
                 
                 for d in problematic_decisions:
                     claim_text = claim_map.get(d.claim_id, "[Unknown claim]")
@@ -292,7 +292,7 @@ class RePrompter:
             ]
             
             # Map decisions to claim text
-            claim_map = {c.claim_id: c.claim_text for c in claims}
+            claim_map = {c.claim_id: c.text for c in claims}
             
             verification_questions = []
             for d in contradictory_decisions:

@@ -69,16 +69,13 @@ class TestRagasEvaluatorInitialization:
     
     @patch('src.evaluation.ragas_evaluator.ChatOpenAI')
     @patch('src.evaluation.ragas_evaluator.LangchainLLMWrapper')
-    @patch('src.evaluation.ragas_evaluator.Faithfulness')
-    @patch('src.evaluation.ragas_evaluator.AnswerRelevancy')
     def test_init_success(
         self,
-        mock_answer_relevancy,
-        mock_faithfulness,
         mock_llm_wrapper,
         mock_chat_openai,
         config,
-        mock_env_openai_key
+        mock_env_openai_key,
+        monkeypatch
     ):
         """Test successful initialization."""
         # Setup mocks
@@ -86,6 +83,16 @@ class TestRagasEvaluatorInitialization:
         mock_chat_openai.return_value = mock_llm
         mock_wrapped_llm = Mock()
         mock_llm_wrapper.return_value = mock_wrapped_llm
+        mock_faithfulness = Mock()
+        mock_answer_relevancy = Mock()
+        monkeypatch.setattr(
+            RagasEvaluator,
+            'AVAILABLE_METRICS',
+            {
+                'faithfulness': mock_faithfulness,
+                'answer_relevancy': mock_answer_relevancy
+            }
+        )
         
         # Initialize
         evaluator = RagasEvaluator(config)
@@ -348,18 +355,27 @@ class TestMetricManagement:
     
     @patch('src.evaluation.ragas_evaluator.ChatOpenAI')
     @patch('src.evaluation.ragas_evaluator.LangchainLLMWrapper')
-    @patch('src.evaluation.ragas_evaluator.Faithfulness')
-    @patch('src.evaluation.ragas_evaluator.ContextRecall')
     def test_add_metric_success(
         self,
-        mock_context_recall,
-        mock_faithfulness,
         mock_llm_wrapper,
         mock_chat_openai,
         config,
-        mock_env_openai_key
+        mock_env_openai_key,
+        monkeypatch
     ):
         """Test successfully adding a new metric."""
+        mock_faithfulness = Mock()
+        mock_answer_relevancy = Mock()
+        mock_context_recall = Mock()
+        monkeypatch.setattr(
+            RagasEvaluator,
+            'AVAILABLE_METRICS',
+            {
+                'faithfulness': mock_faithfulness,
+                'answer_relevancy': mock_answer_relevancy,
+                'context_recall': mock_context_recall
+            }
+        )
         evaluator = RagasEvaluator(config)
         
         # Initially only has faithfulness
@@ -370,7 +386,7 @@ class TestMetricManagement:
         
         # Verify added
         assert 'context_recall' in evaluator.metric_names
-        assert len(evaluator.metrics) == 2
+        assert len(evaluator.metrics) == 3
         mock_context_recall.assert_called_once()
     
     @patch('src.evaluation.ragas_evaluator.ChatOpenAI')

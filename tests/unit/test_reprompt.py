@@ -280,18 +280,22 @@ class TestPromptConstruction:
         claims = [
             Claim(
                 claim_id="claim_1",
-                claim_text="The capital of France is Berlin.",
-                answer_char_span=[0, 35]
+                answer_id="answer_1",
+                text="The capital of France is Berlin.",
+                answer_char_span=[0, 35],
+                extraction_method="test"
             )
         ]
         
         evidence = [
             EvidenceChunk(
-                chunk_id="chunk_1",
                 doc_id="doc_1",
                 sent_id="sent_1",
                 text="Paris is the capital of France.",
+                char_start=0,
+                char_end=31,
                 score_dense=0.95,
+                rank=1,
                 score_bm25=None,
                 score_hybrid=None
             )
@@ -335,18 +339,22 @@ class TestPromptConstruction:
         claims = [
             Claim(
                 claim_id="claim_1",
-                claim_text="The capital of France is Berlin.",
-                answer_char_span=[0, 35]
+                answer_id="answer_1",
+                text="The capital of France is Berlin.",
+                answer_char_span=[0, 35],
+                extraction_method="test"
             )
         ]
         
         evidence = [
             EvidenceChunk(
-                chunk_id="chunk_1",
                 doc_id="doc_1",
                 sent_id="sent_1",
                 text="Paris is the capital of France.",
+                char_start=0,
+                char_end=31,
                 score_dense=0.95,
+                rank=1,
                 score_bm25=None,
                 score_hybrid=None
             )
@@ -416,18 +424,22 @@ class TestRepromptExecution:
         claims = [
             Claim(
                 claim_id="claim_1",
-                claim_text="The capital of France is Paris.",
-                answer_char_span=[0, 33]
+                answer_id="answer_1",
+                text="The capital of France is Paris.",
+                answer_char_span=[0, 33],
+                extraction_method="test"
             )
         ]
         
         evidence = [
             EvidenceChunk(
-                chunk_id="chunk_1",
                 doc_id="doc_1",
                 sent_id="sent_1",
                 text="Paris is the capital of France.",
+                char_start=0,
+                char_end=31,
                 score_dense=0.95,
+                rank=1,
                 score_bm25=None,
                 score_hybrid=None
             )
@@ -473,23 +485,29 @@ class TestRepromptExecution:
         claims = [
             Claim(
                 claim_id="claim_1",
-                claim_text="The capital of France is Berlin.",
-                answer_char_span=[0, 33]
+                answer_id="answer_1",
+                text="The capital of France is Berlin.",
+                answer_char_span=[0, 33],
+                extraction_method="test"
             ),
             Claim(
                 claim_id="claim_2",
-                claim_text="Berlin is very large.",
-                answer_char_span=[34, 55]
+                answer_id="answer_1",
+                text="Berlin is very large.",
+                answer_char_span=[34, 55],
+                extraction_method="test"
             )
         ]
         
         evidence = [
             EvidenceChunk(
-                chunk_id="chunk_1",
                 doc_id="doc_1",
                 sent_id="sent_1",
                 text="Paris is the capital of France.",
+                char_start=0,
+                char_end=31,
                 score_dense=0.95,
+                rank=1,
                 score_bm25=None,
                 score_hybrid=None
             )

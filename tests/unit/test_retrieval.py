@@ -5,6 +5,7 @@ Tests the DenseRetriever class for query encoding, FAISS search,
 and EvidenceChunk object creation with proper ranking and scoring.
 """
 
+import os
 import pytest
 import sys
 from pathlib import Path
@@ -18,12 +19,28 @@ from src.utils.data_structures import EvidenceChunk
 
 class TestDenseRetriever:
     """Test suite for DenseRetriever class."""
+
+    def _get_strategy(self) -> str:
+        return os.getenv("DATA_STRATEGY", "validation")
+
+    def _resolve_index_dir(self) -> Path:
+        project_root = Path(__file__).parent.parent.parent
+        return project_root / 'data' / 'indexes' / self._get_strategy()
+
+    def _skip_if_missing(self, index_dir: Path) -> None:
+        index_file = index_dir / 'faiss.index'
+        metadata_file = index_dir / 'metadata.pkl'
+        if not index_file.exists() or not metadata_file.exists():
+            pytest.skip(
+                f"FAISS index or metadata not found for strategy '{self._get_strategy()}'. "
+                f"Expected: {index_file} and {metadata_file}"
+            )
     
     @pytest.fixture
     def retriever(self):
-        """Create a DenseRetriever instance with development index."""
-        project_root = Path(__file__).parent.parent.parent
-        index_dir = project_root / 'data' / 'indexes' / 'development'
+        """Create a DenseRetriever instance with validation index."""
+        index_dir = self._resolve_index_dir()
+        self._skip_if_missing(index_dir)
         
         retriever = DenseRetriever(
             index_path=str(index_dir / 'faiss.index'),
@@ -52,8 +69,11 @@ class TestDenseRetriever:
     
     def test_initialization_missing_metadata(self):
         """Test initialization with missing metadata file."""
-        project_root = Path(__file__).parent.parent.parent
-        index_dir = project_root / 'data' / 'indexes' / 'development'
+        index_dir = self._resolve_index_dir()
+        if not (index_dir / 'faiss.index').exists():
+            pytest.skip(
+                f"FAISS index not found for strategy '{self._get_strategy()}', skipping metadata test"
+            )
         
         with pytest.raises(FileNotFoundError, match="Metadata not found"):
             DenseRetriever(

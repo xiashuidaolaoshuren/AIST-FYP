@@ -58,8 +58,8 @@ class TestRuleBasedAggregator:
             'doc_id': 'doc_123',
             'sent_id': 5,
             'nli': {
-                'entail': 0.5,
-                'contradict': 0.3,
+                'entailment': 0.5,
+                'contradiction': 0.3,
                 'neutral': 0.2
             },
             'coverage': {
@@ -82,8 +82,8 @@ class TestRuleBasedAggregator:
         """Mock signal with high NLI contradiction."""
         signal_dict = mock_signal_base.copy()
         signal_dict['nli'] = {
-            'entail': 0.1,
-            'contradict': 0.8,  # High contradiction
+            'entailment': 0.1,
+            'contradiction': 0.8,  # High contradiction
             'neutral': 0.1
         }
         return VerifierSignal(**signal_dict)
@@ -105,8 +105,8 @@ class TestRuleBasedAggregator:
         """Mock signal with strong support."""
         signal_dict = mock_signal_base.copy()
         signal_dict['nli'] = {
-            'entail': 0.9,  # High entailment
-            'contradict': 0.05,
+            'entailment': 0.9,  # High entailment
+            'contradiction': 0.05,
             'neutral': 0.05
         }
         signal_dict['coverage'] = {
@@ -123,8 +123,8 @@ class TestRuleBasedAggregator:
         """Mock signal with weak signals across all dimensions."""
         signal_dict = mock_signal_base.copy()
         signal_dict['nli'] = {
-            'entail': 0.4,  # Weak entailment
-            'contradict': 0.3,  # Low contradiction
+            'entailment': 0.4,  # Weak entailment
+            'contradiction': 0.3,  # Low contradiction
             'neutral': 0.3
         }
         signal_dict['coverage'] = {
@@ -220,8 +220,8 @@ class TestRuleBasedAggregator:
         # High entailment but low coverage
         signal_dict = mock_signal_base.copy()
         signal_dict['nli'] = {
-            'entail': 0.9,
-            'contradict': 0.05,
+            'entailment': 0.9,
+            'contradiction': 0.05,
             'neutral': 0.05
         }
         signal_dict['coverage'] = {
@@ -423,8 +423,8 @@ class TestRuleBasedAggregator:
         
         signal_dict = mock_signal_base.copy()
         signal_dict['nli'] = {
-            'entail': 0.1,
-            'contradict': contradiction_score,
+            'entailment': 0.1,
+            'contradiction': contradiction_score,
             'neutral': 0.1
         }
         # Ensure it doesn't hit supported condition
@@ -452,8 +452,8 @@ class TestRuleBasedAggregator:
         
         signal_dict = mock_signal_base.copy()
         signal_dict['nli'] = {
-            'entail': entailment_score,
-            'contradict': 0.1,
+            'entailment': entailment_score,
+            'contradiction': 0.1,
             'neutral': 0.1
         }
         signal_dict['coverage'] = {
@@ -526,7 +526,7 @@ class TestRuleBasedAggregator:
             claim_id='claim_e2e_1',
             doc_id='doc_999',
             sent_id=10,
-            nli={'entail': 0.05, 'contradict': 0.9, 'neutral': 0.05},
+            nli={'entailment': 0.05, 'contradiction': 0.9, 'neutral': 0.05},
             coverage={'entities': 0.5, 'numbers': 0.0, 'tokens_overlap': 0.5},
             uncertainty={'mean_entropy': 1.5},
             consistency={'variance': 0.5},
@@ -548,7 +548,7 @@ class TestRuleBasedAggregator:
             claim_id='claim_e2e_2',
             doc_id='doc_888',
             sent_id=20,
-            nli={'entail': 0.95, 'contradict': 0.02, 'neutral': 0.03},
+            nli={'entailment': 0.95, 'contradiction': 0.02, 'neutral': 0.03},
             coverage={'entities': 0.95, 'numbers': 0.0, 'tokens_overlap': 0.95},
             uncertainty={'mean_entropy': 0.5},
             consistency={'variance': 0.1},
@@ -571,7 +571,7 @@ class TestRuleBasedAggregator:
             claim_id='claim_e2e_3',
             doc_id='doc_777',
             sent_id=30,
-            nli={'entail': 0.4, 'contradict': 0.3, 'neutral': 0.3},
+            nli={'entailment': 0.4, 'contradiction': 0.3, 'neutral': 0.3},
             coverage={'entities': 0.2, 'numbers': 0.0, 'tokens_overlap': 0.15},
             uncertainty={'mean_entropy': 4.0},
             consistency={'variance': 2.0},

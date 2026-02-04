@@ -283,7 +283,7 @@ class TestEndToEndPipeline:
         try:
             pipeline = BaselineRAGPipeline.from_config(
                 config_path="config.yaml",
-                strategy="development"
+                strategy="validation"
             )
         except FileNotFoundError:
             pytest.skip("FAISS index not found - skipping full pipeline test")
@@ -307,11 +307,17 @@ class TestEndToEndPipeline:
         
         # Verify generator metadata for Month 3
         gen_meta = result['generator_metadata']
-        assert 'logits' in gen_meta
-        assert 'scores' in gen_meta
-        assert 'tokens' in gen_meta
-        assert len(gen_meta['logits']) > 0
-        assert len(gen_meta['scores']) > 0
+        assert 'text' in gen_meta
+        assert 'sub_answer_metadata' in gen_meta
+        
+        # Check that metadata is properly nested
+        if gen_meta['sub_answer_metadata']:
+            meta = gen_meta['sub_answer_metadata'][0]['metadata']
+            assert 'logits' in meta
+            assert 'scores' in meta
+            assert 'tokens' in meta
+            assert len(meta['logits']) > 0
+            assert len(meta['scores']) > 0
 
 
 @pytest.mark.unit

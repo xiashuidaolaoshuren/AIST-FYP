@@ -27,8 +27,12 @@ class TestIntrinsicUncertaintyDetector:
         # Ensure verification settings exist
         if not hasattr(config, 'verification'):
             config._config['verification'] = {
-                'intrinsic': {'epsilon': 1e-10}
+                'intrinsic': {'epsilon': 1e-10, 'strict_logits': False}
             }
+        else:
+            config._config.setdefault('verification', {})
+            config._config['verification'].setdefault('intrinsic', {})
+            config._config['verification']['intrinsic']['strict_logits'] = False
         return config
     
     @pytest.fixture
