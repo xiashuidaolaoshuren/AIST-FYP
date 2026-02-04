@@ -151,7 +151,7 @@ class TestInitialization:
         assert 'tiers_enabled' in summary
         assert summary['acronym_matching'] == True
         assert summary['alias_dictionary'] == True
-        assert len(summary['tiers_enabled']) == 3  # All tiers enabled
+        assert len(summary['tiers_enabled']) == 4  # All tiers enabled
 
 
 # =============================================================================
@@ -369,7 +369,94 @@ class TestIntegration:
 
 
 # =============================================================================
-# Test Class 6: Edge Cases
+# Test Class 6: Tier 4 - LLM Matching
+# =============================================================================
+
+class TestTier4LLM:
+    """Test Tier 4 (LLM) matching functionality with mocked API calls."""
+
+    def test_llm_match_success_with_quote(self, matcher, monkeypatch):
+        """Test LLM match when evidence quote exists."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        matcher.use_llm = True
+        matcher.llm_max_retries = 0
+        matcher.llm_cache_size = 4
+
+        def fake_post_json(self, url, headers, payload, timeout_s):
+            return {
+                "choices": [
+                    {"message": {"content": '{"match": true, "matched_surface_form": "Zeta Corporation", "evidence_quote": "Zeta Corporation", "confidence": 0.9, "rationale_short": "Exact mention"}'}}
+                ]
+            }
+
+        monkeypatch.setattr(EntityMatcher, "_post_json", fake_post_json)
+
+        entity = "ZetaCorp"
+        evidence = "The merger involved Zeta Corporation and Alpha LLC."
+        assert matcher.match_entity(entity, evidence) == True
+
+    def test_llm_match_fails_when_quote_missing(self, matcher, monkeypatch):
+        """Test LLM match rejected if quoted evidence not found."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        matcher.use_llm = True
+        matcher.llm_max_retries = 0
+
+        def fake_post_json(self, url, headers, payload, timeout_s):
+            return {
+                "choices": [
+                    {"message": {"content": '{"match": true, "matched_surface_form": "Zeta Corporation", "evidence_quote": "Nonexistent Quote", "confidence": 0.9, "rationale_short": "Exact mention"}'}}
+                ]
+            }
+
+        monkeypatch.setattr(EntityMatcher, "_post_json", fake_post_json)
+
+        entity = "ZetaCorp"
+        evidence = "The merger involved Zeta Corporation and Alpha LLC."
+        assert matcher.match_entity(entity, evidence) == False
+
+    def test_llm_invalid_json_response(self, matcher, monkeypatch):
+        """Test invalid JSON in LLM response returns False."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        matcher.use_llm = True
+        matcher.llm_max_retries = 0
+
+        def fake_post_json(self, url, headers, payload, timeout_s):
+            return {"choices": [{"message": {"content": "not-json"}}]}
+
+        monkeypatch.setattr(EntityMatcher, "_post_json", fake_post_json)
+
+        entity = "ZetaCorp"
+        evidence = "The merger involved Zeta Corporation and Alpha LLC."
+        assert matcher.match_entity(entity, evidence) == False
+
+    def test_llm_cache_hit(self, matcher, monkeypatch):
+        """Test repeated LLM requests are served from cache."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        matcher.use_llm = True
+        matcher.llm_max_retries = 0
+        matcher.llm_cache_size = 4
+
+        call_count = {"n": 0}
+
+        def fake_post_json(self, url, headers, payload, timeout_s):
+            call_count["n"] += 1
+            return {
+                "choices": [
+                    {"message": {"content": '{"match": true, "matched_surface_form": "Zeta Corporation", "evidence_quote": "Zeta Corporation", "confidence": 0.9, "rationale_short": "Exact mention"}'}}
+                ]
+            }
+
+        monkeypatch.setattr(EntityMatcher, "_post_json", fake_post_json)
+
+        entity = "ZetaCorp"
+        evidence = "The merger involved Zeta Corporation and Alpha LLC."
+        assert matcher.match_entity(entity, evidence) == True
+        assert matcher.match_entity(entity, evidence) == True
+        assert call_count["n"] == 1
+
+
+# =============================================================================
+# Test Class 7: Edge Cases
 # =============================================================================
 
 class TestEdgeCases:
