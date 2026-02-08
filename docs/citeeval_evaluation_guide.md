@@ -16,6 +16,23 @@ Ensure you have completed the setup in [docs/evaluation_setup_guide.md](docs/eva
 - CiteBench data placed in `benchmark/CiteEval/data/`.
 - Required environment variables set (see `benchmark/CiteEval/README.md`).
 
+### Provider Configuration (OpenAI or DeepSeek)
+
+You can configure the evaluator with a project-root [.env](.env) file. The code auto-loads this file if `python-dotenv` is installed.
+
+**OpenAI (default)**
+```
+CITEEVAL_PROVIDER=openai
+OPENAI_API_KEY=your_openai_key
+```
+
+**DeepSeek (OpenAI-compatible)**
+```
+CITEEVAL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
 ## 3. Data Formatting for Evaluation
 
 To run CiteEval on our system, we must format the pipeline's output into the CiteEval **System Evaluation** JSON format.
@@ -86,9 +103,9 @@ export PYTHONPATH=$PYTHONPATH:$(pwd):$(pwd)/src
 python src/scripts/run_citeeval.py \
     --input_file data/system_eval/my_pipeline_results.json \
     --output_dir data/system_eval_outputs/ \
-    --model_name gpt-4o
+    --model_name deepseek-chat
 ```
-*(Note: CiteEval-Auto requires an OpenAI API key for model-based judging)*
+*(Note: Use `--model_name gpt-4o` with `CITEEVAL_PROVIDER=openai`.)*
 
 ### Step 3: Analyze Results
 The evaluation will produce scores for:
