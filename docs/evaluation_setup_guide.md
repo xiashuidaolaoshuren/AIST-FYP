@@ -50,12 +50,38 @@ The evaluation uses two primary benchmark datasets: **RAGTruth** and **CiteEval*
 1. Clone or download the CiteEval repository: [https://github.com/amazon-science/CiteEval](https://github.com/amazon-science/CiteEval)
 2. Place the contents in `benchmark/CiteEval/`.
 
+#### Environment Setup
+Install CiteEval-specific dependencies:
+```bash
+cd benchmark/CiteEval
+pip install -r requirements.txt
+```
+
+Set the required environment variables. You can add these to your project-root `.env` file:
+```env
+# .env in AIST-FYP/
+CITEEVAL_ROOT="benchmark/CiteEval"
+PYTHONPATH="${PYTHONPATH}:benchmark/CiteEval:benchmark/CiteEval/src"
+```
+
+#### Dataset Preparation (CiteBench)
+1. Create necessary data directories:
+```bash
+cd benchmark/CiteEval
+mkdir -p data/metric_eval data/metric_eval_outputs data/system_eval_outputs data/system_eval
+```
+2. Download the CiteBench dataset from [Google Drive](https://drive.google.com/drive/folders/12Evj0f92wKz_7OGuuwq3KShTdSM8eu4v?usp=drive_link).
+3. Extract and place the dataset folders (e.g., `metric_eval`, `dev`, `test`) under `benchmark/CiteEval/data/`.
+
 ### Directory Structure After Setup
 Your `./benchmark` folder should look like this:
 ```
 benchmark/
 ├── CiteEval/
 │   ├── data/
+│   │   ├── metric_eval/
+│   │   ├── system_eval/
+│   │   └── ...
 │   ├── src/
 │   └── ...
 └── RAGTruth/
