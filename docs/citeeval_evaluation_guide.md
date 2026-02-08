@@ -39,7 +39,7 @@ To run CiteEval on our system, we must format the pipeline's output into the Cit
 
 ### Using the Conversion Script
 
-We provide a helper script `scripts/convert_to_citeeval.py` that uses the `CitationFormatter` class to convert pipeline outputs to CiteEval format.
+We provide a helper script `scripts/convert_to_citeeval.py` that uses the `CitationFormatter` class to convert pipeline outputs to CiteEval format. **This script should be run using the Main Project Environment (`.venv`).**
 
 **Option 1: Convert existing pipeline output file**
 ```bash
@@ -96,7 +96,13 @@ python scripts/convert_to_citeeval.py \
 ```
 
 ### Step 2: Run CiteEval-Auto
-Run the evaluation script from within the CiteEval directory:
+
+1. Activate the CiteBench virtual environment:
+```powershell
+.\.venv_citeeval\Scripts\Activate.ps1
+```
+
+2. Run the evaluation script from within the CiteEval directory:
 ```bash
 cd benchmark/CiteEval
 export PYTHONPATH=$PYTHONPATH:$(pwd):$(pwd)/src

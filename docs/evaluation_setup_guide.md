@@ -2,6 +2,34 @@
 
 This guide provides instructions for preparing the Wikipedia corpus and downloading the benchmarks required for evaluating the hallucination detection pipeline.
 
+## 0. Virtual Environment Setup
+
+The evaluation pipeline requires two separate virtual environments to avoid dependency conflicts between the main RAG system and the CiteEval benchmark.
+
+### 1. Main Project Environment
+Used for: Wikipedia preparation, running the RAG pipeline, and RAGTruth evaluation.
+```bash
+# Root directory of AIST-FYP
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1  # Windows PowerShell
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+```
+
+### 2. CiteBench Environment
+Used for: Running CiteEval-Auto evaluation metrics.
+```bash
+# Root directory of AIST-FYP
+python -m venv .venv_citeeval
+.\.venv_citeeval\Scripts\Activate.ps1  # Windows PowerShell
+
+# Install CiteEval dependencies
+cd benchmark/CiteEval
+pip install -r requirements.txt
+```
+
+---
+
 ## 1. Wikipedia Corpus Preparation
 
 The evaluation pipeline uses a Wikipedia corpus as the knowledge base. For evaluation, we use the **strategy validation** to ensure a sufficient scale for reliable results.
@@ -50,14 +78,8 @@ The evaluation uses two primary benchmark datasets: **RAGTruth** and **CiteEval*
 1. Clone or download the CiteEval repository: [https://github.com/amazon-science/CiteEval](https://github.com/amazon-science/CiteEval)
 2. Place the contents in `benchmark/CiteEval/`.
 
-#### Environment Setup
-Install CiteEval-specific dependencies:
-```bash
-cd benchmark/CiteEval
-pip install -r requirements.txt
-```
-
-Set the required environment variables. You can add these to your project-root `.env` file:
+#### Configuration
+Set the required environment variables in your project-root `.env` file to ensure the CiteEval scripts can resolve their internal modules:
 ```env
 # .env in AIST-FYP/
 CITEEVAL_ROOT="benchmark/CiteEval"
@@ -65,13 +87,14 @@ PYTHONPATH="${PYTHONPATH}:benchmark/CiteEval:benchmark/CiteEval/src"
 ```
 
 #### Dataset Preparation (CiteBench)
-1. Create necessary data directories:
+1. Ensure you are using the **Main Project Environment** (`.venv`) for data management.
+2. Create necessary data directories:
 ```bash
 cd benchmark/CiteEval
 mkdir -p data/metric_eval data/metric_eval_outputs data/system_eval_outputs data/system_eval
 ```
-2. Download the CiteBench dataset from [Google Drive](https://drive.google.com/drive/folders/12Evj0f92wKz_7OGuuwq3KShTdSM8eu4v?usp=drive_link).
-3. Extract and place the dataset folders (e.g., `metric_eval`, `dev`, `test`) under `benchmark/CiteEval/data/`.
+3. Download the CiteBench dataset from [Google Drive](https://drive.google.com/drive/folders/12Evj0f92wKz_7OGuuwq3KShTdSM8eu4v?usp=drive_link).
+4. Extract and place the dataset folders (e.g., `metric_eval`, `dev`, `test`) under `benchmark/CiteEval/data/`.
 
 ### Directory Structure After Setup
 Your `./benchmark` folder should look like this:
