@@ -71,6 +71,14 @@ evaluation:
       batch_size: 10
 ```
 
+Disable multi-question splitting (recommended for RAGTruth evaluation stability):
+
+```yaml
+processing:
+  query_split:
+    enabled: false
+```
+
 ### Verification Settings
 
 Ensure verification is enabled:

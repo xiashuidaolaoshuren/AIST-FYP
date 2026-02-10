@@ -57,6 +57,14 @@ python scripts/convert_to_citeeval.py \
     --strategy validation
 ```
 
+If multi-question splitting disrupts evaluation, disable it in config:
+
+```yaml
+processing:
+    query_split:
+        enabled: false
+```
+
 ### Required JSON Structure
 Each item in your evaluation file should follow this structure:
 ```json

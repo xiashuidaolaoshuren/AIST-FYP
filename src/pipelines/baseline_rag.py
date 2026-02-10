@@ -196,15 +196,31 @@ class BaselineRAGPipeline:
             }
         )
         
-        # Step 0: Split query into sub-questions
-        sub_queries = self._split_query_by_questions(query)
-        self.logger.info(f"Split into {len(sub_queries)} sub-question(s)")
+        # Step 0: Split query into sub-questions (optional)
+        split_enabled = True
+        if self.config and hasattr(self.config, 'processing'):
+            split_enabled = bool(
+                getattr(getattr(self.config.processing, 'query_split', None), 'enabled', True)
+            )
+
+        if split_enabled:
+            sub_queries = self._split_query_by_questions(query)
+        else:
+            sub_queries = [{
+                'text': query.strip() if query else '',
+                'sub_query_id': 0
+            }]
+
+        self.logger.info(
+            f"Split into {len(sub_queries)} sub-question(s) (enabled={split_enabled})"
+        )
         self.logger.info(
             "rag_query_split",
             extra={
                 "event": "rag_query_split",
                 "data": {
-                    "num_sub_questions": len(sub_queries)
+                    "num_sub_questions": len(sub_queries),
+                    "enabled": split_enabled
                 }
             }
         )

@@ -66,6 +66,11 @@ processing:
   max_chunk_length: 512  # Maximum tokens per chunk
   min_sentence_length: 10  # Minimum characters for valid sentence
 
+  # Query splitting for multi-question inputs
+  query_split:
+    # Enable splitting on question marks for multi-question processing
+    enabled: false
+
 # Retrieval Configuration
 retrieval:
   # Retrieval mode: "dense" (embeddings only), "bm25" (sparse lexical only), 
