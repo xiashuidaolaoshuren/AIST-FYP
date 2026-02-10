@@ -446,6 +446,9 @@ class RAGTruthEvaluator:
 
         # Normalize claim/evidence pairs for verification
         resolved_pairs = []
+        sub_answer_metadata = []
+        if isinstance(rag_result.get('generator_metadata'), dict):
+            sub_answer_metadata = rag_result['generator_metadata'].get('sub_answer_metadata', [])
         for pair in claim_evidence_pairs:
             claim = pair.get('claim') if isinstance(pair, dict) else None
             if claim is None and isinstance(pair, dict):
@@ -468,13 +471,30 @@ class RAGTruthEvaluator:
                         evidence_list.append(EvidenceChunk(**span))
                 evidence = evidence_list
 
+            metadata = None
+            if claim is not None:
+                for entry in sub_answer_metadata:
+                    span = entry.get('char_span')
+                    if (
+                        isinstance(span, list)
+                        and len(span) == 2
+                        and claim.answer_char_span[0] >= span[0]
+                        and claim.answer_char_span[1] <= span[1]
+                    ):
+                        metadata = entry.get('metadata')
+                        break
+
             if claim is None or not evidence:
                 self.logger.warning(
                     "Skipping claim-evidence pair due to missing claim or evidence"
                 )
                 continue
 
-            resolved_pairs.append({'claim': claim, 'evidence': evidence})
+            resolved_pairs.append({
+                'claim': claim,
+                'evidence': evidence,
+                'metadata': metadata
+            })
         
         # Step 2: Verify claims if verifier is enabled
         claim_decisions = []
@@ -482,7 +502,7 @@ class RAGTruthEvaluator:
             for pair in resolved_pairs:
                 claim = pair['claim']
                 evidence = pair['evidence']
-                metadata = rag_result.get('generator_metadata', {})
+                metadata = pair.get('metadata') or rag_result.get('generator_metadata', {})
                 
                 # Verify claim
                 signal = self.verifier_hub.verify_claim(claim, evidence, metadata)
