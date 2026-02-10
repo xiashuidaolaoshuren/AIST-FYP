@@ -58,7 +58,7 @@ from sklearn.metrics import (
 
 from src.utils.config import Config
 from src.utils.logger import setup_logger
-from src.utils.data_structures import ClaimDecision
+from src.utils.data_structures import ClaimDecision, Claim, EvidenceChunk
 
 
 class RAGTruthEvaluator:
@@ -435,11 +435,51 @@ class RAGTruthEvaluator:
         
         generated_response = rag_result['draft_response']
         claim_evidence_pairs = rag_result.get('claim_evidence_pairs', [])
+
+        # Build claim lookup from pipeline output for claim_id -> Claim
+        claim_map = {}
+        for entry in rag_result.get('claims_by_sub_answer', []):
+            for claim in entry.get('claims', []):
+                claim_obj = Claim(**claim) if isinstance(claim, dict) else claim
+                if claim_obj is not None:
+                    claim_map[claim_obj.claim_id] = claim_obj
+
+        # Normalize claim/evidence pairs for verification
+        resolved_pairs = []
+        for pair in claim_evidence_pairs:
+            claim = pair.get('claim') if isinstance(pair, dict) else None
+            if claim is None and isinstance(pair, dict):
+                claim_id = pair.get('claim_id')
+                claim = claim_map.get(claim_id)
+
+            if isinstance(claim, dict):
+                claim = Claim(**claim)
+
+            evidence = None
+            if isinstance(pair, dict) and 'evidence' in pair:
+                evidence = pair.get('evidence')
+            elif isinstance(pair, dict):
+                evidence_spans = pair.get('evidence_spans', [])
+                evidence_list = []
+                for span in evidence_spans:
+                    if isinstance(span, EvidenceChunk):
+                        evidence_list.append(span)
+                    elif isinstance(span, dict):
+                        evidence_list.append(EvidenceChunk(**span))
+                evidence = evidence_list
+
+            if claim is None or not evidence:
+                self.logger.warning(
+                    "Skipping claim-evidence pair due to missing claim or evidence"
+                )
+                continue
+
+            resolved_pairs.append({'claim': claim, 'evidence': evidence})
         
         # Step 2: Verify claims if verifier is enabled
         claim_decisions = []
-        if self.verifier_hub and self.verifier_hub.enabled and claim_evidence_pairs:
-            for pair in claim_evidence_pairs:
+        if self.verifier_hub and self.verifier_hub.enabled and resolved_pairs:
+            for pair in resolved_pairs:
                 claim = pair['claim']
                 evidence = pair['evidence']
                 metadata = rag_result.get('generator_metadata', {})
@@ -465,7 +505,7 @@ class RAGTruthEvaluator:
         # Detailed per-claim analysis
         claim_results = []
         for idx, decision in enumerate(claim_decisions):
-            claim_text = claim_evidence_pairs[idx]['claim'].text
+            claim_text = resolved_pairs[idx]['claim'].text
             
             # Check if this claim overlaps with any gold hallucination span
             overlaps_gold = self._check_overlap_with_gold(

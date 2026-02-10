@@ -23,6 +23,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import argparse
+from tqdm import tqdm
 from src.utils.config import Config
 from src.utils.logger import setup_logger
 from src.pipelines.baseline_rag import BaselineRAGPipeline
@@ -63,6 +64,13 @@ def main():
         help='Batch size for processing (default: 10)'
     )
     parser.add_argument(
+        '--strategy',
+        type=str,
+        default='validation',
+        choices=['development', 'validation', 'production'],
+        help='Data strategy for retrieval indexes (default: validation)'
+    )
+    parser.add_argument(
         '--save-results',
         action='store_true',
         help='Save detailed results to JSON file'
@@ -86,26 +94,47 @@ def main():
     logger.info(f"Split: {args.split}")
     logger.info(f"Max samples: {args.max_samples or 'all'}")
     logger.info(f"Batch size: {args.batch_size}")
+    logger.info(f"Data strategy: {args.strategy}")
     logger.info(f"Save results: {args.save_results}")
     
     # Load configuration
+    setup_steps = [
+        "Load configuration",
+        "Initialize RAG pipeline",
+        "Initialize VerifierHub",
+        "Initialize RuleBasedAggregator",
+        "Initialize RAGTruthEvaluator"
+    ]
+    setup_bar = tqdm(total=len(setup_steps), desc="Setup", unit="step")
+
     logger.info("\n📋 Loading configuration...")
     config = Config(args.config)
+    setup_bar.set_postfix_str(setup_steps[0])
+    setup_bar.update(1)
     
     # Initialize RAG pipeline
     logger.info("🔧 Initializing RAG pipeline...")
-    rag_pipeline = BaselineRAGPipeline.from_config(config)
+    rag_pipeline = BaselineRAGPipeline.from_config(
+        args.config,
+        strategy=args.strategy
+    )
     logger.info("✓ RAG pipeline initialized")
+    setup_bar.set_postfix_str(setup_steps[1])
+    setup_bar.update(1)
     
     # Initialize VerifierHub
     logger.info("🔧 Initializing VerifierHub...")
     verifier_hub = VerifierHub(config, rag_pipeline.generator)
     logger.info("✓ VerifierHub initialized")
+    setup_bar.set_postfix_str(setup_steps[2])
+    setup_bar.update(1)
     
     # Initialize RuleBasedAggregator
     logger.info("🔧 Initializing RuleBasedAggregator...")
     aggregator = RuleBasedAggregator(config)
     logger.info("✓ RuleBasedAggregator initialized")
+    setup_bar.set_postfix_str(setup_steps[3])
+    setup_bar.update(1)
     
     # Initialize RAGTruthEvaluator
     logger.info("🔧 Initializing RAGTruthEvaluator...")
@@ -116,6 +145,9 @@ def main():
         aggregator=aggregator
     )
     logger.info("✓ RAGTruthEvaluator initialized")
+    setup_bar.set_postfix_str(setup_steps[4])
+    setup_bar.update(1)
+    setup_bar.close()
     
     # Run evaluation
     logger.info("\n🚀 Starting evaluation...")
