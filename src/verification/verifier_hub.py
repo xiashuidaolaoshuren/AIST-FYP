@@ -231,33 +231,37 @@ class VerifierHub:
         try:
             # Compute intrinsic uncertainty signal
             uncertainty_signal = None
-            try:
-                uncertainty_signal = self.uncertainty_detector.compute_signal(
-                    claim, evidence, metadata
-                )
-                self.logger.debug(
-                    f"Uncertainty signal computed for claim {claim.claim_id}: "
-                    f"mean_entropy={uncertainty_signal.get('mean_entropy', 0.0):.3f}"
-                )
-                self.logger.info(
-                    "verifier_uncertainty",
-                    extra={
-                        "event": "verifier_uncertainty",
-                        "data": {
-                            "claim_id": claim.claim_id,
-                            "mean_entropy": uncertainty_signal.get('mean_entropy', 0.0)
-                        }
-                    }
-                )
-            except Exception as e:
-                self.logger.error(
-                    f"IntrinsicUncertaintyDetector failed for claim {claim.claim_id}: {str(e)}"
-                )
-                self.logger.debug(traceback.format_exc())
-                if self.strict_logits:
-                    raise
-                # Use default fallback value
+            disable_intrinsic = bool(metadata.get('disable_intrinsic_uncertainty'))
+            if disable_intrinsic:
                 uncertainty_signal = {'mean_entropy': 0.0}
+            else:
+                try:
+                    uncertainty_signal = self.uncertainty_detector.compute_signal(
+                        claim, evidence, metadata
+                    )
+                    self.logger.debug(
+                        f"Uncertainty signal computed for claim {claim.claim_id}: "
+                        f"mean_entropy={uncertainty_signal.get('mean_entropy', 0.0):.3f}"
+                    )
+                    self.logger.info(
+                        "verifier_uncertainty",
+                        extra={
+                            "event": "verifier_uncertainty",
+                            "data": {
+                                "claim_id": claim.claim_id,
+                                "mean_entropy": uncertainty_signal.get('mean_entropy', 0.0)
+                            }
+                        }
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"IntrinsicUncertaintyDetector failed for claim {claim.claim_id}: {str(e)}"
+                    )
+                    self.logger.debug(traceback.format_exc())
+                    if self.strict_logits:
+                        raise
+                    # Use default fallback value
+                    uncertainty_signal = {'mean_entropy': 0.0}
             
             # Compute retrieval-grounded signal
             grounded_signal = None
@@ -429,9 +433,12 @@ class VerifierHub:
             for chunk in evidence_list:
                 try:
                     # Compute uncertainty and grounded signals for this chunk
-                    uncertainty_signal = self.uncertainty_detector.compute_signal(
-                        claim, chunk, metadata
-                    )
+                    if metadata.get('disable_intrinsic_uncertainty'):
+                        uncertainty_signal = {'mean_entropy': 0.0}
+                    else:
+                        uncertainty_signal = self.uncertainty_detector.compute_signal(
+                            claim, chunk, metadata
+                        )
                     grounded_signal = self.grounded_detector.compute_signal(
                         claim, chunk, metadata
                     )

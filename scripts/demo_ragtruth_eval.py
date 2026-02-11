@@ -81,6 +81,13 @@ def main():
         default=None,
         help='Custom output path for results (default: auto-generated)'
     )
+    parser.add_argument(
+        '--ragtruth-eval-mode',
+        type=str,
+        default='ragtruth_eval',
+        choices=['ragtruth_eval', 'normal'],
+        help='Evaluation mode: ragtruth_eval uses dataset responses; normal uses pipeline responses'
+    )
     
     args = parser.parse_args()
     
@@ -96,6 +103,7 @@ def main():
     logger.info(f"Batch size: {args.batch_size}")
     logger.info(f"Data strategy: {args.strategy}")
     logger.info(f"Save results: {args.save_results}")
+    logger.info(f"RAGTruth eval mode: {args.ragtruth_eval_mode}")
     
     # Load configuration
     setup_steps = [
@@ -109,6 +117,10 @@ def main():
 
     logger.info("\n📋 Loading configuration...")
     config = Config(args.config)
+    config._config.setdefault('evaluation', {})
+    config._config['evaluation'].setdefault('benchmarks', {})
+    config._config['evaluation']['benchmarks'].setdefault('ragtruth', {})
+    config._config['evaluation']['benchmarks']['ragtruth']['ragtruth_eval_mode'] = args.ragtruth_eval_mode
     setup_bar.set_postfix_str(setup_steps[0])
     setup_bar.update(1)
     

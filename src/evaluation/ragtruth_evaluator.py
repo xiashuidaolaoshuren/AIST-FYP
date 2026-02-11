@@ -59,6 +59,7 @@ from sklearn.metrics import (
 from src.utils.config import Config
 from src.utils.logger import setup_logger
 from src.utils.data_structures import ClaimDecision, Claim, EvidenceChunk
+from src.generation.claim_extractor import extract_claims
 
 
 class RAGTruthEvaluator:
@@ -131,10 +132,26 @@ class RAGTruthEvaluator:
             if hasattr(config.evaluation.benchmarks, 'ragtruth'):
                 benchmark_config = config.evaluation.benchmarks.ragtruth
                 self.benchmark_dir = Path(getattr(benchmark_config, 'dataset_path', 'benchmark/RAGTruth/dataset'))
+                self.ragtruth_eval_mode = getattr(benchmark_config, 'ragtruth_eval_mode', 'ragtruth_eval')
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
+                self.ragtruth_eval_mode = 'ragtruth_eval'
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
+            self.ragtruth_eval_mode = 'ragtruth_eval'
+
+        if isinstance(self.ragtruth_eval_mode, str):
+            self.ragtruth_eval_mode = self.ragtruth_eval_mode.strip().lower()
+        else:
+            self.ragtruth_eval_mode = 'ragtruth_eval'
+
+        if self.ragtruth_eval_mode not in {'ragtruth_eval', 'normal'}:
+            self.logger.warning(
+                "Invalid ragtruth_eval_mode '%s' (expected 'ragtruth_eval' or 'normal'); "
+                "defaulting to 'ragtruth_eval'",
+                self.ragtruth_eval_mode
+            )
+            self.ragtruth_eval_mode = 'ragtruth_eval'
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -143,7 +160,11 @@ class RAGTruthEvaluator:
                 "Please download RAGTruth dataset to benchmark/RAGTruth/dataset/"
             )
             
-        self.logger.info(f"Initialized RAGTruthEvaluator with benchmark: {self.benchmark_dir}")
+        self.logger.info(
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s)",
+            self.benchmark_dir,
+            self.ragtruth_eval_mode
+        )
     
     def run_evaluation(
         self,
@@ -201,6 +222,7 @@ class RAGTruthEvaluator:
         self.logger.info(f"Split: {split}")
         self.logger.info(f"Max samples: {max_samples or 'all'}")
         self.logger.info(f"Batch size: {batch_size}")
+        self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
         
         # Step 1: Load dataset
         self.logger.info("\nStep 1: Loading RAGTruth dataset...")
@@ -426,75 +448,101 @@ class RAGTruthEvaluator:
         question = sample['question']
         gold_labels = sample['gold_labels']
         
-        # Step 1: Run RAG pipeline
-        # Note: RAGTruth contexts are gold passages, but we'll use retrieval for realism
-        rag_result = self.rag_pipeline.run(
-            query=question,
-            top_k=5  # Retrieve top 5 passages
-        )
-        
-        generated_response = rag_result['draft_response']
-        claim_evidence_pairs = rag_result.get('claim_evidence_pairs', [])
-
-        # Build claim lookup from pipeline output for claim_id -> Claim
-        claim_map = {}
-        for entry in rag_result.get('claims_by_sub_answer', []):
-            for claim in entry.get('claims', []):
-                claim_obj = Claim(**claim) if isinstance(claim, dict) else claim
-                if claim_obj is not None:
-                    claim_map[claim_obj.claim_id] = claim_obj
-
-        # Normalize claim/evidence pairs for verification
         resolved_pairs = []
-        sub_answer_metadata = []
-        if isinstance(rag_result.get('generator_metadata'), dict):
-            sub_answer_metadata = rag_result['generator_metadata'].get('sub_answer_metadata', [])
-        for pair in claim_evidence_pairs:
-            claim = pair.get('claim') if isinstance(pair, dict) else None
-            if claim is None and isinstance(pair, dict):
-                claim_id = pair.get('claim_id')
-                claim = claim_map.get(claim_id)
+        generated_response = None
 
-            if isinstance(claim, dict):
-                claim = Claim(**claim)
+        if self.ragtruth_eval_mode == 'ragtruth_eval':
+            generated_response = sample.get('gold_response', '')
+            evidence_chunks = self._build_evidence_from_contexts(sample.get('contexts', []))
+            claims = extract_claims(
+                text=generated_response,
+                answer_id=str(sample_id),
+                method='auto'
+            )
+            metadata = {
+                'text': generated_response,
+                'original_query': question,
+                'tokens': [],
+                'scores': [],
+                'disable_intrinsic_uncertainty': True
+            }
+            for claim in claims:
+                if not evidence_chunks:
+                    continue
+                resolved_pairs.append({
+                    'claim': claim,
+                    'evidence': evidence_chunks,
+                    'metadata': metadata
+                })
+        else:
+            # Step 1: Run RAG pipeline
+            # Note: RAGTruth contexts are gold passages, but we'll use retrieval for realism
+            rag_result = self.rag_pipeline.run(
+                query=question,
+                top_k=5  # Retrieve top 5 passages
+            )
+            
+            generated_response = rag_result['draft_response']
+            claim_evidence_pairs = rag_result.get('claim_evidence_pairs', [])
 
-            evidence = None
-            if isinstance(pair, dict) and 'evidence' in pair:
-                evidence = pair.get('evidence')
-            elif isinstance(pair, dict):
-                evidence_spans = pair.get('evidence_spans', [])
-                evidence_list = []
-                for span in evidence_spans:
-                    if isinstance(span, EvidenceChunk):
-                        evidence_list.append(span)
-                    elif isinstance(span, dict):
-                        evidence_list.append(EvidenceChunk(**span))
-                evidence = evidence_list
+            # Build claim lookup from pipeline output for claim_id -> Claim
+            claim_map = {}
+            for entry in rag_result.get('claims_by_sub_answer', []):
+                for claim in entry.get('claims', []):
+                    claim_obj = Claim(**claim) if isinstance(claim, dict) else claim
+                    if claim_obj is not None:
+                        claim_map[claim_obj.claim_id] = claim_obj
 
-            metadata = None
-            if claim is not None:
-                for entry in sub_answer_metadata:
-                    span = entry.get('char_span')
-                    if (
-                        isinstance(span, list)
-                        and len(span) == 2
-                        and claim.answer_char_span[0] >= span[0]
-                        and claim.answer_char_span[1] <= span[1]
-                    ):
-                        metadata = entry.get('metadata')
-                        break
+            # Normalize claim/evidence pairs for verification
+            sub_answer_metadata = []
+            if isinstance(rag_result.get('generator_metadata'), dict):
+                sub_answer_metadata = rag_result['generator_metadata'].get('sub_answer_metadata', [])
+            for pair in claim_evidence_pairs:
+                claim = pair.get('claim') if isinstance(pair, dict) else None
+                if claim is None and isinstance(pair, dict):
+                    claim_id = pair.get('claim_id')
+                    claim = claim_map.get(claim_id)
 
-            if claim is None or not evidence:
-                self.logger.warning(
-                    "Skipping claim-evidence pair due to missing claim or evidence"
-                )
-                continue
+                if isinstance(claim, dict):
+                    claim = Claim(**claim)
 
-            resolved_pairs.append({
-                'claim': claim,
-                'evidence': evidence,
-                'metadata': metadata
-            })
+                evidence = None
+                if isinstance(pair, dict) and 'evidence' in pair:
+                    evidence = pair.get('evidence')
+                elif isinstance(pair, dict):
+                    evidence_spans = pair.get('evidence_spans', [])
+                    evidence_list = []
+                    for span in evidence_spans:
+                        if isinstance(span, EvidenceChunk):
+                            evidence_list.append(span)
+                        elif isinstance(span, dict):
+                            evidence_list.append(EvidenceChunk(**span))
+                    evidence = evidence_list
+
+                metadata = None
+                if claim is not None:
+                    for entry in sub_answer_metadata:
+                        span = entry.get('char_span')
+                        if (
+                            isinstance(span, list)
+                            and len(span) == 2
+                            and claim.answer_char_span[0] >= span[0]
+                            and claim.answer_char_span[1] <= span[1]
+                        ):
+                            metadata = entry.get('metadata')
+                            break
+
+                if claim is None or not evidence:
+                    self.logger.warning(
+                        "Skipping claim-evidence pair due to missing claim or evidence"
+                    )
+                    continue
+
+                resolved_pairs.append({
+                    'claim': claim,
+                    'evidence': evidence,
+                    'metadata': metadata
+                })
         
         # Step 2: Verify claims if verifier is enabled
         claim_decisions = []
@@ -551,6 +599,27 @@ class RAGTruthEvaluator:
             'detected_hallucination': detected_hallucination,
             'claim_results': claim_results
         }
+
+    def _build_evidence_from_contexts(self, contexts: List[str]) -> List[EvidenceChunk]:
+        """
+        Convert RAGTruth contexts into EvidenceChunk objects.
+        """
+        evidence_chunks = []
+        for idx, context in enumerate(contexts):
+            if not context:
+                continue
+            evidence_chunks.append(
+                EvidenceChunk(
+                    doc_id=f"ragtruth_context_{idx}",
+                    sent_id=idx,
+                    text=context,
+                    char_start=0,
+                    char_end=len(context),
+                    score_dense=1.0,
+                    rank=idx
+                )
+            )
+        return evidence_chunks
     
     def _check_overlap_with_gold(
         self,

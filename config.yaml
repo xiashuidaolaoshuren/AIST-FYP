@@ -369,6 +369,7 @@ evaluation:
       dataset_path: "benchmark/RAGTruth/dataset"
       output_dir: "outputs/ragtruth_eval/"
       batch_size: 10  # Process samples in batches for memory efficiency
+      ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal
     
     # Future benchmarks
     truthful_qa:
