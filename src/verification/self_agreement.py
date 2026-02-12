@@ -75,11 +75,14 @@ class SelfAgreementDetector:
         self.k_samples = sa_config.get('k_samples', 5)
         self.temperature = sa_config.get('temperature', 1.5)
         self.device = sa_config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+        self.deterministic = sa_config.get('deterministic', False)
+        self.random_seed = sa_config.get('random_seed', 42)
         
         self.logger.info(f"Initializing SelfAgreementDetector...")
         self.logger.info(f"Model: {self.model_name}")
         self.logger.info(f"k_samples: {self.k_samples}, temperature: {self.temperature}")
         self.logger.info(f"Device: {self.device}")
+        self.logger.info(f"Deterministic mode: {self.deterministic} (seed={self.random_seed})")
         
         # Load sentence-transformer model for similarity measurement
         try:
@@ -133,6 +136,14 @@ class SelfAgreementDetector:
         if evidence_chunks is None:
             evidence_chunks = []
         
+        # Set random seed for deterministic mode
+        if self.deterministic:
+            torch.manual_seed(self.random_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(self.random_seed)
+            np.random.seed(self.random_seed)
+            self.logger.debug(f"Deterministic mode: seed set to {self.random_seed}")
+        
         self.logger.debug(f"Generating {k} samples for query: {query[:50]}...")
         
         samples = []
@@ -148,14 +159,24 @@ class SelfAgreementDetector:
                 )
                 
                 generated_text = result['text']
-                samples.append(generated_text)
-                self.logger.debug(f"Sample {i+1}/{k}: {generated_text[:50]}...")
+                
+                # Skip empty samples (can happen with high temperature)
+                if generated_text and generated_text.strip():
+                    samples.append(generated_text)
+                    self.logger.debug(f"Sample {i+1}/{k}: {generated_text[:50]}...")
+                else:
+                    self.logger.warning(f"Sample {i+1}/{k} is empty, skipping")
                 
             except Exception as e:
                 self.logger.error(f"Failed to generate sample {i+1}/{k}: {e}")
-                raise RuntimeError(f"Generation failed for sample {i+1}: {e}")
+                # Don't raise, just skip this sample
+                continue
         
-        self.logger.debug(f"Successfully generated {len(samples)} samples")
+        # Validate we have at least some samples
+        if len(samples) == 0:
+            raise RuntimeError(f"All {k} generation attempts produced empty samples")
+        
+        self.logger.debug(f"Successfully generated {len(samples)}/{k} valid samples")
         return samples
     
     def measure_consistency(
@@ -201,11 +222,6 @@ class SelfAgreementDetector:
         
         if not samples or len(samples) == 0:
             raise ValueError("samples list cannot be empty")
-        
-        # Check for empty samples
-        for i, sample in enumerate(samples):
-            if not sample or not sample.strip():
-                raise ValueError(f"Sample {i} is empty")
         
         self.logger.debug(f"Measuring consistency between original and {len(samples)} samples")
         
@@ -313,6 +329,18 @@ class SelfAgreementDetector:
             
             # Measure consistency
             consistency_result = self.measure_consistency(claim_text, samples)
+
+            self.logger.info(
+                "detector_self_agreement",
+                extra={
+                    "event": "detector_self_agreement",
+                    "data": {
+                        "score": consistency_result.get('consistency_score', None),
+                        "variance": consistency_result.get('variance', None),
+                        "samples_generated": len(samples)
+                    }
+                }
+            )
             
             # Return formatted result for VerifierHub
             return {

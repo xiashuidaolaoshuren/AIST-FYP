@@ -243,6 +243,18 @@ class NLIDetector:
                 f"neutral: {scores['neutral']:.3f}, "
                 f"contradiction: {scores['contradiction']:.3f}"
             )
+
+            self.logger.info(
+                "detector_nli",
+                extra={
+                    "event": "detector_nli",
+                    "data": {
+                        "entailment": scores['entailment'],
+                        "neutral": scores['neutral'],
+                        "contradiction": scores['contradiction']
+                    }
+                }
+            )
             
             return scores
             

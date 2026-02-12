@@ -23,6 +23,7 @@ from src.utils.nlp_utils import get_spacy_model
 from src.utils.data_structures import Claim, EvidenceChunk
 from src.utils.logger import setup_logger
 from src.utils.config import Config
+from .entity_matcher import EntityMatcher
 
 
 class RetrievalGroundedDetector:
@@ -73,6 +74,9 @@ class RetrievalGroundedDetector:
             else 'en_core_web_sm'
         )
         self.nlp = get_spacy_model(spacy_model)
+        
+        # Initialize entity matcher for improved entity coverage
+        self.entity_matcher = EntityMatcher(config)
         
         # Load configuration parameters
         if hasattr(config, 'verification') and hasattr(config.verification, 'grounded'):
@@ -142,6 +146,19 @@ class RetrievalGroundedDetector:
                 f"Claim {claim.claim_id}: entities={entities_score:.2f}, "
                 f"numbers={numbers_score:.2f}, tokens_overlap={overlap_score:.2f}"
             )
+
+            self.logger.info(
+                "detector_retrieval_grounded",
+                extra={
+                    "event": "detector_retrieval_grounded",
+                    "data": {
+                        "claim_id": claim.claim_id,
+                        "entities": entities_score,
+                        "numbers": numbers_score,
+                        "tokens_overlap": overlap_score
+                    }
+                }
+            )
             
             return {
                 'entities': entities_score,
@@ -204,7 +221,7 @@ class RetrievalGroundedDetector:
             evidence_text = evidence.text
             
             for entity in entities:
-                if self._fuzzy_match(entity, evidence_text):
+                if self.entity_matcher.match_entity(entity, evidence_text):
                     matched += 1
                     self.logger.debug(f"Entity '{entity}' found in evidence")
                 else:
@@ -448,6 +465,8 @@ class RetrievalGroundedDetector:
     
     def _fuzzy_match(self, entity: str, text: str) -> bool:
         """
+        [DEPRECATED] Use self.entity_matcher.match_entity() instead.
+        
         Check if entity appears in text using fuzzy matching.
         
         Currently implements simple case-insensitive substring matching.

@@ -66,6 +66,13 @@ class IntrinsicUncertaintyDetector:
             if hasattr(config, 'verification') and hasattr(config.verification, 'intrinsic')
             else 1e-10
         )
+
+        # Strict mode: raise error when logits are missing
+        self.strict_logits = bool(
+            getattr(config.verification.intrinsic, 'strict_logits', False)
+            if hasattr(config, 'verification') and hasattr(config.verification, 'intrinsic')
+            else False
+        )
         
         self.logger.info(
             f"IntrinsicUncertaintyDetector initialized with epsilon={self.epsilon}"
@@ -85,6 +92,12 @@ class IntrinsicUncertaintyDetector:
         2. Extracting logits for aligned tokens
         3. Computing entropy for each token
         4. Averaging across the claim
+        
+        **Note on seq2seq models (e.g., FLAN-T5):**
+        - Hugging Face returns (n-1) logit arrays for n generated tokens
+        - Token indices are filtered to valid logit range [0, len(logits)-1]
+        - EOS token (</s>) at position n-1 has no corresponding logits
+        - This is expected behavior and handled gracefully
         
         Args:
             claim: Claim object with text and char span
@@ -107,22 +120,40 @@ class IntrinsicUncertaintyDetector:
         
         # Edge case: no logits in metadata
         if 'logits' not in metadata or not metadata['logits']:
-            self.logger.warning(
-                f"No logits in metadata for claim {claim.claim_id}, returning 0.0 entropy"
-            )
+            message = f"No logits in metadata for claim {claim.claim_id}"
+            if self.strict_logits:
+                self.logger.error(f"{message}; strict_logits enabled")
+                raise ValueError(message)
+            self.logger.warning(f"{message}, returning 0.0 entropy")
             return {'mean_entropy': 0.0}
         
         try:
             # Align claim to token indices
             token_indices = self._align_claim_tokens(claim, metadata)
             
+            # Important: For seq2seq models (e.g., FLAN-T5), output.scores has (n-1) entries
+            # for n generated tokens. The EOS token (</s>) at position n-1 has no logits.
+            # We need to cap token indices to valid logit range.
+            max_logit_idx = len(metadata['logits']) - 1
+            
             if not token_indices:
-                # Alignment failed - use full response as fallback
+                # Alignment failed - use valid range as fallback
                 self.logger.debug(
                     f"Token alignment failed for claim {claim.claim_id}, "
-                    f"using all tokens as fallback"
+                    f"using valid logit range as fallback (0-{max_logit_idx})"
                 )
-                token_indices = list(range(len(metadata['logits'])))
+                token_indices = list(range(min(len(metadata['logits']), len(metadata.get('tokens', [])))))
+            else:
+                # Filter token indices to stay within logit bounds
+                # This handles seq2seq models where last token has no logits
+                original_count = len(token_indices)
+                token_indices = [idx for idx in token_indices if idx <= max_logit_idx]
+                if len(token_indices) < original_count:
+                    self.logger.debug(
+                        f"Filtered token indices for claim {claim.claim_id}: "
+                        f"{original_count} → {len(token_indices)} "
+                        f"(seq2seq model: last token has no logits)"
+                    )
             
             # Calculate entropy for each aligned token
             entropies = []
@@ -146,6 +177,18 @@ class IntrinsicUncertaintyDetector:
             self.logger.debug(
                 f"Claim {claim.claim_id}: {len(entropies)} tokens, "
                 f"mean_entropy={mean_entropy:.3f}"
+            )
+
+            self.logger.info(
+                "detector_intrinsic_uncertainty",
+                extra={
+                    "event": "detector_intrinsic_uncertainty",
+                    "data": {
+                        "claim_id": claim.claim_id,
+                        "mean_entropy": mean_entropy,
+                        "token_count": len(entropies)
+                    }
+                }
             )
             
             return {'mean_entropy': mean_entropy}

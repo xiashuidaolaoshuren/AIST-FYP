@@ -66,11 +66,21 @@ processing:
   max_chunk_length: 512  # Maximum tokens per chunk
   min_sentence_length: 10  # Minimum characters for valid sentence
 
+  # Query splitting for multi-question inputs
+  query_split:
+    # Enable splitting on question marks for multi-question processing
+    enabled: false
+
 # Retrieval Configuration
 retrieval:
+  # Retrieval mode: "dense" (embeddings only), "bm25" (sparse lexical only), 
+  # or "hybrid" (combine both)
+  mode: "hybrid"  # Options: "dense", "bm25", "hybrid"
+  
   # Number of evidence chunks to retrieve
   top_k: 5
   
+  # Dense Retrieval (FAISS) Configuration
   # FAISS index type: FLAT (exact), IVFFLAT (approximate), HNSW (best quality/speed)
   index_type: "IVFFLAT"
   
@@ -80,6 +90,18 @@ retrieval:
   
   # HNSW parameters (if using HNSW)
   hnsw_m: 32  # Number of connections per element
+  
+  # BM25 Sparse Retrieval Configuration
+  bm25:
+    k1: 1.5  # Term frequency saturation parameter (standard: 1.2-2.0)
+    b: 0.75  # Length normalization parameter (standard: 0.75)
+  
+  # Hybrid Retrieval Configuration
+  hybrid:
+    alpha: 0.5  # Weight for dense scores in linear fusion (0-1)
+                # alpha=1.0: dense only, alpha=0.0: BM25 only
+    fusion_method: "rrf"  # Fusion method: "linear" or "rrf" (reciprocal rank fusion)
+    rrf_k: 60  # RRF constant (only used if fusion_method="rrf")
 
 # Generation Configuration
 generation:
@@ -97,12 +119,12 @@ generation:
 # Verification Configuration (Month 3)
 verification:
   # Enable/disable verification module (default: false for backward compatibility)
-  enabled: false
+  enabled: true
   
   # Multi-evidence verification (Month 4, Task 2)
   # If True, verify claims against ALL retrieved evidence chunks and aggregate results
   # If False, verify only against top-ranked chunk (backward compatible)
-  verify_all_evidence: false
+  verify_all_evidence: true
   
   # Aggregation method for multi-evidence verification
   # "max": Optimistic - take best match (max coverage, min entropy)
@@ -119,6 +141,9 @@ verification:
     
     # Uncertainty calculation method
     method: "entropy"
+
+    # Strict mode: raise error when logits are missing
+    strict_logits: true
   
   # Retrieval-Grounded Detector Configuration
   grounded:
@@ -135,6 +160,31 @@ verification:
     
     # ROUGE method for token overlap calculation
     rouge_method: "rouge-l"
+    
+    # Enhanced Entity Matching Configuration (Month 2 Enhancement)
+    matching:
+      # Enable Tier 2: Acronym extraction and matching
+      # Handles acronyms like USA, WHO, MIT, FBI with various punctuation styles
+      acronym_matching: true
+      
+      # Enable Tier 3: Dictionary-based alias matching
+      # Uses entity_aliases.py for canonical form and surface variation matching
+      alias_dictionary: true
+
+      # Enable Tier 4: LLM-based entity matching (DeepSeek API)
+      llm:
+        enabled: true
+        provider: "deepseek"
+        base_url: "https://api.deepseek.com"
+        model: "deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        timeout_s: 20
+        max_retries: 2
+        retry_backoff_s: 1.5
+        max_evidence_chars: 3000
+        cache_size: 2048
+        temperature: 0
+        max_tokens: 200
   
   # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
   nli:
@@ -166,6 +216,130 @@ verification:
     # Aggregation method for multi-evidence consistency scores
     # Options: "max" (optimistic), "mean" (average), "min" (pessimistic), "inherit" (use global aggregation_method)
     aggregation_method: "inherit"
+    
+    # Deterministic mode for reproducible results
+    # If True, uses random_seed for reproducible sampling
+    # If False (default), uses stochastic sampling for robustness
+    deterministic: false
+    
+    # Random seed for deterministic mode (only used if deterministic=true)
+    # Set to any integer for reproducible results
+    random_seed: 42
+  
+  # Citation Formatter Configuration (Month 5)
+  citation:
+    # Maximum number of citations to add per claim
+    # Limits citation density to avoid cluttering the output
+    # Default: 3 (recommended for readability)
+    max_citations_per_claim: 3
+  
+  # Ragas Framework Configuration (Month 5)
+  ragas:
+    # OpenAI model for evaluation (requires OPENAI_API_KEY environment variable)
+    # gpt-4o-mini is cost-effective for evaluation tasks
+    model: "gpt-4o-mini"
+    
+    # Temperature for LLM evaluation (0 = deterministic, recommended for consistency)
+    temperature: 0
+    
+    # Metrics to compute during evaluation
+    # Available metrics: faithfulness, answer_relevancy, context_precision, 
+    # context_recall, context_relevance, answer_correctness
+    metrics:
+      - faithfulness          # Factual consistency between answer and contexts
+      - answer_relevancy      # How relevant the answer is to the question
+      - context_precision     # How well contexts match ground truth
+  
+  # Rule-Based Aggregator Configuration (Month 5)
+  aggregator:
+    # Entropy normalization parameters (from SelfCheckGPT research)
+    # Entropy threshold: Value at sigmoid midpoint for uncertainty-to-confidence mapping
+    entropy_threshold: 2.0
+    
+    # K entropy: Sigmoid steepness parameter (higher = sharper transition)
+    k_entropy: 2.0
+    
+    # NLI thresholds for claim classification
+    # Contradiction threshold: Minimum NLI contradiction score to flag as contradictory
+    contradiction_threshold: 0.5
+    
+    # Entailment threshold: Minimum NLI entailment score required for "Supported" status
+    entailment_threshold: 0.7
+    
+    # Coverage threshold: Minimum coverage score required for "Supported" status
+    # (used in combination with entailment)
+    coverage_threshold: 0.6
+    
+    # Low confidence detection thresholds
+    # Entropy confidence threshold: Below this indicates high uncertainty
+    entropy_confidence_threshold: 0.4
+    
+    # Consistency confidence threshold: Below this indicates inconsistency
+    consistency_confidence_threshold: 0.4
+    
+    # Low coverage threshold: Below this indicates poor grounding
+    low_coverage_threshold: 0.3
+    
+    # Coverage weights for signal normalization
+    # These weights determine relative importance of different coverage metrics
+    coverage_weights:
+      entities: 0.4      # Named entity coverage (highest weight)
+      numbers: 0.3       # Numeric value coverage
+      tokens_overlap: 0.3  # Lexical token overlap (ROUGE-L)
+
+# Mitigation Strategies Configuration (Month 5)
+mitigation:
+  # Enable/disable mitigation module for independent evaluation
+  # Set to false to evaluate base system performance without mitigation
+  enabled: false
+  
+  # Evidence Re-Ranker Configuration
+  reranker:
+    # Enable/disable evidence re-ranking
+    enabled: true
+    
+    # Weight for retrieval score (semantic similarity from FAISS)
+    # Higher alpha prioritizes original retrieval quality
+    alpha: 0.6
+    
+    # Weight for verification score (coverage + NLI entailment)
+    # Higher beta prioritizes verification feedback
+    beta: 0.4
+    
+    # Fallback verification score when signal is missing
+    # Used for evidence chunks without verification signals
+    # 0.5 = neutral (neither good nor bad)
+    fallback_score: 0.5
+  
+  # Claim Filter Configuration
+  filter:
+    # Enable/disable claim filtering
+    enabled: true
+    
+    # Placeholder text for removed contradictory claims
+    placeholder: "[CLAIM REMOVED: Contradictory]"
+  
+  # Re-Prompting Configuration (Month 5/6)
+  reprompt:
+    # Enable/disable re-prompting for hallucination self-correction
+    # When enabled, triggers iterative refinement if hallucination rate is high
+    enabled: false
+    
+    # Hallucination rate threshold for triggering re-prompting
+    # If (contradictory_claims / total_claims) > threshold, trigger re-prompting
+    # Range: 0.0 to 1.0 (default: 0.5 = 50%)
+    threshold: 0.5
+    
+    # Maximum number of re-prompting iterations
+    # Prevents infinite loops while allowing iterative refinement
+    # Recommended: 1-2 iterations (default: 2)
+    max_iterations: 2
+    
+    # Re-prompting strategy
+    # - "full": Regenerate entire answer with verification feedback
+    # - "claim-specific": Create targeted verification questions (CoVe-inspired)
+    # Default: "full" (simpler, works well with smaller models)
+    strategy: "full"
 
 # Checkpointing
 checkpointing:
@@ -188,11 +362,20 @@ logging:
 
 # Evaluation (for future use)
 evaluation:
-  # Benchmark datasets
+  # Benchmark datasets configuration
   benchmarks:
-    - "truthful_qa"
-    - "rag_truth"
-    - "fever"
+    # RAGTruth hallucination benchmark
+    ragtruth:
+      dataset_path: "benchmark/RAGTruth/dataset"
+      output_dir: "outputs/ragtruth_eval/"
+      batch_size: 10  # Process samples in batches for memory efficiency
+      ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal
+    
+    # Future benchmarks
+    truthful_qa:
+      enabled: false
+    fever:
+      enabled: false
   
-  # Evaluation batch size
+  # Evaluation batch size (default for all benchmarks)
   eval_batch_size: 8

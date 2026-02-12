@@ -8,7 +8,7 @@ capturing token-level logits and scores for downstream verifier modules.
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 import numpy as np
 
 from src.utils.data_structures import EvidenceChunk

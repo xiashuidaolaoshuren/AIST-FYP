@@ -339,3 +339,115 @@ class TestRetrievalGroundedDetector:
         
         # Verify detector uses the same model instance
         assert detector.nlp is model1  # Should be the exact same object
+    
+    # Test 15: Entity coverage with acronym matching
+    def test_entity_coverage_with_acronyms(self, sample_config, sample_metadata):
+        """Test improved entity coverage with acronym matching (Tier 2)."""
+        detector = RetrievalGroundedDetector(sample_config)
+        
+        claim = Claim(
+            claim_id='test_acronym',
+            answer_id='test_a1',
+            text='The United States of America has 330 million people.',
+            answer_char_span=[0, 54],
+            extraction_method='test'
+        )
+        
+        evidence = EvidenceChunk(
+            doc_id='test_doc',
+            sent_id=1,
+            text='The U.S. population is approximately 330 million.',
+            char_start=0,
+            char_end=50,
+            score_dense=0.95,
+            rank=1
+        )
+        
+        signal = detector.compute_signal(claim, evidence, sample_metadata)
+        
+        # Should match "United States of America" with "U.S." via acronym tier
+        assert signal['entities'] > 0.5, "Entity coverage should improve with acronym matching"
+    
+    # Test 16: Entity coverage with alias matching
+    def test_entity_coverage_with_aliases(self, sample_config, sample_metadata):
+        """Test improved entity coverage with alias dictionary (Tier 3)."""
+        detector = RetrievalGroundedDetector(sample_config)
+        
+        claim = Claim(
+            claim_id='test_alias',
+            answer_id='test_a2',
+            text='United States economy is strong and growing.',
+            answer_char_span=[0, 44],
+            extraction_method='test'
+        )
+        
+        evidence = EvidenceChunk(
+            doc_id='test_doc',
+            sent_id=1,
+            text='America has a robust economy with steady growth.',
+            char_start=0,
+            char_end=49,
+            score_dense=0.90,
+            rank=1
+        )
+        
+        signal = detector.compute_signal(claim, evidence, sample_metadata)
+        
+        # Should match "United States" with "America" via alias tier
+        assert signal['entities'] > 0.5, "Entity coverage should improve with alias matching"
+    
+    # Test 17: Entity coverage with punctuation variations
+    def test_entity_coverage_with_punctuation(self, sample_config, sample_metadata):
+        """Test entity matching handles punctuation variations (e.g., U.S.A vs USA)."""
+        detector = RetrievalGroundedDetector(sample_config)
+        
+        claim = Claim(
+            claim_id='test_punct',
+            answer_id='test_a3',
+            text='The USA is a federal republic.',
+            answer_char_span=[0, 31],
+            extraction_method='test'
+        )
+        
+        evidence = EvidenceChunk(
+            doc_id='test_doc',
+            sent_id=1,
+            text='The U.S.A. government has three branches.',
+            char_start=0,
+            char_end=42,
+            score_dense=0.93,
+            rank=1
+        )
+        
+        signal = detector.compute_signal(claim, evidence, sample_metadata)
+        
+        # Should match "USA" with "U.S.A." via acronym normalization
+        assert signal['entities'] > 0.5, "Entity coverage should handle punctuation variations"
+    
+    # Test 18: Backward compatibility with substring matching
+    def test_backward_compatibility_substring(self, sample_config, sample_metadata):
+        """Verify existing substring matching (Tier 1) still works correctly."""
+        detector = RetrievalGroundedDetector(sample_config)
+        
+        claim = Claim(
+            claim_id='test_backward',
+            answer_id='test_a4',
+            text='Barack Obama was president.',
+            answer_char_span=[0, 27],
+            extraction_method='test'
+        )
+        
+        evidence = EvidenceChunk(
+            doc_id='test_doc',
+            sent_id=1,
+            text='Barack Obama served as the 44th president of the United States.',
+            char_start=0,
+            char_end=64,
+            score_dense=0.95,
+            rank=1
+        )
+        
+        signal = detector.compute_signal(claim, evidence, sample_metadata)
+        
+        # Should still match perfectly with substring matching (Tier 1 early exit)
+        assert signal['entities'] == 1.0, "Backward compatibility: substring matching should still work"

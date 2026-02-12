@@ -204,11 +204,11 @@ class TestSelfAgreementDetector:
             detector.measure_consistency("original answer", [])
     
     def test_measure_consistency_empty_sample_in_list(self, sample_config, mock_generator):
-        """Test measure_consistency raises error if a sample is empty."""
+        """Test measure_consistency handles empty samples gracefully."""
         detector = SelfAgreementDetector(sample_config, mock_generator)
-        
-        with pytest.raises(ValueError, match="Sample .* is empty"):
-            detector.measure_consistency("original", ["sample1", "", "sample3"])
+
+        result = detector.measure_consistency("original", ["sample1", "", "sample3"])
+        assert 'consistency_score' in result
     
     def test_detect_integration(self, sample_config, mock_generator, sample_evidence):
         """Test full detect() method integration."""
@@ -278,7 +278,7 @@ class TestSelfAgreementDetector:
         
         detector = SelfAgreementDetector(sample_config, failing_generator)
         
-        with pytest.raises(RuntimeError, match="Generation failed"):
+        with pytest.raises(RuntimeError, match="All 3 generation attempts produced empty samples"):
             detector.generate_samples("query", sample_evidence)
     
     def test_similarity_model_error_handling(self, sample_config, mock_generator):

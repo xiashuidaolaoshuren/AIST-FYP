@@ -256,7 +256,7 @@ class TestLogger:
         
         assert isinstance(logger, logging.Logger)
         assert logger.name == 'test_logger'
-        assert len(logger.handlers) == 2  # File + Console
+        assert len(logger.handlers) >= 2  # File + Console (+ optional event handler)
         
         # Test logging
         logger.info("Test info message")
