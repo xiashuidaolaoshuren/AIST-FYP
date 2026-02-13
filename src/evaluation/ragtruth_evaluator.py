@@ -632,6 +632,7 @@ class RAGTruthEvaluator:
         claim_results = []
         for idx, decision in enumerate(claim_decisions):
             claim_text = resolved_pairs[idx]['claim'].text
+            evidence_items = resolved_pairs[idx].get('evidence', [])
             
             # Check if this claim overlaps with any gold hallucination span
             overlaps_gold = self._check_overlap_with_gold(
@@ -644,7 +645,8 @@ class RAGTruthEvaluator:
                 'claim_text': claim_text,
                 'predicted_status': decision.status,
                 'confidence': decision.confidence,
-                'overlaps_gold_hallucination': overlaps_gold
+                'overlaps_gold_hallucination': overlaps_gold,
+                'top_k_evidences': self._serialize_evidences(evidence_items)
             })
         
         return {
@@ -681,6 +683,36 @@ class RAGTruthEvaluator:
                 )
             )
         return evidence_chunks
+
+    def _serialize_evidences(self, evidence_items: List[Any]) -> List[Dict[str, Any]]:
+        """Serialize evidence items for JSON export in claim-level results."""
+        serialized = []
+        for evidence in evidence_items:
+            if isinstance(evidence, EvidenceChunk):
+                serialized.append({
+                    'doc_id': evidence.doc_id,
+                    'sent_id': evidence.sent_id,
+                    'text': evidence.text,
+                    'rank': evidence.rank,
+                    'score_dense': evidence.score_dense,
+                    'score_bm25': evidence.score_bm25,
+                    'score_hybrid': evidence.score_hybrid,
+                    'source': evidence.source,
+                    'version': evidence.version
+                })
+            elif isinstance(evidence, dict):
+                serialized.append({
+                    'doc_id': evidence.get('doc_id', ''),
+                    'sent_id': evidence.get('sent_id', -1),
+                    'text': evidence.get('text', ''),
+                    'rank': evidence.get('rank', None),
+                    'score_dense': evidence.get('score_dense', None),
+                    'score_bm25': evidence.get('score_bm25', None),
+                    'score_hybrid': evidence.get('score_hybrid', None),
+                    'source': evidence.get('source', None),
+                    'version': evidence.get('version', None)
+                })
+        return serialized
     
     def _check_overlap_with_gold(
         self,
