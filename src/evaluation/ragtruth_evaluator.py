@@ -136,14 +136,21 @@ class RAGTruthEvaluator:
                 self.teacher_forced_intrinsic = bool(
                     getattr(benchmark_config, 'teacher_forced_intrinsic', True)
                 )
+                raw_threshold = getattr(benchmark_config, 'low_confidence_ratio_threshold', 0.5)
+                try:
+                    self.low_confidence_ratio_threshold = float(raw_threshold)
+                except (TypeError, ValueError):
+                    self.low_confidence_ratio_threshold = 0.5
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
                 self.teacher_forced_intrinsic = True
+                self.low_confidence_ratio_threshold = 0.5
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
             self.teacher_forced_intrinsic = True
+            self.low_confidence_ratio_threshold = 0.5
 
         if isinstance(self.ragtruth_eval_mode, str):
             self.ragtruth_eval_mode = self.ragtruth_eval_mode.strip().lower()
@@ -157,6 +164,10 @@ class RAGTruthEvaluator:
                 self.ragtruth_eval_mode
             )
             self.ragtruth_eval_mode = 'ragtruth_eval'
+
+        self.low_confidence_ratio_threshold = float(
+            np.clip(self.low_confidence_ratio_threshold, 0.0, 1.0)
+        )
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -166,10 +177,11 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f)",
             self.benchmark_dir,
             self.ragtruth_eval_mode,
-            self.teacher_forced_intrinsic
+            self.teacher_forced_intrinsic,
+            self.low_confidence_ratio_threshold
         )
     
     def run_evaluation(
@@ -357,6 +369,7 @@ class RAGTruthEvaluator:
                     'source_id': source_id,
                     'task_type': task_type,
                     'question': question,
+                    'dataset_prompt': source.get('prompt', ''),
                     'contexts': contexts,
                     'gold_labels': response['labels'],  # List of hallucination spans
                     'split': split,
@@ -453,7 +466,11 @@ class RAGTruthEvaluator:
         """
         sample_id = sample['id']
         question = sample['question']
+        dataset_prompt = sample.get('dataset_prompt', '')
         gold_labels = sample['gold_labels']
+        hallucination_gold_labels = [
+            label for label in gold_labels if self._is_hallucination_label(label)
+        ]
         default_generation_metadata = {}
         
         resolved_pairs = []
@@ -482,9 +499,9 @@ class RAGTruthEvaluator:
             ):
                 try:
                     scored_metadata = self.rag_pipeline.generator.score_target_with_metadata(
-                        prompt=question,
+                        prompt=dataset_prompt or question,
                         target_text=generated_response,
-                        evidence_chunks=evidence_chunks
+                        evidence_chunks=[] if dataset_prompt else evidence_chunks
                     )
                     scored_metadata['original_query'] = question
                     scored_metadata['disable_intrinsic_uncertainty'] = False
@@ -591,15 +608,25 @@ class RAGTruthEvaluator:
                 claim_decisions.append(decision)
         
         # Step 3: Compare with gold annotations
-        gold_has_hallucination = len(gold_labels) > 0
+        gold_has_hallucination = len(hallucination_gold_labels) > 0
         
         # Determine if we detected any hallucinations
-        # Count claims labeled as Contradictory or Low Confidence
-        detected_hallucinations = [
+        contradictory_count = len([
             d for d in claim_decisions
-            if d.status in ['Contradictory', 'Low Confidence']
-        ]
-        detected_hallucination = len(detected_hallucinations) > 0
+            if d.status == 'Contradictory'
+        ])
+        low_confidence_count = len([
+            d for d in claim_decisions
+            if d.status == 'Low Confidence'
+        ])
+        low_confidence_ratio = (
+            low_confidence_count / len(claim_decisions)
+            if claim_decisions else 0.0
+        )
+        detected_hallucination = (
+            contradictory_count > 0
+            or low_confidence_ratio >= self.low_confidence_ratio_threshold
+        )
         
         # Detailed per-claim analysis
         claim_results = []
@@ -610,7 +637,7 @@ class RAGTruthEvaluator:
             overlaps_gold = self._check_overlap_with_gold(
                 claim_text,
                 generated_response,
-                gold_labels
+                hallucination_gold_labels
             )
             
             claim_results.append({
@@ -628,6 +655,9 @@ class RAGTruthEvaluator:
             'predictions': [d.status for d in claim_decisions],
             'gold_has_hallucination': gold_has_hallucination,
             'detected_hallucination': detected_hallucination,
+            'contradictory_count': contradictory_count,
+            'low_confidence_count': low_confidence_count,
+            'low_confidence_ratio': low_confidence_ratio,
             'claim_results': claim_results
         }
 
@@ -691,6 +721,20 @@ class RAGTruthEvaluator:
                 return True
         
         return False
+
+    def _is_hallucination_label(self, label: Dict[str, Any]) -> bool:
+        """
+        Decide whether a gold label should count as hallucination.
+
+        `implicit_true=True` labels are factually correct statements not mentioned
+        in context; those are excluded from hallucination-positive targets.
+        """
+        if not isinstance(label, dict):
+            return False
+        implicit_true = label.get('implicit_true', False)
+        if isinstance(implicit_true, str):
+            implicit_true = implicit_true.strip().lower() == 'true'
+        return not bool(implicit_true)
     
     def _compute_metrics(
         self,

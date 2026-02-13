@@ -371,6 +371,7 @@ evaluation:
       batch_size: 10  # Process samples in batches for memory efficiency
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
+      low_confidence_ratio_threshold: 0.5  # sample-level hallucination if Low Confidence ratio >= threshold
     
     # Future benchmarks
     truthful_qa:

@@ -706,10 +706,10 @@ class RuleBasedAggregator:
             overall = 50.0
         
         # Determine confidence band
-        if contradict_conf > 0.7 or support_conf > 0.8:
-            band = 'High'
-        elif status == 'Low Confidence':
+        if status == 'Low Confidence':
             band = 'Low'
+        elif contradict_conf > 0.7 or support_conf > 0.8:
+            band = 'High'
         else:
             band = 'Medium'
         

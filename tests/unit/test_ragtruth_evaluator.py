@@ -40,6 +40,9 @@ class TestRAGTruthEvaluator(unittest.TestCase):
         self.dataset_path.mkdir(parents=True)
         
         self.config.evaluation.benchmarks.ragtruth.dataset_path = str(self.dataset_path)
+        self.config.evaluation.benchmarks.ragtruth.ragtruth_eval_mode = 'normal'
+        self.config.evaluation.benchmarks.ragtruth.teacher_forced_intrinsic = False
+        self.config.evaluation.benchmarks.ragtruth.low_confidence_ratio_threshold = 0.5
         
         # Create mock components
         self.rag_pipeline = Mock()
@@ -388,6 +391,97 @@ class TestRAGTruthEvaluator(unittest.TestCase):
         self.assertIn('sample_results', saved)
         self.assertIn('metadata', saved)
         self.assertEqual(saved['metrics']['overall']['accuracy'], 0.9)
+
+    def test_is_hallucination_label_implicit_true(self):
+        """implicit_true labels should not count as hallucination."""
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        self.assertFalse(evaluator._is_hallucination_label({'implicit_true': True}))
+        self.assertFalse(evaluator._is_hallucination_label({'implicit_true': 'true'}))
+        self.assertTrue(evaluator._is_hallucination_label({'implicit_true': False}))
+        self.assertTrue(evaluator._is_hallucination_label({'label_type': 'Evident Contradiction'}))
+
+    def test_low_confidence_ratio_threshold_decision(self):
+        """Sample-level decision should depend on low-confidence ratio threshold."""
+        self.config.evaluation.benchmarks.ragtruth.ragtruth_eval_mode = 'normal'
+        self.config.evaluation.benchmarks.ragtruth.teacher_forced_intrinsic = False
+        self.config.evaluation.benchmarks.ragtruth.low_confidence_ratio_threshold = 0.75
+
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        # Mock rag pipeline output (normal mode path)
+        claim_dicts = [
+            {
+                'claim_id': 'c1',
+                'answer_id': 'a1',
+                'text': 'Claim one.',
+                'answer_char_span': [0, 9],
+                'extraction_method': 'test'
+            },
+            {
+                'claim_id': 'c2',
+                'answer_id': 'a1',
+                'text': 'Claim two.',
+                'answer_char_span': [10, 19],
+                'extraction_method': 'test'
+            }
+        ]
+        evidence_spans = [
+            {
+                'doc_id': 'd1',
+                'sent_id': 0,
+                'text': 'evidence text',
+                'char_start': 0,
+                'char_end': 13,
+                'score_dense': 1.0,
+                'rank': 0
+            }
+        ]
+        self.rag_pipeline.run.return_value = {
+            'draft_response': 'Claim one. Claim two.',
+            'claim_evidence_pairs': [
+                {'claim_id': 'c1', 'evidence_spans': evidence_spans},
+                {'claim_id': 'c2', 'evidence_spans': evidence_spans}
+            ],
+            'claims_by_sub_answer': [
+                {'claims': claim_dicts}
+            ],
+            'generator_metadata': {'sub_answer_metadata': []}
+        }
+
+        # One Low Confidence + one Supported => ratio 0.5 < 0.75 => not hallucination
+        decision_1 = Mock()
+        decision_1.status = 'Low Confidence'
+        decision_1.confidence = {}
+        decision_2 = Mock()
+        decision_2.status = 'Supported'
+        decision_2.confidence = {}
+
+        self.verifier_hub.verify_claim.side_effect = [Mock(), Mock()]
+        self.aggregator.aggregate.side_effect = [decision_1, decision_2]
+
+        sample = {
+            'id': 'test_sample',
+            'question': 'What is test?',
+            'dataset_prompt': '',
+            'contexts': ['ctx'],
+            'gold_labels': [],
+            'gold_response': 'irrelevant'
+        }
+
+        result = evaluator._evaluate_sample(sample)
+        self.assertFalse(result['detected_hallucination'])
+        self.assertAlmostEqual(result['low_confidence_ratio'], 0.5)
 
 
 if __name__ == '__main__':
