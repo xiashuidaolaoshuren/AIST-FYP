@@ -357,3 +357,95 @@ class GeneratorWrapper:
             results.append(result)
         
         return results
+
+    def score_target_with_metadata(
+        self,
+        prompt: str,
+        target_text: str,
+        evidence_chunks: Optional[List[EvidenceChunk]] = None
+    ) -> Dict:
+        """
+        Score a provided target text with teacher forcing and return token-level metadata.
+
+        This method is designed for benchmark settings where response text is fixed
+        (e.g., RAGTruth gold responses) but intrinsic uncertainty signals are still
+        required. It computes per-token entropies over the decoder distribution for
+        the forced target sequence.
+
+        Args:
+            prompt: Input prompt/query used for conditioning
+            target_text: Target response text to score
+            evidence_chunks: Optional evidence chunks used to format the prompt
+
+        Returns:
+            Metadata dictionary containing target text, tokens, token entropies,
+            and per-token probabilities/log-probabilities for the forced sequence.
+        """
+        if evidence_chunks is None:
+            evidence_chunks = []
+
+        formatted_prompt = self._format_prompt(prompt, evidence_chunks)
+
+        model_inputs = self.tokenizer(
+            formatted_prompt,
+            text_target=target_text,
+            return_tensors='pt',
+            truncation=True,
+            max_length=512
+        ).to(self.model.device)
+
+        labels = model_inputs.get('labels')
+        if labels is None:
+            raise ValueError("Tokenizer did not return labels for teacher-forcing scoring")
+
+        with torch.no_grad():
+            outputs = self.model(
+                input_ids=model_inputs['input_ids'],
+                attention_mask=model_inputs.get('attention_mask'),
+                labels=labels
+            )
+
+        logits = outputs.logits[0]  # (target_len, vocab_size)
+        label_ids = labels[0]
+
+        token_ids = []
+        tokens = []
+        token_entropies = []
+        token_probs = []
+        token_logprobs = []
+
+        for idx in range(label_ids.shape[0]):
+            token_id = int(label_ids[idx].item())
+            if token_id < 0:
+                continue
+
+            step_logits = logits[idx]
+            step_probs = torch.softmax(step_logits, dim=-1)
+            step_log_probs = torch.log(step_probs + 1e-12)
+            entropy = -torch.sum(step_probs * step_log_probs)
+
+            token_prob = float(step_probs[token_id].item())
+            token_logprob = float(step_log_probs[token_id].item())
+
+            token_ids.append(token_id)
+            tokens.append(self.tokenizer.decode([token_id], skip_special_tokens=False))
+            token_entropies.append(float(entropy.item()))
+            token_probs.append(token_prob)
+            token_logprobs.append(token_logprob)
+
+        evidence_used = [chunk.doc_id for chunk in evidence_chunks]
+
+        return {
+            'text': target_text,
+            'prompt_text': formatted_prompt,
+            'tokens': tokens,
+            'token_ids': token_ids,
+            'token_entropies': token_entropies,
+            'scores': token_probs,
+            'token_logprobs': token_logprobs,
+            'evidence_used': evidence_used,
+            'generation_config': {
+                'mode': 'teacher_forcing',
+                'model_name': self.model_name
+            }
+        }

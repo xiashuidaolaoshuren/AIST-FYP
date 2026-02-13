@@ -133,12 +133,17 @@ class RAGTruthEvaluator:
                 benchmark_config = config.evaluation.benchmarks.ragtruth
                 self.benchmark_dir = Path(getattr(benchmark_config, 'dataset_path', 'benchmark/RAGTruth/dataset'))
                 self.ragtruth_eval_mode = getattr(benchmark_config, 'ragtruth_eval_mode', 'ragtruth_eval')
+                self.teacher_forced_intrinsic = bool(
+                    getattr(benchmark_config, 'teacher_forced_intrinsic', True)
+                )
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
+                self.teacher_forced_intrinsic = True
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
+            self.teacher_forced_intrinsic = True
 
         if isinstance(self.ragtruth_eval_mode, str):
             self.ragtruth_eval_mode = self.ragtruth_eval_mode.strip().lower()
@@ -161,9 +166,10 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s)",
             self.benchmark_dir,
-            self.ragtruth_eval_mode
+            self.ragtruth_eval_mode,
+            self.teacher_forced_intrinsic
         )
     
     def run_evaluation(
@@ -223,6 +229,7 @@ class RAGTruthEvaluator:
         self.logger.info(f"Max samples: {max_samples or 'all'}")
         self.logger.info(f"Batch size: {batch_size}")
         self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
+        self.logger.info(f"Teacher-forced intrinsic: {self.teacher_forced_intrinsic}")
         
         # Step 1: Load dataset
         self.logger.info("\nStep 1: Loading RAGTruth dataset...")
@@ -447,6 +454,7 @@ class RAGTruthEvaluator:
         sample_id = sample['id']
         question = sample['question']
         gold_labels = sample['gold_labels']
+        default_generation_metadata = {}
         
         resolved_pairs = []
         generated_response = None
@@ -466,6 +474,29 @@ class RAGTruthEvaluator:
                 'scores': [],
                 'disable_intrinsic_uncertainty': True
             }
+
+            if (
+                self.teacher_forced_intrinsic
+                and hasattr(self.rag_pipeline, 'generator')
+                and hasattr(self.rag_pipeline.generator, 'score_target_with_metadata')
+            ):
+                try:
+                    scored_metadata = self.rag_pipeline.generator.score_target_with_metadata(
+                        prompt=question,
+                        target_text=generated_response,
+                        evidence_chunks=evidence_chunks
+                    )
+                    scored_metadata['original_query'] = question
+                    scored_metadata['disable_intrinsic_uncertainty'] = False
+                    metadata = scored_metadata
+                except Exception as e:
+                    self.logger.warning(
+                        "Teacher-forced intrinsic scoring failed for sample %s: %s. "
+                        "Falling back to intrinsic-disabled metadata.",
+                        sample_id,
+                        str(e)
+                    )
+
             for claim in claims:
                 if not evidence_chunks:
                     continue
@@ -550,7 +581,7 @@ class RAGTruthEvaluator:
             for pair in resolved_pairs:
                 claim = pair['claim']
                 evidence = pair['evidence']
-                metadata = pair.get('metadata') or rag_result.get('generator_metadata', {})
+                metadata = pair.get('metadata') or default_generation_metadata
                 
                 # Verify claim
                 signal = self.verifier_hub.verify_claim(claim, evidence, metadata)

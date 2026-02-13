@@ -9,10 +9,10 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 -   [X] **Literature Review:**
     -   [X] Read and summarize key papers on trainless hallucination detection (e.g., SelfCheckGPT, CoVe).
     -   [X] Consolidate findings and identify the most promising signals for the verifier module.
--   [ ] **Data Sourcing:**
-    -   [ ] Download the English Wikipedia corpus.
-    -   [ ] Download evaluation benchmarks: `TruthfulQA`, `RAGTruth`, and `FEVER`.
-    -   [ ] Organize all datasets in a structured project directory.
+-   [X] **Data Sourcing:**
+    -   [X] Download the English Wikipedia corpus.
+    -   [X] Download evaluation benchmarks: `TruthfulQA`, `RAGTruth`, and `FEVER`.
+    -   [X] Organize all datasets in a structured project directory.
 -   [X] **System Architecture:**
     -   [X] Review and confirm the finalized trainless architecture design.
     -   [X] Define the precise inputs and outputs for each signal detector in the verifier module.
@@ -41,9 +41,9 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 ### **Month 3: Verifier Module (Part 1) & Presentation Preparation**
 
 -   **Member 1 (Research & Presentation Focus):**
-    -   [ ] Conduct a deep dive into the theoretical foundations of intrinsic uncertainty (entropy, perplexity) in LLMs.
-    -   [ ] Research and document best practices for implementing retrieval-grounded heuristics, analyzing trade-offs between different overlap metrics (e.g., lexical vs. semantic).
-    -   [ ] Begin drafting the methodology section of the first term report.
+    -   [x] Conduct a deep dive into the theoretical foundations of intrinsic uncertainty (entropy, perplexity) in LLMs.
+    -   [x] Research and document best practices for implementing retrieval-grounded heuristics, analyzing trade-offs between different overlap metrics (e.g., lexical vs. semantic).
+    -   [x] Begin drafting the methodology section of the first term report.
 -   **Member 2 (Development & Experimentation Focus):**
     -   [x] **Intrinsic Uncertainty Detector:**
         -   [x] Implement a function to extract token-level logits/probabilities from the generator's output.
@@ -55,10 +55,10 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [x] Integrate these two detectors into the main pipeline to process claims after generation.
         -   [x] Run initial tests to ensure signals are being generated correctly.
 -   **Team (End of Month):**
-    -   [ ] **First Term Presentation Preparation:**
-        -   [ ] Prepare presentation slides covering project introduction, literature review, system architecture, and progress to date.
-        -   [ ] Draft and rehearse the presentation script.
-        -   [ ] Finalize and submit the first term report.
+    -   [x] **First Term Presentation Preparation:**
+        -   [x] Prepare presentation slides covering project introduction, literature review, system architecture, and progress to date.
+        -   [x] Draft and rehearse the presentation script.
+        -   [x] Finalize and submit the first term report.
 
 ---
 
