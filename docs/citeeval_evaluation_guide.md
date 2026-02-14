@@ -93,39 +93,108 @@ If your output is in the standard pipeline format (e.g., `outputs/full_pipeline_
 
 ## 4. Running Evaluation Metrics
 
-CiteEval provides several metrics. The most relevant for our project is the **System Evaluation** suite.
+Use two separate tracks depending on your goal.
 
-### Step 1: Prepare System Output
-Use the conversion script to generate CiteEval-formatted JSON:
-```bash
-python scripts/convert_to_citeeval.py \
-    --input outputs/full_pipeline_queries_20260201_173435.json \
-    --output benchmark/CiteEval/data/system_eval/my_pipeline_results.json
-```
+### Track A: Official Metric Evaluation (Meta-Eval)
 
-### Step 2: Run CiteEval-Auto
+This track evaluates metric-human correlation using official CiteBench splits with human labels.
+
+- Input splits: `benchmark/CiteEval/data/metric_eval/metric_dev`, `benchmark/CiteEval/data/metric_eval/metric_test`
+- Human labels: `citebench.metric_*.human.out`
 
 1. Activate the CiteBench virtual environment:
 ```powershell
 .\.venv_citeeval\Scripts\Activate.ps1
 ```
 
-2. Run the evaluation script from within the CiteEval directory:
+2. Run CiteEval metric generation (inside CiteEval repo):
+```bash
+cd benchmark/CiteEval/src
+sh run_citeeval.sh
+```
+
+3. Run human-correlation scoring:
+```bash
+cd benchmark/CiteEval/src
+sh run_metric_eval.sh
+```
+
+### Track B: System Evaluation (Our Pipeline Output)
+
+This track evaluates our own RAG outputs without human annotations.
+
+1. Prepare CiteEval-formatted system output:
+```bash
+python scripts/convert_to_citeeval.py \
+    --input outputs/full_pipeline_queries_20260201_173435.json \
+    --output benchmark/CiteEval/data/system_eval/my_pipeline_results.json
+```
+
+2. Convert to `.citeeval` format expected by CiteEval system scripts:
+```bash
+cd benchmark/CiteEval
+python src/data/convert_to_citeeval_format.py \
+    --system_output_file data/system_eval/my_pipeline_results.json
+```
+
+3. Run CiteEval-Auto on the converted file (direct CLI):
 ```bash
 cd benchmark/CiteEval
 export PYTHONPATH=$PYTHONPATH:$(pwd):$(pwd)/src
 python src/scripts/run_citeeval.py \
-    --input_file data/system_eval/my_pipeline_results.json \
-    --output_dir data/system_eval_outputs/ \
+    --response_output_file data/system_eval/my_pipeline_results.citeeval \
+    --eval_output_dir data/system_eval_outputs/ \
+    --modules ca,ce,cr_itercoe,cr_editdist \
+    --version citeeval-auto-12272024 \
     --model_name deepseek-chat
 ```
-*(Note: Use `--model_name gpt-4o` with `CITEEVAL_PROVIDER=openai`.)*
+*(Use `--model_name gpt-4o` with `CITEEVAL_PROVIDER=openai`.)*
 
-### Step 3: Analyze Results
-The evaluation will produce scores for:
-- **Cite-Precision**: Accuracy of citations.
-- **Cite-Recall**: Coverage of citations for supported claims.
-- **AutoAIS**: Overall factual alignment score.
+4. Summarize system-level results:
+```bash
+cd benchmark/CiteEval/src
+sh run_system_eval.sh
+```
+
+### Notes on Data Layout
+
+- Some upstream scripts use `data/citebench/metric_eval/...`, while this project keeps files in `data/metric_eval/...`.
+- Local wrappers in `benchmark/CiteEval/src/run_citeeval.sh` and `benchmark/CiteEval/src/run_metric_eval.sh` now auto-detect either layout.
+
+### One-Command Runner (Windows-Friendly)
+
+You can run preflight + evaluation from project root with:
+
+```powershell
+python scripts/run_citebench_eval.py --track both --metric-split test
+```
+
+When `.env` has `CITEEVAL_PROVIDER=deepseek`, the runner auto-selects `deepseek-chat`.
+
+Quick smoke test with ~10 examples:
+
+```powershell
+python scripts/run_citebench_eval.py --track both --metric-split test --max-examples 10
+```
+
+Force provider/model explicitly (optional):
+
+```powershell
+python scripts/run_citebench_eval.py --track both --provider deepseek --model-name deepseek-chat --max-examples 10
+```
+
+Useful variants:
+
+```powershell
+# Metric track only
+python scripts/run_citebench_eval.py --track metric --metric-split dev
+
+# System track only with your own output file
+python scripts/run_citebench_eval.py --track system --system-input benchmark/CiteEval/data/system_eval/my_pipeline_results.json
+
+# Print commands without executing
+python scripts/run_citebench_eval.py --track both --dry-run
+```
 
 ## 5. Integrating with Verifier Signals
 
