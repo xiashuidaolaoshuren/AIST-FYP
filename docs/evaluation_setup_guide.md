@@ -30,6 +30,35 @@ pip install -r requirements.txt
 
 ---
 
+## 0.5 Environment Configuration
+
+### Setting Up the .env File
+
+The project requires a `.env` file to configure API keys and environment variables. Follow these steps:
+
+1. **Obtain the .env file** from your project lead (Felix)
+2. **Place it in the project root directory**: `AIST-FYP/.env`
+   - This is the same directory where `config.yaml`, `README.md`, and `requirements.txt` are located
+   - The path should be: `d:\Felix_stuff\AIST-FYP\.env` (Windows) or the equivalent on your system
+3. **Do NOT commit this file to Git** - it should remain on your local machine only
+
+The `.env` file contains sensitive credentials (API keys) and is automatically loaded by the pipeline through the `python-dotenv` package. Key configurations include:
+
+**For DeepSeek API (Citation Evaluation):**
+```env
+CITEEVAL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+**For CiteEval System Path:**
+```env
+CITEEVAL_ROOT="benchmark/CiteEval"
+PYTHONPATH="${PYTHONPATH}:benchmark/CiteEval:benchmark/CiteEval/src"
+```
+
+---
+
 ## 1. Wikipedia Corpus Preparation
 
 The evaluation pipeline uses a Wikipedia corpus as the knowledge base. For evaluation, we use the **strategy validation** to ensure a sufficient scale for reliable results.
@@ -77,6 +106,27 @@ The evaluation uses two primary benchmark datasets: **RAGTruth** and **CiteEval*
 ### Download CiteEval
 1. Clone or download the CiteEval repository: [https://github.com/amazon-science/CiteEval](https://github.com/amazon-science/CiteEval)
 2. Place the contents in `benchmark/CiteEval/`.
+
+### Using the Custom CiteBench Version (Modified for DeepSeek Integration)
+
+A modified version of the CiteBench benchmark (with DeepSeek API integration) has been prepared. Follow these steps:
+
+1. **Obtain the CiteBench zip file** from your project lead (Felix)
+2. **Extract the zip file** to a temporary location
+3. **Copy the extracted files** directly into `benchmark/CiteEval/`:
+   ```bash
+   # After extracting the zip file
+   # Copy the contents (maintaining directory structure) to:
+   # benchmark/CiteEval/
+   #
+   # The directory structure should look like:
+   # benchmark/CiteEval/
+   # ├── data/
+   # ├── src/
+   # ├── scripts/
+   # └── ... (other files)
+   ```
+4. **Ensure the modified files are in place** before running CiteEval evaluation scripts
 
 #### Configuration
 Set the required environment variables in your project-root `.env` file to ensure the CiteEval scripts can resolve their internal modules:

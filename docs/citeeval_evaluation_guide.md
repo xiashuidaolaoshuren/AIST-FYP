@@ -12,9 +12,10 @@ CiteEval focuses on fine-grained citation assessment, evaluating not just whethe
 ## 2. Prerequisites
 
 Ensure you have completed the setup in [docs/evaluation_setup_guide.md](docs/evaluation_setup_guide.md):
-- CiteEval repository downloaded to `benchmark/CiteEval/`.
+- **CiteEval repository with DeepSeek modifications**: Use the modified CiteBench version provided by your project lead. Extract and place in `benchmark/CiteEval/`. (See "Using the Custom CiteBench Version" in the setup guide)
 - CiteBench data placed in `benchmark/CiteEval/data/`.
-- Required environment variables set (see `benchmark/CiteEval/README.md`).
+- Required environment variables set in `.env` file at project root (see `.env placement` in the setup guide)
+- Environment variables (see `benchmark/CiteEval/README.md`)
 
 ### Provider Configuration (OpenAI or DeepSeek)
 
@@ -26,12 +27,16 @@ CITEEVAL_PROVIDER=openai
 OPENAI_API_KEY=your_openai_key
 ```
 
-**DeepSeek (OpenAI-compatible)**
+**DeepSeek (OpenAI-compatible) - RECOMMENDED**
+
+This evaluation framework has been modified to support DeepSeek API for cost-effective evaluation. Configure your `.env` file at the project root with:
 ```
 CITEEVAL_PROVIDER=deepseek
 DEEPSEEK_API_KEY=your_deepseek_key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
+
+The `.env` file should be placed in the project root: `AIST-FYP/.env`
 
 ## 3. Data Formatting for Evaluation
 
