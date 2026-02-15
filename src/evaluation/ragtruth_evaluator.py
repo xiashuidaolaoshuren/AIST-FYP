@@ -141,16 +141,23 @@ class RAGTruthEvaluator:
                     self.low_confidence_ratio_threshold = float(raw_threshold)
                 except (TypeError, ValueError):
                     self.low_confidence_ratio_threshold = 0.5
+                raw_low_coverage_ratio = getattr(benchmark_config, 'low_coverage_ratio_threshold', 0.3)
+                try:
+                    self.low_coverage_ratio_threshold = float(raw_low_coverage_ratio)
+                except (TypeError, ValueError):
+                    self.low_coverage_ratio_threshold = 0.3
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
                 self.teacher_forced_intrinsic = True
                 self.low_confidence_ratio_threshold = 0.5
+                self.low_coverage_ratio_threshold = 0.3
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
             self.teacher_forced_intrinsic = True
             self.low_confidence_ratio_threshold = 0.5
+            self.low_coverage_ratio_threshold = 0.3
 
         if isinstance(self.ragtruth_eval_mode, str):
             self.ragtruth_eval_mode = self.ragtruth_eval_mode.strip().lower()
@@ -168,6 +175,9 @@ class RAGTruthEvaluator:
         self.low_confidence_ratio_threshold = float(
             np.clip(self.low_confidence_ratio_threshold, 0.0, 1.0)
         )
+        self.low_coverage_ratio_threshold = float(
+            np.clip(self.low_coverage_ratio_threshold, 0.0, 1.0)
+        )
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -177,11 +187,12 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f)",
             self.benchmark_dir,
             self.ragtruth_eval_mode,
             self.teacher_forced_intrinsic,
-            self.low_confidence_ratio_threshold
+            self.low_confidence_ratio_threshold,
+            self.low_coverage_ratio_threshold
         )
     
     def run_evaluation(
@@ -252,23 +263,28 @@ class RAGTruthEvaluator:
         self.logger.info("\nStep 2: Running evaluation pipeline...")
         all_results = []
         
-        # Process in batches to manage memory
-        for batch_start in range(0, len(samples), batch_size):
-            batch_end = min(batch_start + batch_size, len(samples))
-            batch = samples[batch_start:batch_end]
-            
-            self.logger.info(f"\nProcessing batch {batch_start//batch_size + 1}/{(len(samples)-1)//batch_size + 1} "
-                           f"(samples {batch_start+1}-{batch_end})")
-            
-            # Evaluate each sample in batch
-            for sample in tqdm(batch, desc="Evaluating samples", unit="sample"):
-                try:
-                    result = self._evaluate_sample(sample)
-                    all_results.append(result)
-                except Exception as e:
-                    self.logger.error(f"Error evaluating sample {sample['id']}: {str(e)}")
-                    # Continue with next sample
-                    continue
+        # Process in batches to manage memory, with one persistent progress bar
+        total_batches = (len(samples) - 1) // batch_size + 1 if samples else 0
+        with tqdm(total=len(samples), desc="Evaluating samples", unit="sample") as sample_progress:
+            for batch_start in range(0, len(samples), batch_size):
+                batch_end = min(batch_start + batch_size, len(samples))
+                batch = samples[batch_start:batch_end]
+
+                self.logger.info(
+                    f"\nProcessing batch {batch_start//batch_size + 1}/{total_batches} "
+                    f"(samples {batch_start+1}-{batch_end})"
+                )
+
+                # Evaluate each sample in batch
+                for sample in batch:
+                    try:
+                        result = self._evaluate_sample(sample)
+                        all_results.append(result)
+                    except Exception as e:
+                        self.logger.error(f"Error evaluating sample {sample['id']}: {str(e)}")
+                        # Continue with next sample
+                    finally:
+                        sample_progress.update(1)
         
         # Step 3: Compute metrics
         self.logger.info("\nStep 3: Computing evaluation metrics...")
@@ -623,9 +639,20 @@ class RAGTruthEvaluator:
             low_confidence_count / len(claim_decisions)
             if claim_decisions else 0.0
         )
+        low_coverage_count = len([
+            d for d in claim_decisions
+            if d.confidence.get('coverage_score', 1.0) < 0.5
+        ])
+        low_coverage_ratio = (
+            low_coverage_count / len(claim_decisions)
+            if claim_decisions else 0.0
+        )
         detected_hallucination = (
             contradictory_count > 0
-            or low_confidence_ratio >= self.low_confidence_ratio_threshold
+            or (
+                low_confidence_ratio >= self.low_confidence_ratio_threshold
+                and low_coverage_ratio >= self.low_coverage_ratio_threshold
+            )
         )
         
         # Detailed per-claim analysis
@@ -660,6 +687,8 @@ class RAGTruthEvaluator:
             'contradictory_count': contradictory_count,
             'low_confidence_count': low_confidence_count,
             'low_confidence_ratio': low_confidence_ratio,
+            'low_coverage_count': low_coverage_count,
+            'low_coverage_ratio': low_coverage_ratio,
             'claim_results': claim_results
         }
 
@@ -804,10 +833,10 @@ class RAGTruthEvaluator:
             zero_division=0
         )
         
-        # Confusion matrix
-        cm = confusion_matrix(y_true_binary, y_pred_binary)
-        
-        # Per-class metrics
+        # Confusion matrix (force labels to ensure 2x2 output even if one class present)
+        cm = confusion_matrix(y_true_binary, y_pred_binary, labels=[0, 1])
+
+        # Per-class metrics (tn, fp, fn, tp)
         tn, fp, fn, tp = cm.ravel()
         
         metrics = {

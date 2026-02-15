@@ -264,7 +264,7 @@ verification:
     contradiction_threshold: 0.5
     
     # Entailment threshold: Minimum NLI entailment score required for "Supported" status
-    entailment_threshold: 0.7
+    entailment_threshold: 0.65
     
     # Coverage threshold: Minimum coverage score required for "Supported" status
     # (used in combination with entailment)
@@ -371,7 +371,8 @@ evaluation:
       batch_size: 10  # Process samples in batches for memory efficiency
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
-      low_confidence_ratio_threshold: 0.5  # sample-level hallucination if Low Confidence ratio >= threshold
+      low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
+      low_coverage_ratio_threshold: 0.3  # require weak-evidence corroboration when escalating from Low Confidence
     
     # Future benchmarks
     truthful_qa:

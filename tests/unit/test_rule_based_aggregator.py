@@ -159,7 +159,7 @@ class TestRuleBasedAggregator:
         
         # Should use research-backed defaults
         assert aggregator.thresholds['contradiction'] == 0.5
-        assert aggregator.thresholds['entailment'] == 0.7
+        assert aggregator.thresholds['entailment'] == 0.65
         assert aggregator.thresholds['coverage'] == 0.6
     
     # ==================== Rule 1: Contradictory Classification Tests ====================
@@ -177,12 +177,25 @@ class TestRuleBasedAggregator:
         assert len(decision.signals_ref) > 0
     
     def test_aggregate_contradictory_numeric(self, aggregator, mock_signal_contradictory_numeric):
-        """Test contradictory classification with numeric mismatch."""
+        """Test numeric mismatch defaults to Low Confidence without contradiction corroboration."""
         decision = aggregator.aggregate(mock_signal_contradictory_numeric)
         
-        assert decision.status == 'Contradictory'
+        assert decision.status == 'Low Confidence'
         assert 'numeric' in decision.rationale.lower()
         assert 'mismatch' in decision.rationale.lower()
+
+    def test_aggregate_contradictory_numeric_with_corroboration(self, aggregator, mock_signal_contradictory_numeric):
+        """Numeric mismatch becomes Contradictory when contradiction signal corroborates it."""
+        signal_dict = mock_signal_contradictory_numeric.to_dict()
+        signal_dict['nli']['contradiction'] = 0.45
+        signal_dict['nli']['entailment'] = 0.1
+        signal = VerifierSignal(**signal_dict)
+
+        decision = aggregator.aggregate(signal)
+
+        assert decision.status == 'Contradictory'
+        assert 'numeric' in decision.rationale.lower()
+        assert 'corroboration' in decision.rationale.lower()
     
     def test_contradictory_confidence_breakdown(self, aggregator, mock_signal_contradictory_nli):
         """Test confidence breakdown for contradictory classification."""
