@@ -291,7 +291,7 @@ verification:
 mitigation:
   # Enable/disable mitigation module for independent evaluation
   # Set to false to evaluate base system performance without mitigation
-  enabled: false
+  enabled: true
   
   # Evidence Re-Ranker Configuration
   reranker:
@@ -323,7 +323,7 @@ mitigation:
   reprompt:
     # Enable/disable re-prompting for hallucination self-correction
     # When enabled, triggers iterative refinement if hallucination rate is high
-    enabled: false
+    enabled: true
     
     # Hallucination rate threshold for triggering re-prompting
     # If (contradictory_claims / total_claims) > threshold, trigger re-prompting
