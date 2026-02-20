@@ -73,7 +73,16 @@ python scripts/download_wikipedia.py --strategy validation
 ```bash
 # Download full dump (~20GB, several hours)
 python scripts/download_wikipedia.py --strategy production
+
+# Or pin a specific snapshot explicitly
+python scripts/download_wikipedia.py --strategy production --dump-date 20260101
 ```
+
+Production snapshot selection priority:
+- `--dump-date` CLI argument (highest priority)
+- `data_strategy.production.dump_date` in `config.yaml`
+- `data.wikipedia_dump_date` in `config.yaml`
+- falls back to `latest`
 
 ### 2. Process Wikipedia Data
 

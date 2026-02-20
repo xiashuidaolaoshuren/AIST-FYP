@@ -41,13 +41,15 @@ def build_index_for_strategy(strategy: str, config_path: str = 'config.yaml'):
     logger.info(f"Building BM25 index for strategy: {strategy}")
     
     # Get paths
-    corpus_path = Path('data/processed') / f'wiki_chunks_{strategy}.jsonl'
-    index_path = Path('data/indexes') / strategy / 'bm25_index.pkl'
+    chunks_template = config.get('data.processed_chunks', 'data/processed/wiki_chunks_{strategy}.jsonl')
+    bm25_template = config.get('data.bm25_index', 'data/indexes/{strategy}/bm25_index.pkl')
+    corpus_path = Path(chunks_template.format(strategy=strategy))
+    index_path = Path(bm25_template.format(strategy=strategy))
     
     if not corpus_path.exists():
         logger.error(f"Corpus file not found: {corpus_path}")
         logger.error("Please run preprocessing first:")
-        logger.error(f"  python scripts/preprocess_wikipedia.py --strategy {strategy}")
+        logger.error(f"  python scripts/prepare_wikipedia_chunks.py --strategy {strategy}")
         return False
     
     # Get BM25 parameters from config (with defaults)

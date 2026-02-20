@@ -21,6 +21,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.retrieval import FAISSIndexManager
+from src.utils.config import Config
 from src.utils.logger import setup_logger
 
 
@@ -84,17 +85,28 @@ def main():
         default=32,
         help='Number of connections per layer for HNSW (default: 32)'
     )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='config.yaml',
+        help='Path to configuration file (default: config.yaml)'
+    )
     
     args = parser.parse_args()
     
     logger = setup_logger(__name__)
     logger.info(f"Starting FAISS index build: strategy={args.strategy}, type={args.index_type}")
+
+    config = Config(args.config)
     
     # Set up paths based on strategy
-    project_root = Path(__file__).parent.parent
-    embeddings_path = project_root / 'data' / 'embeddings' / f'wiki_embeddings_{args.strategy}.npy'
-    chunks_path = project_root / 'data' / 'processed' / f'wiki_chunks_{args.strategy}.jsonl'
-    output_dir = project_root / 'data' / 'indexes' / args.strategy
+    embeddings_template = config.get('data.embeddings', 'data/embeddings/wiki_embeddings_{strategy}.npy')
+    chunks_template = config.get('data.processed_chunks', 'data/processed/wiki_chunks_{strategy}.jsonl')
+    faiss_template = config.get('data.faiss_index', 'data/indexes/{strategy}/faiss.index')
+
+    embeddings_path = Path(embeddings_template.format(strategy=args.strategy))
+    chunks_path = Path(chunks_template.format(strategy=args.strategy))
+    output_dir = Path(faiss_template.format(strategy=args.strategy)).parent
     
     # Verify input files exist
     if not embeddings_path.exists():
@@ -181,7 +193,11 @@ def main():
     logger.info("\n" + "="*60)
     logger.info("Index Build Summary")
     logger.info("="*60)
+    corpus_source = metadata[0].get('source', 'unknown') if metadata else 'unknown'
+    corpus_version = metadata[0].get('version', 'unknown') if metadata else 'unknown'
     logger.info(f"Strategy: {args.strategy}")
+    logger.info(f"Corpus Source: {corpus_source}")
+    logger.info(f"Corpus Version: {corpus_version}")
     logger.info(f"Index Type: {adjusted_index_type}")
     logger.info(f"Embedding Dimension: {embedding_dim}")
     logger.info(f"Total Vectors: {index.ntotal:,}")

@@ -19,6 +19,8 @@ models:
 data:
   # Wikipedia data
   wikipedia_dump: "data/raw/enwiki-latest-pages-articles.xml.bz2"
+  # Optional pinned production dump date (YYYYMMDD). Null means use 'latest'.
+  wikipedia_dump_date: null
   wikipedia_sample_dev: "data/raw/wiki_sample_development.jsonl"
   wikipedia_sample_val: "data/raw/wiki_sample_validation.jsonl"
   
@@ -32,6 +34,8 @@ data:
   # FAISS index
   faiss_index: "data/indexes/{strategy}/faiss.index"
   index_metadata: "data/indexes/{strategy}/metadata.pkl"
+  index_config: "data/indexes/{strategy}/index_config.json"
+  bm25_index: "data/indexes/{strategy}/bm25_index.pkl"
 
 # Data Strategy Configuration
 data_strategy:
@@ -49,6 +53,7 @@ data_strategy:
   production:
     max_articles: null  # null = all articles
     name: "production"
+    dump_date: null  # Optional YYYYMMDD to pin snapshot (overrides data.wikipedia_dump_date)
 
 # Processing Parameters
 processing:

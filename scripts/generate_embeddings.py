@@ -133,13 +133,15 @@ Examples:
     logger.info(f"Batch size: {batch_size}, Device: {device}, FP16: {use_fp16}")
     
     # Determine input/output paths
-    processed_dir = Path(config.get('paths.processed', 'data/processed'))
-    embeddings_dir = Path(config.get('paths.embeddings', 'data/embeddings'))
+    chunks_template = config.get('data.processed_chunks', 'data/processed/wiki_chunks_{strategy}.jsonl')
+    embeddings_template = config.get('data.embeddings', 'data/embeddings/wiki_embeddings_{strategy}.npy')
+    metadata_template = config.get('data.embeddings_metadata', 'data/embeddings/metadata_{strategy}.json')
+
+    chunks_file = Path(chunks_template.format(strategy=args.strategy))
+    embeddings_file = Path(embeddings_template.format(strategy=args.strategy))
+    metadata_file = Path(metadata_template.format(strategy=args.strategy))
+    embeddings_dir = embeddings_file.parent
     embeddings_dir.mkdir(parents=True, exist_ok=True)
-    
-    chunks_file = processed_dir / f"wiki_chunks_{args.strategy}.jsonl"
-    embeddings_file = embeddings_dir / f"wiki_embeddings_{args.strategy}.npy"
-    metadata_file = embeddings_dir / f"metadata_{args.strategy}.json"
     checkpoint_file = embeddings_dir / f"checkpoint_{args.strategy}.pkl"
     
     if not chunks_file.exists():
@@ -215,7 +217,9 @@ Examples:
             'device': device,
             'use_fp16': use_fp16,
             'generation_time_seconds': gen_time,
-            'chunks_per_second': chunks_per_sec
+            'chunks_per_second': chunks_per_sec,
+            'corpus_source': chunks[0].get('source', 'wikipedia') if chunks else 'unknown',
+            'corpus_version': chunks[0].get('version', 'unknown') if chunks else 'unknown'
         }
         
         with open(metadata_file, 'w', encoding='utf-8') as f:

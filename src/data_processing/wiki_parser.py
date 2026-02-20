@@ -7,6 +7,7 @@ for development and testing.
 """
 
 import re
+import bz2
 import xml.etree.ElementTree as ET
 from typing import Dict, Iterator, Optional
 from pathlib import Path
@@ -51,10 +52,31 @@ class WikipediaParser:
         
         if not self.dump_path.exists():
             raise FileNotFoundError(f"Wikipedia dump not found: {self.dump_path}")
+
+        self.dump_version = self._infer_dump_version(self.dump_path)
+        self.dump_source = "wikipedia_xml_dump"
         
         self.logger.info(f"Initialized WikipediaParser with dump: {self.dump_path}")
         if self.max_articles:
             self.logger.info(f"Limiting extraction to {self.max_articles} articles")
+
+    def _infer_dump_version(self, dump_path: Path) -> str:
+        """Infer dump version from filename (e.g., enwiki-YYYYMMDD-...)."""
+        filename = dump_path.name
+        match = re.search(r'enwiki-(\d{8})-pages-articles', filename)
+        if match:
+            return match.group(1)
+        if 'enwiki-latest' in filename:
+            return 'latest'
+        return 'unknown'
+
+    def _open_dump_stream(self):
+        """Open dump as binary stream, supporting both XML and XML.BZ2."""
+        if self.dump_path.suffix.lower() == '.bz2':
+            self.logger.info("Opening compressed Wikipedia dump (.bz2) for streaming parse")
+            return bz2.open(self.dump_path, 'rb')
+        self.logger.info("Opening uncompressed Wikipedia dump (.xml)")
+        return open(self.dump_path, 'rb')
     
     def extract_articles(self) -> Iterator[Dict[str, str]]:
         """
@@ -77,11 +99,10 @@ class WikipediaParser:
         articles_processed = 0
         articles_skipped = 0
         
+        dump_stream = self._open_dump_stream()
+
         # Use iterparse for memory-efficient XML parsing
-        context = ET.iterparse(
-            str(self.dump_path),
-            events=('start', 'end')
-        )
+        context = ET.iterparse(dump_stream, events=('start', 'end'))
         
         # Track current page data
         current_page = {}
@@ -144,6 +165,7 @@ class WikipediaParser:
             raise
         
         finally:
+            dump_stream.close()
             pbar.close()
             self.logger.info(
                 f"Extraction complete: {articles_processed} articles processed, "
@@ -214,7 +236,9 @@ class WikipediaParser:
                 'doc_id': doc_id,
                 'title': title,
                 'text': text,
-                'url': url
+                'url': url,
+                'source': self.dump_source,
+                'version': self.dump_version
             }
         
         except Exception as e:

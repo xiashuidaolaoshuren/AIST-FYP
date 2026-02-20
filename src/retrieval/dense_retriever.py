@@ -179,8 +179,8 @@ class DenseRetriever:
                 text=metadata['text'],
                 char_start=metadata['char_start'],
                 char_end=metadata['char_end'],
-                source=metadata['source'],
-                version=metadata['version'],
+                source=metadata.get('source', 'wikipedia'),
+                version=metadata.get('version', 'wiki_sent_v1'),
                 score_dense=score,
                 rank=rank
             )
@@ -266,8 +266,8 @@ class DenseRetriever:
                     text=metadata['text'],
                     char_start=metadata['char_start'],
                     char_end=metadata['char_end'],
-                    source=metadata['source'],
-                    version=metadata['version'],
+                    source=metadata.get('source', 'wikipedia'),
+                    version=metadata.get('version', 'wiki_sent_v1'),
                     score_dense=score,
                     rank=rank
                 )

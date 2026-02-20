@@ -123,11 +123,13 @@ Examples:
     # Determine output path
     if args.output_dir:
         output_dir = Path(args.output_dir)
+        output_file = output_dir / f"wiki_chunks_{args.strategy}.jsonl"
     else:
-        output_dir = Path(config.get('paths.processed', 'data/processed'))
+        output_template = config.get('data.processed_chunks', 'data/processed/wiki_chunks_{strategy}.jsonl')
+        output_file = Path(output_template.format(strategy=args.strategy))
+        output_dir = output_file.parent
     
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / f"wiki_chunks_{args.strategy}.jsonl"
     
     logger.info(f"Output will be saved to: {output_file}")
     
