@@ -4,28 +4,16 @@ This guide provides instructions for preparing the Wikipedia corpus and download
 
 ## 0. Virtual Environment Setup
 
-The evaluation pipeline requires two separate virtual environments to avoid dependency conflicts between the main RAG system and the CiteEval benchmark.
+The evaluation pipeline uses a single project-root virtual environment (`.venv`) for both the main RAG system and CiteEval benchmark workflows.
 
-### 1. Main Project Environment
-Used for: Wikipedia preparation, running the RAG pipeline, and RAGTruth evaluation.
+### Main Project Environment (Single Environment)
+Used for: Wikipedia preparation, running the RAG pipeline, RAGTruth evaluation, and CiteEval/CiteBench evaluation.
 ```bash
 # Root directory of AIST-FYP
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
-```
-
-### 2. CiteBench Environment
-Used for: Running CiteEval-Auto evaluation metrics.
-```bash
-# Root directory of AIST-FYP
-python -m venv .venv_citeeval
-.\.venv_citeeval\Scripts\Activate.ps1  # Windows PowerShell
-
-# Install CiteEval dependencies
-cd benchmark/CiteEval
-pip install -r requirements.txt
 ```
 
 ---

@@ -109,7 +109,7 @@ This track evaluates metric-human correlation using official CiteBench splits wi
 
 1. Activate the CiteBench virtual environment:
 ```powershell
-.\.venv_citeeval\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 ```
 
 2. Run CiteEval metric generation (inside CiteEval repo):
