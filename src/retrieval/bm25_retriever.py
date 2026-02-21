@@ -18,6 +18,7 @@ import spacy
 from src.utils.data_structures import EvidenceChunk
 from src.utils.nlp_utils import get_spacy_model
 from src.utils.logger import setup_logger
+from src.utils.checkpoint_utils import CHECKPOINT_SCHEMA_VERSION, file_fingerprint
 
 
 class BM25Retriever:
@@ -69,6 +70,7 @@ class BM25Retriever:
         self.logger = setup_logger(self.__class__.__name__)
         self.k1 = k1
         self.b = b
+        self.spacy_model = spacy_model
         self.corpus_path = Path(corpus_path)
         self.index_path = Path(index_path) if index_path else None
         
@@ -135,7 +137,10 @@ class BM25Retriever:
             'bm25': self.bm25,
             'chunks': self.chunks,
             'k1': self.k1,
-            'b': self.b
+            'b': self.b,
+            'spacy_model': self.spacy_model,
+            'corpus_fingerprint': file_fingerprint(self.corpus_path),
+            'schema_version': CHECKPOINT_SCHEMA_VERSION,
         }
         
         with open(self.index_path, 'wb') as f:
@@ -160,6 +165,21 @@ class BM25Retriever:
             self.logger.warning(
                 f"Cached index b={index_data.get('b')} differs from requested b={self.b}"
             )
+
+        if index_data.get('spacy_model') and index_data.get('spacy_model') != self.spacy_model:
+            self.logger.warning(
+                f"Cached index spaCy model={index_data.get('spacy_model')} differs "
+                f"from requested model={self.spacy_model}"
+            )
+
+        cached_fingerprint = index_data.get('corpus_fingerprint')
+        if cached_fingerprint is not None and self.corpus_path.exists():
+            current_fingerprint = file_fingerprint(self.corpus_path)
+            if cached_fingerprint != current_fingerprint:
+                self.logger.warning(
+                    "Cached index corpus fingerprint differs from current corpus file. "
+                    "Consider rebuilding BM25 index."
+                )
         
         self.logger.info(f"Loaded BM25 index with {len(self.chunks)} chunks")
     

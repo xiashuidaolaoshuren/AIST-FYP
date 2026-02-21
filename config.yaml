@@ -354,6 +354,31 @@ checkpointing:
   # Checkpoint directory
   checkpoint_dir: "data/embeddings/checkpoints/"
 
+  # Strict checkpoint compatibility validation
+  strict_compatibility: true
+
+  # Chunk preparation checkpoint settings
+  chunking:
+    enabled: true
+    resume_by_default: true
+    checkpoint_dir: "data/checkpoints/chunking/"
+    checkpoint_interval: 1000  # Save every N processed articles
+
+  # FAISS index build checkpoint settings
+  faiss:
+    enabled: true
+    resume_by_default: true
+    checkpoint_dir: "data/checkpoints/faiss/"
+    checkpoint_interval: 200000  # Save every N added vectors
+    add_batch_size: 50000
+
+  # BM25 index build checkpoint settings
+  bm25:
+    enabled: true
+    resume_by_default: true
+    checkpoint_dir: "data/checkpoints/bm25/"
+    checkpoint_interval: 5000  # Save every N tokenized chunks
+
 # Logging Configuration
 logging:
   # Log file location

@@ -9,13 +9,19 @@ FP16 precision, checkpointing for long-running jobs, and progress tracking.
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 from tqdm import tqdm
 import pickle
 from pathlib import Path
 import time
 
 from src.utils.logger import setup_logger
+from src.utils.checkpoint_utils import (
+    CHECKPOINT_SCHEMA_VERSION,
+    ensure_manifest_compatible,
+    load_manifest,
+    save_manifest,
+)
 
 
 class EmbeddingGenerator:
@@ -80,6 +86,8 @@ class EmbeddingGenerator:
         self,
         chunks: List[Dict[str, any]],
         checkpoint_path: Optional[str] = None,
+        checkpoint_manifest_path: Optional[str] = None,
+        checkpoint_metadata: Optional[Dict[str, Any]] = None,
         checkpoint_interval: int = 10000
     ) -> np.ndarray:
         """
@@ -90,7 +98,9 @@ class EmbeddingGenerator:
         
         Args:
             chunks: List of chunk dictionaries with 'text' field
-            checkpoint_path: Path to save/load checkpoints (optional)
+            checkpoint_path: Path to save/load checkpoint payload (pickle, optional)
+            checkpoint_manifest_path: Path to checkpoint manifest (json, optional)
+            checkpoint_metadata: Additional strict compatibility fields
             checkpoint_interval: Save checkpoint every N chunks (default: 10000)
         
         Returns:
@@ -102,13 +112,45 @@ class EmbeddingGenerator:
         """
         n_chunks = len(chunks)
         self.logger.info(f"Generating embeddings for {n_chunks} chunks")
+
+        if checkpoint_interval <= 0:
+            raise ValueError("checkpoint_interval must be > 0")
+
+        manifest_path = Path(checkpoint_manifest_path) if checkpoint_manifest_path else None
+        payload_path = Path(checkpoint_path) if checkpoint_path else None
+        metadata = checkpoint_metadata or {}
+
+        if payload_path and manifest_path is None:
+            manifest_path = payload_path.with_suffix('.manifest.json')
+
+        if manifest_path and payload_path is None:
+            payload_path = manifest_path.with_suffix('.payload.pkl')
+
+        if manifest_path and payload_path:
+            if manifest_path.exists() != payload_path.exists():
+                raise ValueError(
+                    "Incomplete embedding checkpoint state detected (manifest/payload mismatch). "
+                    "Reset checkpoint and retry."
+                )
         
         # Check for existing checkpoint
         start_idx = 0
         embeddings_list = []
-        
-        if checkpoint_path and Path(checkpoint_path).exists():
-            start_idx, embeddings_list = self._load_checkpoint(checkpoint_path)
+
+        expected_manifest = {
+            'schema_version': CHECKPOINT_SCHEMA_VERSION,
+            'model_name': self.model_name,
+            'embedding_dim': self.embedding_dim,
+            'total_chunks': n_chunks,
+            **metadata,
+        }
+
+        if manifest_path and payload_path and manifest_path.exists() and payload_path.exists():
+            start_idx, embeddings_list = self._load_checkpoint(
+                payload_path,
+                manifest_path,
+                expected_manifest,
+            )
             self.logger.info(f"Resumed from checkpoint: {start_idx}/{n_chunks} chunks processed")
         
         # Extract texts
@@ -136,8 +178,14 @@ class EmbeddingGenerator:
                     pbar.update(len(batch_texts))
                     
                     # Save checkpoint periodically
-                    if checkpoint_path and (batch_end % checkpoint_interval == 0 or batch_end == n_chunks):
-                        self._save_checkpoint(checkpoint_path, batch_end, embeddings_list)
+                    if payload_path and manifest_path and (batch_end % checkpoint_interval == 0 or batch_end == n_chunks):
+                        self._save_checkpoint(
+                            payload_path=payload_path,
+                            manifest_path=manifest_path,
+                            processed_count=batch_end,
+                            embeddings_list=embeddings_list,
+                            manifest_fields=expected_manifest,
+                        )
                         self.logger.info(f"Checkpoint saved at {batch_end}/{n_chunks} chunks")
                 
                 except Exception as e:
@@ -163,42 +211,66 @@ class EmbeddingGenerator:
             self.logger.info("Embeddings are L2 normalized")
         
         # Clean up checkpoint if successful
-        if checkpoint_path and Path(checkpoint_path).exists():
-            Path(checkpoint_path).unlink()
-            self.logger.info("Checkpoint file removed after successful completion")
+        if payload_path and payload_path.exists():
+            payload_path.unlink()
+            self.logger.info("Checkpoint payload removed after successful completion")
+
+        if manifest_path and manifest_path.exists():
+            manifest_path.unlink()
+            self.logger.info("Checkpoint manifest removed after successful completion")
         
         return embeddings
     
     def _save_checkpoint(
         self,
-        checkpoint_path: str,
+        payload_path: Path,
+        manifest_path: Path,
         processed_count: int,
-        embeddings_list: List[np.ndarray]
+        embeddings_list: List[np.ndarray],
+        manifest_fields: Dict[str, Any],
     ) -> None:
         """
         Save checkpoint for resume capability.
         
         Args:
-            checkpoint_path: Path to save checkpoint
+            payload_path: Path to save checkpoint payload
+            manifest_path: Path to save checkpoint manifest
             processed_count: Number of chunks processed so far
             embeddings_list: List of embedding arrays
         """
-        checkpoint_data = {
+        payload_data = {
             'processed_count': processed_count,
             'embeddings_list': embeddings_list,
             'model_name': self.model_name,
             'embedding_dim': self.embedding_dim
         }
         
-        with open(checkpoint_path, 'wb') as f:
-            pickle.dump(checkpoint_data, f)
+        payload_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(payload_path, 'wb') as f:
+            pickle.dump(payload_data, f)
+
+        save_manifest(
+            manifest_path,
+            {
+                **manifest_fields,
+                'processed_count': int(processed_count),
+                'payload_path': str(payload_path),
+            }
+        )
     
-    def _load_checkpoint(self, checkpoint_path: str) -> Tuple[int, List[np.ndarray]]:
+    def _load_checkpoint(
+        self,
+        payload_path: Path,
+        manifest_path: Path,
+        expected_manifest: Dict[str, Any],
+    ) -> Tuple[int, List[np.ndarray]]:
         """
         Load checkpoint to resume processing.
         
         Args:
-            checkpoint_path: Path to checkpoint file
+            payload_path: Path to checkpoint payload file
+            manifest_path: Path to checkpoint manifest file
+            expected_manifest: Expected compatibility fields
         
         Returns:
             Tuple of (processed_count, embeddings_list)
@@ -206,7 +278,14 @@ class EmbeddingGenerator:
         Raises:
             ValueError: If checkpoint model doesn't match current model
         """
-        with open(checkpoint_path, 'rb') as f:
+        manifest = load_manifest(manifest_path)
+        ensure_manifest_compatible(
+            manifest,
+            expected_manifest,
+            required_keys=['schema_version', 'model_name', 'embedding_dim', 'total_chunks', 'processed_count']
+        )
+
+        with open(payload_path, 'rb') as f:
             checkpoint_data = pickle.load(f)
         
         # Verify checkpoint compatibility
@@ -221,8 +300,15 @@ class EmbeddingGenerator:
                 f"Checkpoint embedding dimension ({checkpoint_data['embedding_dim']}) "
                 f"doesn't match current model dimension ({self.embedding_dim})"
             )
+
+        processed_count = checkpoint_data['processed_count']
+        if processed_count != manifest['processed_count']:
+            raise ValueError(
+                f"Checkpoint mismatch: payload processed_count={processed_count} "
+                f"!= manifest processed_count={manifest['processed_count']}"
+            )
         
-        return checkpoint_data['processed_count'], checkpoint_data['embeddings_list']
+        return processed_count, checkpoint_data['embeddings_list']
     
     def get_embedding_dimension(self) -> int:
         """

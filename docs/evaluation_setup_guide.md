@@ -63,6 +63,12 @@ python scripts/download_wikipedia.py --strategy validation
 Parse the downloaded Wikipedia articles into sentence-level chunks.
 ```bash
 python scripts/prepare_wikipedia_chunks.py --strategy validation
+
+# Resume from checkpoint (default behavior can also be configured in config.yaml)
+python scripts/prepare_wikipedia_chunks.py --strategy validation --resume
+
+# Force fresh run
+python scripts/prepare_wikipedia_chunks.py --strategy validation --no-resume --reset-checkpoint
 ```
 
 ### Step 3: Generate Embedding Index (for Dense Retrieval)
@@ -71,14 +77,30 @@ Generate vector embeddings and build the FAISS index.
 # Generate embeddings
 python scripts/generate_embeddings.py --strategy validation
 
+# Embedding checkpoints are stored under checkpointing.checkpoint_dir
+# in config.yaml (default: data/embeddings/checkpoints/).
+# Note: legacy checkpoint file format checkpoint_{strategy}.pkl is no longer supported.
+
 # Build FAISS index
 python scripts/build_faiss_index.py --strategy validation
+
+# Resume interrupted FAISS build
+python scripts/build_faiss_index.py --strategy validation --resume
+
+# Force fresh FAISS build
+python scripts/build_faiss_index.py --strategy validation --no-resume --reset-checkpoint
 ```
 
 ### Step 4: Build BM25 Index (for Hybrid Retrieval)
 Build and cache the BM25 index for faster loading during hybrid retrieval.
 ```bash
 python scripts/build_bm25_index.py --strategy validation
+
+# Resume interrupted BM25 tokenization/build
+python scripts/build_bm25_index.py --strategy validation --resume
+
+# Force fresh BM25 build
+python scripts/build_bm25_index.py --strategy validation --no-resume --reset-checkpoint
 ```
 
 ---

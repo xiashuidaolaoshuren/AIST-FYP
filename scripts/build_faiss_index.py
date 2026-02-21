@@ -16,6 +16,7 @@ import json
 import sys
 from pathlib import Path
 import numpy as np
+import faiss
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,6 +24,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.retrieval import FAISSIndexManager
 from src.utils.config import Config
 from src.utils.logger import setup_logger
+from src.utils.checkpoint_utils import (
+    CHECKPOINT_SCHEMA_VERSION,
+    ensure_manifest_compatible,
+    file_fingerprint,
+    load_manifest,
+    save_manifest,
+)
 
 
 def load_embeddings(embeddings_path: Path) -> np.ndarray:
@@ -30,7 +38,7 @@ def load_embeddings(embeddings_path: Path) -> np.ndarray:
     logger = setup_logger(__name__)
     logger.info(f"Loading embeddings from {embeddings_path}")
     
-    embeddings = np.load(embeddings_path)
+    embeddings = np.load(embeddings_path, mmap_mode='r')
     logger.info(f"Loaded embeddings: shape={embeddings.shape}, dtype={embeddings.dtype}")
     
     return embeddings
@@ -49,6 +57,52 @@ def load_chunk_metadata(chunks_path: Path) -> list:
     logger.info(f"Loaded {len(metadata):,} chunk metadata entries")
     
     return metadata
+
+
+def create_faiss_index(
+    embeddings: np.ndarray,
+    index_type: str,
+    dimension: int,
+    nlist: int,
+    nprobe: int,
+    hnsw_m: int,
+    logger,
+):
+    """Create and train (if required) FAISS index, without adding vectors."""
+    index_type = index_type.upper()
+
+    if index_type == 'FLAT':
+        return faiss.IndexFlatIP(dimension)
+
+    if index_type == 'HNSW':
+        return faiss.IndexHNSWFlat(dimension, hnsw_m, faiss.METRIC_INNER_PRODUCT)
+
+    if index_type == 'IVFFLAT':
+        quantizer = faiss.IndexFlatIP(dimension)
+        index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_INNER_PRODUCT)
+
+        n_vectors = len(embeddings)
+        train_sample_size = min(n_vectors, max(nlist * 39, 100000))
+
+        if n_vectors <= train_sample_size:
+            train_embeddings = np.asarray(embeddings, dtype=np.float32)
+        else:
+            train_indices = np.linspace(0, n_vectors - 1, train_sample_size, dtype=int)
+            train_embeddings = np.asarray(embeddings[train_indices], dtype=np.float32)
+
+        logger.info(f"Training IVFFLAT index on {len(train_embeddings):,} samples...")
+        index.train(train_embeddings)
+        index.nprobe = nprobe
+        return index
+
+    raise ValueError(f"Unsupported index type: {index_type}")
+
+
+def build_checkpoint_paths(checkpoint_dir: Path, strategy: str):
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = checkpoint_dir / f"faiss_build_{strategy}.json"
+    partial_index_path = checkpoint_dir / f"faiss_build_{strategy}.partial.index"
+    return manifest_path, partial_index_path
 
 
 def main():
@@ -91,6 +145,39 @@ def main():
         default='config.yaml',
         help='Path to configuration file (default: config.yaml)'
     )
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume from existing FAISS build checkpoint if available'
+    )
+    parser.add_argument(
+        '--no-resume',
+        action='store_true',
+        help='Disable checkpoint loading and build from scratch'
+    )
+    parser.add_argument(
+        '--reset-checkpoint',
+        action='store_true',
+        help='Delete FAISS build checkpoint before starting'
+    )
+    parser.add_argument(
+        '--checkpoint-dir',
+        type=str,
+        default=None,
+        help='Directory for FAISS checkpoints (default: from config)'
+    )
+    parser.add_argument(
+        '--checkpoint-interval',
+        type=int,
+        default=None,
+        help='Save checkpoint every N added vectors (default: from config)'
+    )
+    parser.add_argument(
+        '--add-batch-size',
+        type=int,
+        default=None,
+        help='Vectors to add per batch during index construction (default: from config)'
+    )
     
     args = parser.parse_args()
     
@@ -98,6 +185,19 @@ def main():
     logger.info(f"Starting FAISS index build: strategy={args.strategy}, type={args.index_type}")
 
     config = Config(args.config)
+    checkpoint_enabled = config.get('checkpointing.faiss.enabled', True)
+    default_resume = config.get('checkpointing.faiss.resume_by_default', True)
+    strict_compatibility = config.get('checkpointing.strict_compatibility', True)
+    checkpoint_interval = args.checkpoint_interval or config.get('checkpointing.faiss.checkpoint_interval', 200000)
+    add_batch_size = args.add_batch_size or config.get('checkpointing.faiss.add_batch_size', 50000)
+    checkpoint_dir = Path(args.checkpoint_dir or config.get('checkpointing.faiss.checkpoint_dir', 'data/checkpoints/faiss/'))
+
+    if args.no_resume:
+        resume = False
+    elif args.resume:
+        resume = True
+    else:
+        resume = default_resume
     
     # Set up paths based on strategy
     embeddings_template = config.get('data.embeddings', 'data/embeddings/wiki_embeddings_{strategy}.npy')
@@ -107,6 +207,15 @@ def main():
     embeddings_path = Path(embeddings_template.format(strategy=args.strategy))
     chunks_path = Path(chunks_template.format(strategy=args.strategy))
     output_dir = Path(faiss_template.format(strategy=args.strategy)).parent
+    manifest_path, partial_index_path = build_checkpoint_paths(checkpoint_dir, args.strategy)
+
+    if args.reset_checkpoint:
+        if manifest_path.exists():
+            manifest_path.unlink()
+            logger.info(f"Removed checkpoint manifest: {manifest_path}")
+        if partial_index_path.exists():
+            partial_index_path.unlink()
+            logger.info(f"Removed partial index: {partial_index_path}")
     
     # Verify input files exist
     if not embeddings_path.exists():
@@ -155,22 +264,103 @@ def main():
                     f"for dataset with {n_vectors} vectors"
                 )
     
+    if add_batch_size <= 0:
+        raise ValueError("add_batch_size must be > 0")
+
     # Create FAISS index manager
     embedding_dim = embeddings.shape[1]
     manager = FAISSIndexManager(dimension=embedding_dim, index_type=adjusted_index_type)
-    
-    # Build index
-    logger.info("Building FAISS index...")
-    index = manager.build_index(
-        embeddings,
-        nlist=adjusted_nlist,
-        nprobe=args.nprobe,
-        hnsw_m=args.hnsw_m
-    )
+
+    expected_manifest = {
+        'schema_version': CHECKPOINT_SCHEMA_VERSION,
+        'strategy': args.strategy,
+        'index_type': adjusted_index_type,
+        'dimension': int(embedding_dim),
+        'nlist': int(adjusted_nlist),
+        'nprobe': int(args.nprobe),
+        'hnsw_m': int(args.hnsw_m),
+        'input_embeddings': file_fingerprint(embeddings_path),
+        'input_chunks': file_fingerprint(chunks_path),
+        'n_vectors': int(n_vectors),
+    }
+
+    start_idx = 0
+    index = None
+
+    if checkpoint_enabled and resume and manifest_path.exists():
+        manifest = load_manifest(manifest_path)
+        if strict_compatibility:
+            ensure_manifest_compatible(
+                manifest,
+                expected_manifest,
+                required_keys=[
+                    'schema_version', 'strategy', 'index_type', 'dimension',
+                    'nlist', 'nprobe', 'hnsw_m', 'input_embeddings',
+                    'input_chunks', 'n_vectors', 'added_count',
+                ],
+            )
+
+        if not partial_index_path.exists():
+            raise FileNotFoundError(
+                f"Checkpoint manifest found but partial FAISS index missing: {partial_index_path}. "
+                "Use --reset-checkpoint to rebuild."
+            )
+
+        index = faiss.read_index(str(partial_index_path))
+        start_idx = int(manifest.get('added_count', 0))
+
+        if index.ntotal != start_idx:
+            raise ValueError(
+                f"Checkpoint mismatch: index.ntotal={index.ntotal}, added_count={start_idx}"
+            )
+
+        logger.info(f"Resumed FAISS build from checkpoint at {start_idx:,}/{n_vectors:,} vectors")
+
+    if index is None:
+        logger.info("Initializing new FAISS index...")
+        index = create_faiss_index(
+            embeddings=embeddings,
+            index_type=adjusted_index_type,
+            dimension=embedding_dim,
+            nlist=adjusted_nlist,
+            nprobe=args.nprobe,
+            hnsw_m=args.hnsw_m,
+            logger=logger,
+        )
+
+    if adjusted_index_type == 'IVFFLAT' and hasattr(index, 'nprobe'):
+        index.nprobe = args.nprobe
+
+    logger.info("Adding vectors to FAISS index in batches...")
+    for i in range(start_idx, n_vectors, add_batch_size):
+        batch_end = min(i + add_batch_size, n_vectors)
+        batch_vectors = np.asarray(embeddings[i:batch_end], dtype=np.float32)
+        index.add(batch_vectors)
+
+        if checkpoint_enabled and checkpoint_interval > 0 and (
+            batch_end % checkpoint_interval == 0 or batch_end == n_vectors
+        ):
+            faiss.write_index(index, str(partial_index_path))
+            save_manifest(
+                manifest_path,
+                {
+                    **expected_manifest,
+                    'added_count': int(batch_end),
+                }
+            )
+            logger.info(f"Checkpoint saved at {batch_end:,}/{n_vectors:,} vectors")
     
     # Save index and metadata
     logger.info(f"Saving index to {output_dir}")
     manager.save_index(index, metadata, str(output_dir))
+
+    if checkpoint_enabled:
+        if manifest_path.exists():
+            manifest_path.unlink()
+            logger.info(f"Removed checkpoint manifest: {manifest_path}")
+        if partial_index_path.exists():
+            partial_index_path.unlink()
+            logger.info(f"Removed partial index checkpoint: {partial_index_path}")
     
     # Test search with sample query
     logger.info("\n" + "="*60)
@@ -181,8 +371,8 @@ def main():
     test_query = embeddings[0:1]  # Shape (1, dimension)
     distances, indices = manager.search(index, test_query, top_k=5)
     
-    logger.info(f"\nTest query (first embedding in dataset):")
-    logger.info(f"Top 5 results:")
+    logger.info("\nTest query (first embedding in dataset):")
+    logger.info("Top 5 results:")
     for i, (idx, score) in enumerate(zip(indices[0], distances[0]), 1):
         chunk = metadata[idx]
         logger.info(f"\n{i}. Score: {score:.4f}, Index: {idx}")

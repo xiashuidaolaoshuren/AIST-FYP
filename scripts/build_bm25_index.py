@@ -13,19 +13,43 @@ Usage:
 """
 
 import argparse
+import json
+import pickle
 import sys
 from pathlib import Path
+from typing import List
+from rank_bm25 import BM25Okapi
+from tqdm import tqdm
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.retrieval.bm25_retriever import BM25Retriever
 from src.utils.config import Config
 from src.utils.logger import setup_logger
+from src.utils.nlp_utils import get_spacy_model
+from src.utils.checkpoint_utils import (
+    CHECKPOINT_SCHEMA_VERSION,
+    ensure_manifest_compatible,
+    file_fingerprint,
+    load_manifest,
+    save_manifest,
+)
 
 
-def build_index_for_strategy(strategy: str, config_path: str = 'config.yaml'):
+def _tokenize(nlp, text: str) -> List[str]:
+    doc = nlp(text)
+    return [token.text.lower() for token in doc if not token.is_space]
+
+
+def build_index_for_strategy(
+    strategy: str,
+    config_path: str = 'config.yaml',
+    resume: bool = True,
+    reset_checkpoint: bool = False,
+    checkpoint_dir_override: str = None,
+    checkpoint_interval_override: int = None,
+):
     """
     Build and cache BM25 index for a specific dataset strategy.
     
@@ -37,6 +61,12 @@ def build_index_for_strategy(strategy: str, config_path: str = 'config.yaml'):
     
     # Load configuration
     config = Config(config_path)
+    checkpoint_enabled = config.get('checkpointing.bm25.enabled', True)
+    strict_compatibility = config.get('checkpointing.strict_compatibility', True)
+    checkpoint_interval = checkpoint_interval_override or config.get('checkpointing.bm25.checkpoint_interval', 5000)
+    checkpoint_dir = Path(
+        checkpoint_dir_override or config.get('checkpointing.bm25.checkpoint_dir', 'data/checkpoints/bm25/')
+    )
     
     logger.info(f"Building BM25 index for strategy: {strategy}")
     
@@ -59,18 +89,126 @@ def build_index_for_strategy(strategy: str, config_path: str = 'config.yaml'):
     logger.info(f"BM25 parameters: k1={k1}, b={b}")
     logger.info(f"Corpus path: {corpus_path}")
     logger.info(f"Index will be saved to: {index_path}")
-    
-    # Build index (this will automatically cache it)
+
+    spacy_model = config.get('verification.spacy_model', 'en_core_web_sm')
+    nlp = get_spacy_model(spacy_model)
+
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_manifest = checkpoint_dir / f'bm25_build_{strategy}.json'
+    checkpoint_tokens = checkpoint_dir / f'bm25_tokens_{strategy}.pkl'
+
+    if reset_checkpoint:
+        if checkpoint_manifest.exists():
+            checkpoint_manifest.unlink()
+            logger.info(f"Removed BM25 checkpoint manifest: {checkpoint_manifest}")
+        if checkpoint_tokens.exists():
+            checkpoint_tokens.unlink()
+            logger.info(f"Removed BM25 token checkpoint: {checkpoint_tokens}")
+
+    expected_manifest = {
+        'schema_version': CHECKPOINT_SCHEMA_VERSION,
+        'strategy': strategy,
+        'corpus_fingerprint': file_fingerprint(corpus_path),
+        'k1': float(k1),
+        'b': float(b),
+        'spacy_model': spacy_model,
+    }
+
+    # Build index with tokenization-progress checkpointing
     try:
-        retriever = BM25Retriever(
-            corpus_path=str(corpus_path),
-            index_path=str(index_path),
-            k1=k1,
-            b=b
-        )
-        
+        chunks = []
+        with open(corpus_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                chunks.append(json.loads(line))
+
+        logger.info(f"Loaded {len(chunks):,} chunks from corpus")
+
+        processed_count = 0
+        tokenized_corpus = []
+
+        if checkpoint_enabled and resume and checkpoint_manifest.exists() != checkpoint_tokens.exists():
+            raise ValueError(
+                "Incomplete BM25 checkpoint state detected (manifest/token file mismatch). "
+                "Use --reset-checkpoint to rebuild."
+            )
+
+        if checkpoint_enabled and resume and checkpoint_manifest.exists() and checkpoint_tokens.exists():
+            manifest = load_manifest(checkpoint_manifest)
+            if strict_compatibility:
+                ensure_manifest_compatible(
+                    manifest,
+                    expected_manifest,
+                    required_keys=[
+                        'schema_version',
+                        'strategy',
+                        'corpus_fingerprint',
+                        'k1',
+                        'b',
+                        'spacy_model',
+                        'processed_count',
+                    ],
+                )
+
+            with open(checkpoint_tokens, 'rb') as f:
+                checkpoint_data = pickle.load(f)
+
+            tokenized_corpus = checkpoint_data.get('tokenized_corpus', [])
+            processed_count = int(manifest.get('processed_count', len(tokenized_corpus)))
+
+            if processed_count != len(tokenized_corpus):
+                raise ValueError(
+                    f"BM25 checkpoint mismatch: processed_count={processed_count}, "
+                    f"tokenized_entries={len(tokenized_corpus)}"
+                )
+
+            logger.info(f"Resuming BM25 tokenization from {processed_count:,}/{len(chunks):,}")
+
+        for idx in tqdm(range(processed_count, len(chunks)), desc='Tokenizing', unit='chunk'):
+            tokenized_corpus.append(_tokenize(nlp, chunks[idx]['text']))
+            processed_count = idx + 1
+
+            if checkpoint_enabled and checkpoint_interval > 0 and (
+                processed_count % checkpoint_interval == 0 or processed_count == len(chunks)
+            ):
+                save_manifest(
+                    checkpoint_manifest,
+                    {
+                        **expected_manifest,
+                        'processed_count': processed_count,
+                    }
+                )
+
+                with open(checkpoint_tokens, 'wb') as f:
+                    pickle.dump({'tokenized_corpus': tokenized_corpus}, f)
+
+                logger.info(f"Checkpoint saved at {processed_count:,}/{len(chunks):,} chunks")
+
+        logger.info("Building BM25 index from tokenized corpus...")
+        bm25 = BM25Okapi(tokenized_corpus, k1=k1, b=b)
+
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(index_path, 'wb') as f:
+            pickle.dump(
+                {
+                    'bm25': bm25,
+                    'chunks': chunks,
+                    'k1': k1,
+                    'b': b,
+                    'corpus_fingerprint': expected_manifest['corpus_fingerprint'],
+                    'spacy_model': spacy_model,
+                    'schema_version': CHECKPOINT_SCHEMA_VERSION,
+                },
+                f,
+            )
+
+        if checkpoint_enabled:
+            if checkpoint_manifest.exists():
+                checkpoint_manifest.unlink()
+            if checkpoint_tokens.exists():
+                checkpoint_tokens.unlink()
+
         logger.info(f"Successfully built and cached BM25 index for {strategy}")
-        logger.info(f"Index contains {len(retriever.chunks)} chunks")
+        logger.info(f"Index contains {len(chunks)} chunks")
         return True
         
     except Exception as e:
@@ -101,6 +239,33 @@ def main():
         default='config.yaml',
         help='Path to configuration file (default: config.yaml)'
     )
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume BM25 tokenization from checkpoint if available'
+    )
+    parser.add_argument(
+        '--no-resume',
+        action='store_true',
+        help='Disable checkpoint loading and build from scratch'
+    )
+    parser.add_argument(
+        '--reset-checkpoint',
+        action='store_true',
+        help='Delete existing BM25 checkpoints before building'
+    )
+    parser.add_argument(
+        '--checkpoint-dir',
+        type=str,
+        default=None,
+        help='Directory for BM25 checkpoints (default: from config)'
+    )
+    parser.add_argument(
+        '--checkpoint-interval',
+        type=int,
+        default=None,
+        help='Save checkpoint every N tokenized chunks (default: from config)'
+    )
     
     args = parser.parse_args()
     
@@ -112,12 +277,28 @@ def main():
         parser.error("Cannot specify both --strategy and --all")
     
     # Build indexes
+    config = Config(args.config)
+    default_resume = config.get('checkpointing.bm25.resume_by_default', True)
+    if args.no_resume:
+        resume = False
+    elif args.resume:
+        resume = True
+    else:
+        resume = default_resume
+
     if args.all:
         strategies = ['development', 'validation', 'production']
         success_count = 0
         
         for strategy in strategies:
-            success = build_index_for_strategy(strategy, args.config)
+            success = build_index_for_strategy(
+                strategy,
+                args.config,
+                resume=resume,
+                reset_checkpoint=args.reset_checkpoint,
+                checkpoint_dir_override=args.checkpoint_dir,
+                checkpoint_interval_override=args.checkpoint_interval,
+            )
             if success:
                 success_count += 1
             print()  # Blank line between strategies
@@ -127,7 +308,14 @@ def main():
         if success_count < len(strategies):
             sys.exit(1)
     else:
-        success = build_index_for_strategy(args.strategy, args.config)
+        success = build_index_for_strategy(
+            args.strategy,
+            args.config,
+            resume=resume,
+            reset_checkpoint=args.reset_checkpoint,
+            checkpoint_dir_override=args.checkpoint_dir,
+            checkpoint_interval_override=args.checkpoint_interval,
+        )
         if not success:
             sys.exit(1)
 
