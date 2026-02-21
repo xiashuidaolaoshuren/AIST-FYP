@@ -37,6 +37,14 @@ def _build_checkpoint_path(checkpoint_dir: Path, strategy: str) -> Path:
     return checkpoint_dir / f"prepare_chunks_{strategy}.json"
 
 
+def _build_article_export_checkpoint_path(checkpoint_dir: Path, strategy: str) -> Path:
+    return checkpoint_dir / f"prepare_articles_{strategy}.json"
+
+
+def _default_article_jsonl_path(strategy: str) -> Path:
+    return Path(f"data/processed/wiki_articles_{strategy}.jsonl")
+
+
 def _save_chunking_checkpoint(
     checkpoint_path: Path,
     strategy: str,
@@ -62,6 +70,122 @@ def _save_chunking_checkpoint(
             'input_offset': input_offset,
         }
     )
+
+
+def _save_article_export_checkpoint(
+    checkpoint_path: Path,
+    strategy: str,
+    dump_path: Path,
+    article_output_file: Path,
+    max_articles,
+    total_articles: int,
+) -> None:
+    save_manifest(
+        checkpoint_path,
+        {
+            'schema_version': CHECKPOINT_SCHEMA_VERSION,
+            'strategy': strategy,
+            'input_fingerprint': file_fingerprint(dump_path),
+            'article_output_file': str(article_output_file),
+            'max_articles': max_articles,
+            'total_articles': total_articles,
+        }
+    )
+
+
+def _export_xml_articles_to_jsonl(
+    logger,
+    wiki_parser: WikipediaParser,
+    dump_path: Path,
+    article_output_file: Path,
+    strategy: str,
+    max_articles,
+    checkpoint_enabled: bool,
+    checkpoint_interval: int,
+    checkpoint_dir: Path,
+    resume: bool,
+    strict_compatibility: bool,
+    reset_checkpoint: bool,
+) -> int:
+    checkpoint_path = _build_article_export_checkpoint_path(checkpoint_dir, strategy)
+
+    if reset_checkpoint and checkpoint_path.exists():
+        checkpoint_path.unlink()
+        logger.info(f"Removed existing article export checkpoint: {checkpoint_path}")
+
+    total_articles = 0
+    resumed_from_checkpoint = False
+
+    if checkpoint_enabled and resume and checkpoint_path.exists():
+        checkpoint = load_manifest(checkpoint_path)
+        if strict_compatibility:
+            ensure_manifest_compatible(
+                checkpoint,
+                {
+                    'schema_version': CHECKPOINT_SCHEMA_VERSION,
+                    'strategy': strategy,
+                    'input_fingerprint': file_fingerprint(dump_path),
+                    'article_output_file': str(article_output_file),
+                    'max_articles': max_articles,
+                },
+                required_keys=[
+                    'schema_version',
+                    'strategy',
+                    'input_fingerprint',
+                    'article_output_file',
+                    'max_articles',
+                    'total_articles',
+                ],
+            )
+
+        total_articles = int(checkpoint.get('total_articles', 0))
+        resumed_from_checkpoint = True
+
+        if article_output_file.exists():
+            new_size = truncate_to_last_complete_jsonl_line(article_output_file)
+            logger.info(f"Article export recovery complete, file truncated to {new_size} bytes")
+        else:
+            raise FileNotFoundError(
+                f"Article export checkpoint exists but output file is missing: {article_output_file}. "
+                "Use --reset-checkpoint to restart cleanly."
+            )
+
+        logger.info(f"Resuming article export from checkpoint: total_articles={total_articles}")
+
+    output_mode = 'a' if (checkpoint_enabled and resume and checkpoint_path.exists()) else 'w'
+    skipped_processed_articles = 0
+    articles_to_skip = total_articles if resumed_from_checkpoint else 0
+
+    with open(article_output_file, output_mode, encoding='utf-8') as article_file:
+        logger.info(f"Exporting XML articles to JSONL: {article_output_file}")
+        for article in wiki_parser.extract_articles():
+            if skipped_processed_articles < articles_to_skip:
+                skipped_processed_articles += 1
+                continue
+
+            if max_articles and total_articles >= max_articles:
+                logger.info(f"Reached max_articles limit during article export: {max_articles}")
+                break
+
+            article_file.write(json.dumps(article, ensure_ascii=False) + '\n')
+            total_articles += 1
+
+            if checkpoint_enabled and checkpoint_interval > 0 and total_articles % checkpoint_interval == 0:
+                _save_article_export_checkpoint(
+                    checkpoint_path=checkpoint_path,
+                    strategy=strategy,
+                    dump_path=dump_path,
+                    article_output_file=article_output_file,
+                    max_articles=max_articles,
+                    total_articles=total_articles,
+                )
+
+    if checkpoint_enabled and checkpoint_path.exists():
+        checkpoint_path.unlink()
+        logger.info(f"Removed article export checkpoint after successful completion: {checkpoint_path}")
+
+    logger.info(f"Article export complete: {total_articles:,} articles written to {article_output_file}")
+    return total_articles
 
 
 def main():
@@ -109,6 +233,12 @@ Examples:
         type=str,
         default=None,
         help='Output directory (default: data/processed from config)'
+    )
+    parser.add_argument(
+        '--article-jsonl',
+        type=str,
+        default=None,
+        help='Path to intermediate article JSONL file for two-stage XML processing'
     )
     parser.add_argument(
         '--resume',
@@ -207,6 +337,8 @@ Examples:
         args.checkpoint_dir or config.get('checkpointing.chunking.checkpoint_dir', 'data/checkpoints/chunking/')
     )
     checkpoint_path = _build_checkpoint_path(checkpoint_dir, args.strategy)
+    if checkpoint_enabled:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     if args.no_resume:
         resume = False
@@ -232,10 +364,42 @@ Examples:
         logger.error(f"Failed to initialize components: {e}")
         sys.exit(1)
     
+    if not is_jsonl:
+        article_jsonl_path = Path(args.article_jsonl) if args.article_jsonl else _default_article_jsonl_path(args.strategy)
+        article_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            "Two-stage mode enabled for XML input: "
+            f"Stage 1 export XML -> {article_jsonl_path}, Stage 2 chunk from JSONL"
+        )
+
+        if article_jsonl_path.exists() and not args.reset_checkpoint:
+            logger.info(f"Reusing existing intermediate article JSONL: {article_jsonl_path}")
+        else:
+            _export_xml_articles_to_jsonl(
+                logger=logger,
+                wiki_parser=wiki_parser,
+                dump_path=dump_path,
+                article_output_file=article_jsonl_path,
+                strategy=args.strategy,
+                max_articles=max_articles,
+                checkpoint_enabled=checkpoint_enabled,
+                checkpoint_interval=checkpoint_interval,
+                checkpoint_dir=checkpoint_dir,
+                resume=resume,
+                strict_compatibility=strict_compatibility,
+                reset_checkpoint=args.reset_checkpoint,
+            )
+
+        dump_path = article_jsonl_path
+        is_jsonl = True
+        logger.info(f"Stage 1 finished. Continuing with Stage 2 chunking from: {dump_path}")
+
     # Process articles
     total_articles = 0
     total_chunks = 0
     input_offset = 0
+    resumed_from_checkpoint = False
 
     if checkpoint_enabled and resume and checkpoint_path.exists():
         checkpoint = load_manifest(checkpoint_path)
@@ -266,6 +430,7 @@ Examples:
         total_articles = int(checkpoint.get('total_articles', 0))
         total_chunks = int(checkpoint.get('total_chunks', 0))
         input_offset = int(checkpoint.get('input_offset', 0))
+        resumed_from_checkpoint = True
 
         if output_file.exists():
             new_size = truncate_to_last_complete_jsonl_line(output_file)
@@ -333,46 +498,7 @@ Examples:
                             logger.error(f"Error processing article at line {line_num + 1}: {e}")
                             continue
             
-            # Handle XML input (for production)
-            else:
-                logger.info("Processing XML input...")
-                skipped_processed_articles = 0
-                for article in wiki_parser.extract_articles():
-                    if skipped_processed_articles < total_articles:
-                        skipped_processed_articles += 1
-                        continue
-
-                    if max_articles and total_articles >= max_articles:
-                        logger.info(f"Reached max_articles limit: {max_articles}")
-                        break
-
-                    try:
-                        # Chunk the article
-                        chunks = text_chunker.chunk_article(article)
-                        
-                        # Write chunks to JSONL
-                        for chunk in chunks:
-                            f.write(json.dumps(chunk, ensure_ascii=False) + '\n')
-                        
-                        total_articles += 1
-                        total_chunks += len(chunks)
-
-                        if checkpoint_enabled and checkpoint_interval > 0 and total_articles % checkpoint_interval == 0:
-                            _save_chunking_checkpoint(
-                                checkpoint_path=checkpoint_path,
-                                strategy=args.strategy,
-                                dump_path=dump_path,
-                                output_file=output_file,
-                                is_jsonl=is_jsonl,
-                                max_articles=max_articles,
-                                total_articles=total_articles,
-                                total_chunks=total_chunks,
-                                input_offset=total_articles,
-                            )
-                    
-                    except Exception as e:
-                        logger.error(f"Error processing article {article.get('doc_id', 'unknown')}: {e}")
-                        continue
+            # XML inputs are converted to JSONL in stage 1, so stage 2 always runs in JSONL mode
         
         # Print summary
         avg_chunks_per_article = total_chunks / total_articles if total_articles > 0 else 0

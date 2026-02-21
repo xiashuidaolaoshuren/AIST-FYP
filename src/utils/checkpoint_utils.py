@@ -45,12 +45,12 @@ def ensure_manifest_compatible(
     expected: Dict[str, Any],
     required_keys: Iterable[str],
 ) -> None:
-    """Raise ValueError if required manifest fields differ from expectations."""
+    """Raise ValueError if required fields are missing or expected fields mismatch."""
     for key in required_keys:
         if key not in manifest:
             raise ValueError(f"Checkpoint missing required key: {key}")
 
-        if manifest[key] != expected[key]:
+        if key in expected and manifest[key] != expected[key]:
             raise ValueError(
                 f"Checkpoint mismatch for '{key}': "
                 f"checkpoint={manifest[key]!r}, expected={expected[key]!r}"

@@ -71,6 +71,22 @@ python scripts/prepare_wikipedia_chunks.py --strategy validation --resume
 python scripts/prepare_wikipedia_chunks.py --strategy validation --no-resume --reset-checkpoint
 ```
 
+For **production XML dumps**, the script now uses a two-stage flow automatically:
+1) export XML into intermediate article JSONL, then 2) chunk from JSONL with deterministic line-offset resume.
+
+```bash
+# Production (automatic two-stage mode)
+python scripts/prepare_wikipedia_chunks.py --strategy production
+
+# Optional: set custom intermediate article JSONL path
+python scripts/prepare_wikipedia_chunks.py --strategy production --article-jsonl data/processed/wiki_articles_production.jsonl
+```
+
+Notes:
+- Intermediate file default: `data/processed/wiki_articles_{strategy}.jsonl`
+- If intermediate JSONL already exists, it is reused unless `--reset-checkpoint` is provided
+- Chunking resume remains checkpoint-based and deterministic on JSONL input
+
 ### Step 3: Generate Embedding Index (for Dense Retrieval)
 Generate vector embeddings and build the FAISS index.
 ```bash
