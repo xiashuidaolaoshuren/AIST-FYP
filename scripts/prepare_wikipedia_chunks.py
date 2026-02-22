@@ -398,6 +398,8 @@ Examples:
     # Process articles
     total_articles = 0
     total_chunks = 0
+    run_articles_processed = 0
+    run_articles_failed = 0
     input_offset = 0
     resumed_from_checkpoint = False
 
@@ -445,6 +447,8 @@ Examples:
             f"Resuming from checkpoint: articles={total_articles}, chunks={total_chunks}, "
             f"input_offset={input_offset}"
         )
+    else:
+        logger.info("Starting fresh chunking run (current-run throughput starts at 0)")
     
     try:
         output_mode = 'a' if (checkpoint_enabled and resume and checkpoint_path.exists()) else 'w'
@@ -455,9 +459,15 @@ Examples:
             if is_jsonl:
                 logger.info("Processing JSONL input...")
                 with open(dump_path, 'r', encoding='utf-8') as jsonl_file:
-                    for line_num, line in enumerate(tqdm(jsonl_file, desc="Processing articles", unit=" articles")):
-                        if line_num < input_offset:
-                            continue
+                    skipped_lines = 0
+                    while skipped_lines < input_offset:
+                        if not jsonl_file.readline():
+                            break
+                        skipped_lines += 1
+
+                    progress_bar = tqdm(desc="Chunking articles (current run)", unit=" articles")
+                    progress_bar.set_postfix(total_articles=total_articles)
+                    for line_num, line in enumerate(jsonl_file, start=skipped_lines):
 
                         # Check max_articles limit
                         if max_articles and total_articles >= max_articles:
@@ -475,7 +485,10 @@ Examples:
                                 f.write(json.dumps(chunk, ensure_ascii=False) + '\n')
                             
                             total_articles += 1
+                            run_articles_processed += 1
                             total_chunks += len(chunks)
+                            progress_bar.update(1)
+                            progress_bar.set_postfix(total_articles=total_articles)
 
                             input_offset = line_num + 1
                             if checkpoint_enabled and checkpoint_interval > 0 and total_articles % checkpoint_interval == 0:
@@ -493,10 +506,14 @@ Examples:
                         
                         except json.JSONDecodeError as e:
                             logger.error(f"JSON decode error at line {line_num + 1}: {e}")
+                            run_articles_failed += 1
                             continue
                         except Exception as e:
                             logger.error(f"Error processing article at line {line_num + 1}: {e}")
+                            run_articles_failed += 1
                             continue
+
+                    progress_bar.close()
             
             # XML inputs are converted to JSONL in stage 1, so stage 2 always runs in JSONL mode
         
@@ -512,6 +529,8 @@ Wikipedia Dump:        {dump_path}
 Output File:           {output_file}
 Total Articles:        {total_articles:,}
 Total Chunks:          {total_chunks:,}
+Current Run Articles:  {run_articles_processed:,}
+Current Run Failures:  {run_articles_failed:,}
 Avg Chunks/Article:    {avg_chunks_per_article:.1f}
 Output File Size:      {output_file.stat().st_size / (1024*1024):.2f} MB
 {'='*60}
