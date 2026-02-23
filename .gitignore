@@ -68,13 +68,18 @@ logs/
 wandb/
 .neptune/
 
-# Data files
+# Data files - ignore all in /data except .gitkeep
 *.csv
 *.json
 *.jsonl
 *.parquet
 *.arrow
-data/
+*.bz2
+*.xml
+/data/*
+!/data/.gitkeep
+!/data/*/
+!/data/**/.gitkeep
 datasets/
 corpus/
 
