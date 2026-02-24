@@ -303,18 +303,40 @@ Examples:
             dump_path = Path(config.get('data.wikipedia_sample_val', 'data/raw/wiki_sample_validation.jsonl'))
         else:  # production
             dump_path = Path(config.get('data.wikipedia_dump', 'data/raw/enwiki-latest-pages-articles.xml.bz2'))
-    
-    if not dump_path.exists():
-        logger.error(
-            f"Wikipedia data not found: {dump_path}\n"
-            f"Please run the download script first:\n"
-            f"  python scripts/download_wikipedia.py --strategy {args.strategy}\n"
-        )
-        sys.exit(1)
-    
-    # Detect file type
-    is_jsonl = dump_path.suffix == '.jsonl'
-    logger.info(f"Using Wikipedia data: {dump_path} (format: {'JSONL' if is_jsonl else 'XML'})")
+
+    # Production shortcut: if intermediate article JSONL already exists,
+    # allow stage-2 chunking without requiring raw XML dump.
+    article_jsonl_path = Path(args.article_jsonl) if args.article_jsonl else _default_article_jsonl_path(args.strategy)
+    reuse_intermediate_jsonl = (
+        args.strategy == 'production'
+        and article_jsonl_path.exists()
+        and not args.reset_checkpoint
+    )
+
+    if reuse_intermediate_jsonl:
+        dump_path = article_jsonl_path
+        is_jsonl = True
+        logger.info(f"Reusing existing intermediate article JSONL: {article_jsonl_path}")
+        logger.info(f"Using Wikipedia data: {dump_path} (format: JSONL)")
+    else:
+        if not dump_path.exists():
+            if args.strategy == 'production' and args.reset_checkpoint:
+                logger.error(
+                    "Raw production dump is required when using --reset-checkpoint.\n"
+                    f"Expected dump path: {dump_path}\n"
+                    f"Or remove --reset-checkpoint to reuse existing intermediate JSONL at: {article_jsonl_path}"
+                )
+            else:
+                logger.error(
+                    f"Wikipedia data not found: {dump_path}\n"
+                    f"Please run the download script first:\n"
+                    f"  python scripts/download_wikipedia.py --strategy {args.strategy}\n"
+                )
+            sys.exit(1)
+
+        # Detect file type
+        is_jsonl = dump_path.suffix == '.jsonl'
+        logger.info(f"Using Wikipedia data: {dump_path} (format: {'JSONL' if is_jsonl else 'XML'})")
     
     # Determine output path
     if args.output_dir:
@@ -365,7 +387,6 @@ Examples:
         sys.exit(1)
     
     if not is_jsonl:
-        article_jsonl_path = Path(args.article_jsonl) if args.article_jsonl else _default_article_jsonl_path(args.strategy)
         article_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(
