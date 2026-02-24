@@ -34,6 +34,12 @@ ENV/
 env.bak/
 venv.bak/
 
+# Colab managed env metadata (track these files)
+!colab/env/
+!colab/env/pyproject.toml
+!colab/env/uv.lock
+colab/env/.venv/
+
 # IDEs
 .vscode/
 .idea/
