@@ -382,26 +382,6 @@ aggregator = RuleBasedAggregator(config)
 evaluator = RAGTruthEvaluator(config, pipeline, verifier, aggregator)
 ```
 
-## Integration with Ragas
-
-Compare RAGTruth results with Ragas metrics:
-
-```python
-from src.evaluation.ragas_evaluator import RagasEvaluator
-
-# Run RAGTruth evaluation
-ragtruth_metrics = ragtruth_evaluator.run_evaluation(...)
-
-# Run Ragas evaluation on same samples
-ragas_evaluator = RagasEvaluator(config)
-rag_results = [...]  # From RAG pipeline
-ragas_df = ragas_evaluator.evaluate_rag_outputs(rag_results)
-
-# Compare metrics
-print(f"RAGTruth F1: {ragtruth_metrics['overall']['f1']:.3f}")
-print(f"Ragas Faithfulness: {ragas_df['faithfulness'].mean():.3f}")
-```
-
 ## References
 
 - **RAGTruth Paper**: https://arxiv.org/abs/2401.00396

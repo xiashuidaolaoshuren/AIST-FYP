@@ -209,7 +209,6 @@ The next phase of the project (Months 4-6) will focus on completing the verifier
 
 ### Evaluation & Refinement (Month 5)
 -   **Rule-Based Aggregation:** Develop the logic to combine the four signals (Entropy, Heuristics, NLI, Consistency) into a single confidence score. We will need to tune the thresholds for each signal based on validation data.
--   **Ragas Integration:** Integrate the **Ragas** framework to systematically evaluate `faithfulness` and `answer_relevancy`. This will provide an external benchmark to validate our custom verifier's performance.
 -   **Benchmarking:** Run the full system on **CiteBench** [7] and **RAGTruth** [8] benchmarks to quantify detection accuracy, precision, and recall.
 -   **Hallucination Mitigation:** Beyond detection, we aim to implement active mitigation strategies. This involves using the verifier's negative feedback to trigger corrective actions, such as re-ranking retrieved documents, re-prompting the LLM to self-correct, or filtering out unsupported claims from the final response [10, 11].
 

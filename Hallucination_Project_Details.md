@@ -20,7 +20,7 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
   - **Self-Agreement Methods:** Analyzing response variability across multiple generations (Self-Consistency).
   - **Retrieval-Grounded Heuristics:** Calculating evidence coverage and lexical overlap.
   - **Zero-Shot NLI:** Using off-the-shelf models to check for entailment and contradiction between claims and evidence.
-- **Technical Stack:** Python, Transformers, Vector DBs (FAISS/Chroma), Ragas, and specific zero-shot NLI models (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`).
+- **Technical Stack:** Python, Transformers, Vector DBs (FAISS/Chroma), and specific zero-shot NLI models (e.g., `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`).
 - **Complexity:** Medium.
 
 **6-Month Compact Roadmap & Workflow (Detector-Focused):**
@@ -47,9 +47,8 @@ The following is the established plan from the `FYP_Selected_Projects_Roadmap.tx
   - **Rule-Based Aggregation:** Combine all detector signals using explicit rules or a weighted heuristic to produce a final confidence score.
   - **Confidence UI Display:** Implement a simple UI to visualize the confidence score for each generated claim, making the detector's output interpretable.
   - **CitationFormatter (for CiteBench/CiteEval):** Add a lightweight formatter to insert inline bracketed citations (e.g., [1], [2]) into the generated answer that reference the ranked evidence passages. Provide a post-processing step to align citations with claim spans and export a CiteEval-compatible system output (id, query, passages, pred). This enables both "Full" and "Cited" modes in CiteEval.
-  - **Ragas Integration for Evaluation:** Integrate the Ragas framework to systematically evaluate the RAG pipeline's performance using metrics like `faithfulness` and `answer_relevancy`. This will serve as a complementary evaluation layer to the custom verifier.
   - **End-to-End Detector Evaluation:** Evaluate the complete detector's ability to identify hallucinations on benchmarks (RAGTruth, CiteBench).
-  - **Performance Analysis:** Measure key metrics like detection accuracy, precision, and recall, and compare with Ragas metrics.
+  - **Performance Analysis:** Measure key metrics like detection accuracy, precision, and recall.
   - **Mitigation Strategies:** Implement active mitigation logic based on the verifier's feedback. This includes:
     - **Re-ranking:** Adjusting the ranking of retrieved documents based on verification scores.
     - **Re-prompting:** Asking the LLM to self-correct or refine its answer when low confidence is detected.

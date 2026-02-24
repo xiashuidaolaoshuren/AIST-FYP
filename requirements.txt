@@ -52,9 +52,7 @@ requests==2.32.5
 PyYAML==6.0.3
 pyarrow==21.0.0
 
-# Month 5: RAG Evaluation with Ragas
-ragas>=0.1.0
-langchain-openai>=0.1.0
+# Month 5: Environment and API support
 python-dotenv>=1.0.0
 
 # CiteEval single-venv support

@@ -98,7 +98,6 @@
     - **CiteBench:** For citation quality and attribution.
 - **Metrics:**
     - Detection Accuracy, Precision, Recall.
-    - Comparison with **Ragas** framework (Faithfulness, Answer Relevancy).
 - **Aggregation:** Develop rule-based logic to combine all signals into a final verdict.
 
 ---

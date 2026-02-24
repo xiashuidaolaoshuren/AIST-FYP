@@ -1,15 +1,23 @@
 """
 Evaluation module for RAG system assessment.
 
-This module provides wrappers for external evaluation frameworks (Ragas) and
-custom benchmark evaluation harnesses (RAGTruth, CiteBench).
+This module provides evaluation harnesses for project benchmarks
+(RAGTruth, CiteBench).
 
 Modules:
-    ragas_evaluator: Wrapper for Ragas framework evaluation metrics
     ragtruth_evaluator: Evaluation harness for RAGTruth hallucination benchmark
 """
 
-from .ragas_evaluator import RagasEvaluator
 from .ragtruth_evaluator import RAGTruthEvaluator
+
+class RagasEvaluator:
+    """Compatibility stub for removed Ragas integration."""
+
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError(
+            "Ragas integration has been removed from this repository. "
+            "Use RAGTruth/CiteBench evaluation workflows instead."
+        )
+
 
 __all__ = ['RagasEvaluator', 'RAGTruthEvaluator']

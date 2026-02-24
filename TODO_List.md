@@ -97,7 +97,6 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 
 -   **Member 1 (Research & Presentation Focus):**
     -   [ ] Analyze the results from the end-to-end evaluation, focusing on the performance of each individual signal.
-    -   [ ] Correlate the custom verifier's scores with the Ragas framework's metrics (`faithfulness`, `answer_relevancy`) to produce detailed comparison charts.
     -   [ ] Draft the results and discussion sections of the final report.
 -   **Member 2 (Development & Experimentation Focus):**
     -   [x] **Rule-Based Aggregation:**
@@ -110,9 +109,6 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
         -   [x] Implement an exporter to produce CiteEval System Evaluation JSON: `{id, query, passages:[{text,title?}], pred}`.
         -   [x] Smoke test CiteEval in `Full` mode (no citations required), then `Cited` mode (with `[i]` markers).
         -   [x] Add unit tests: (a) single and multi-sentence answers; (b) missing punctuation; (c) redundant citations; (d) out-of-range indices (should not occur).
-    -   [x] **Ragas Integration:**
-        -   [x] Integrate the Ragas framework into the evaluation pipeline.
-        -   [x] Configure Ragas to compute `faithfulness`, `answer_relevancy`, and other relevant metrics.
     -   [x] **End-to-End Detector Evaluation:**
         -   [x] Set up an evaluation harness to run the full system on the `RAGTruth` and `CiteBench` benchmarks.
         -   [ ] Run the evaluation and collect the results.

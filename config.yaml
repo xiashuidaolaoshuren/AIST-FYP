@@ -238,23 +238,6 @@ verification:
     # Default: 3 (recommended for readability)
     max_citations_per_claim: 3
   
-  # Ragas Framework Configuration (Month 5)
-  ragas:
-    # OpenAI model for evaluation (requires OPENAI_API_KEY environment variable)
-    # gpt-4o-mini is cost-effective for evaluation tasks
-    model: "gpt-4o-mini"
-    
-    # Temperature for LLM evaluation (0 = deterministic, recommended for consistency)
-    temperature: 0
-    
-    # Metrics to compute during evaluation
-    # Available metrics: faithfulness, answer_relevancy, context_precision, 
-    # context_recall, context_relevance, answer_correctness
-    metrics:
-      - faithfulness          # Factual consistency between answer and contexts
-      - answer_relevancy      # How relevant the answer is to the question
-      - context_precision     # How well contexts match ground truth
-  
   # Rule-Based Aggregator Configuration (Month 5)
   aggregator:
     # Entropy normalization parameters (from SelfCheckGPT research)
