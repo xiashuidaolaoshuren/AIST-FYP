@@ -89,6 +89,8 @@ class TextChunker:
         """
         doc_id = article['doc_id']
         text = article['text']
+        source = article.get('source', 'wikipedia')
+        version = article.get('version', 'wiki_sent_v1')
         
         # Process text with spaCy
         doc = self.nlp(text)
@@ -110,8 +112,8 @@ class TextChunker:
                 'text': sent_text,
                 'char_start': sent.start_char,
                 'char_end': sent.end_char,
-                'source': 'wikipedia',
-                'version': 'wiki_sent_v1'
+                'source': source,
+                'version': version
             }
             
             chunks.append(chunk)

@@ -118,9 +118,12 @@ class IntrinsicUncertaintyDetector:
             self.logger.warning(f"Empty claim {claim.claim_id}, returning 0.0 entropy")
             return {'mean_entropy': 0.0}
         
-        # Edge case: no logits in metadata
-        if 'logits' not in metadata or not metadata['logits']:
-            message = f"No logits in metadata for claim {claim.claim_id}"
+        has_token_entropies = bool(metadata.get('token_entropies'))
+        has_logits = bool(metadata.get('logits'))
+
+        # Edge case: no intrinsic source in metadata
+        if not has_token_entropies and not has_logits:
+            message = f"No intrinsic metadata (token_entropies/logits) for claim {claim.claim_id}"
             if self.strict_logits:
                 self.logger.error(f"{message}; strict_logits enabled")
                 raise ValueError(message)
@@ -131,37 +134,67 @@ class IntrinsicUncertaintyDetector:
             # Align claim to token indices
             token_indices = self._align_claim_tokens(claim, metadata)
             
-            # Important: For seq2seq models (e.g., FLAN-T5), output.scores has (n-1) entries
-            # for n generated tokens. The EOS token (</s>) at position n-1 has no logits.
-            # We need to cap token indices to valid logit range.
-            max_logit_idx = len(metadata['logits']) - 1
-            
-            if not token_indices:
-                # Alignment failed - use valid range as fallback
-                self.logger.debug(
-                    f"Token alignment failed for claim {claim.claim_id}, "
-                    f"using valid logit range as fallback (0-{max_logit_idx})"
-                )
-                token_indices = list(range(min(len(metadata['logits']), len(metadata.get('tokens', [])))))
-            else:
-                # Filter token indices to stay within logit bounds
-                # This handles seq2seq models where last token has no logits
-                original_count = len(token_indices)
-                token_indices = [idx for idx in token_indices if idx <= max_logit_idx]
-                if len(token_indices) < original_count:
+            if has_token_entropies:
+                # Teacher-forcing path: token-level entropy already computed
+                max_entropy_idx = len(metadata['token_entropies']) - 1
+
+                if not token_indices:
                     self.logger.debug(
-                        f"Filtered token indices for claim {claim.claim_id}: "
-                        f"{original_count} → {len(token_indices)} "
-                        f"(seq2seq model: last token has no logits)"
+                        f"Token alignment failed for claim {claim.claim_id}, "
+                        f"using available entropy range as fallback (0-{max_entropy_idx})"
                     )
+                    token_indices = list(range(min(
+                        len(metadata['token_entropies']),
+                        len(metadata.get('tokens', []))
+                    )))
+                else:
+                    original_count = len(token_indices)
+                    token_indices = [idx for idx in token_indices if idx <= max_entropy_idx]
+                    if len(token_indices) < original_count:
+                        self.logger.debug(
+                            f"Filtered token indices for claim {claim.claim_id}: "
+                            f"{original_count} → {len(token_indices)} "
+                            f"(teacher-forcing entropy range)"
+                        )
+
+                entropies = []
+                for token_idx in token_indices:
+                    if token_idx < len(metadata['token_entropies']):
+                        entropy_val = metadata['token_entropies'][token_idx]
+                        if entropy_val is not None and np.isfinite(entropy_val):
+                            entropies.append(float(entropy_val))
+            else:
+                # Important: For seq2seq models (e.g., FLAN-T5), output.scores has (n-1) entries
+                # for n generated tokens. The EOS token (</s>) at position n-1 has no logits.
+                # We need to cap token indices to valid logit range.
+                max_logit_idx = len(metadata['logits']) - 1
             
-            # Calculate entropy for each aligned token
-            entropies = []
-            for token_idx in token_indices:
-                if token_idx < len(metadata['logits']):
-                    logits = metadata['logits'][token_idx]
-                    entropy = self._calculate_entropy(logits, self.epsilon)
-                    entropies.append(entropy)
+                if not token_indices:
+                    # Alignment failed - use valid range as fallback
+                    self.logger.debug(
+                        f"Token alignment failed for claim {claim.claim_id}, "
+                        f"using valid logit range as fallback (0-{max_logit_idx})"
+                    )
+                    token_indices = list(range(min(len(metadata['logits']), len(metadata.get('tokens', [])))))
+                else:
+                    # Filter token indices to stay within logit bounds
+                    # This handles seq2seq models where last token has no logits
+                    original_count = len(token_indices)
+                    token_indices = [idx for idx in token_indices if idx <= max_logit_idx]
+                    if len(token_indices) < original_count:
+                        self.logger.debug(
+                            f"Filtered token indices for claim {claim.claim_id}: "
+                            f"{original_count} → {len(token_indices)} "
+                            f"(seq2seq model: last token has no logits)"
+                        )
+
+                # Calculate entropy for each aligned token
+                entropies = []
+                for token_idx in token_indices:
+                    if token_idx < len(metadata['logits']):
+                        logits = metadata['logits'][token_idx]
+                        entropy = self._calculate_entropy(logits, self.epsilon)
+                        entropies.append(entropy)
             
             # Edge case: no valid entropies calculated
             if not entropies:

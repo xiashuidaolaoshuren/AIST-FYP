@@ -613,15 +613,18 @@ class RuleBasedAggregator:
         
         # Check numeric mismatch (if claim contains numbers)
         if self._has_numeric_claims(signal) and not signal.numeric_check:
-            return (
-                'Contradictory',
-                f"Numeric fact mismatch: Claim contains numbers but they don't match "
-                f"evidence (numeric_check=False)."
-            )
+            numeric_contradiction_threshold = self.thresholds['contradiction'] * 0.6
+            if contradict_conf > numeric_contradiction_threshold:
+                return (
+                    'Contradictory',
+                    f"Numeric fact mismatch with contradiction corroboration "
+                    f"({contradict_conf:.2f} > {numeric_contradiction_threshold:.2f})."
+                )
         
         # Rule 2: Supported Detection (medium priority)
         if (support_conf > self.thresholds['entailment'] and 
-            coverage_score > self.thresholds['coverage']):
+            coverage_score > self.thresholds['coverage'] and
+            not (self._has_numeric_claims(signal) and not signal.numeric_check)):
             return (
                 'Supported',
                 f"Strong NLI support ({support_conf:.2f} > {self.thresholds['entailment']:.2f}) "
@@ -656,6 +659,9 @@ class RuleBasedAggregator:
                 f"weak NLI support (support={support_conf:.2f} <= "
                 f"{self.thresholds['entailment']:.2f})"
             )
+
+        if self._has_numeric_claims(signal) and not signal.numeric_check:
+            reasons.append("numeric mismatch detected without strong contradiction corroboration")
         
         if not reasons:
             reasons.append(
@@ -706,10 +712,10 @@ class RuleBasedAggregator:
             overall = 50.0
         
         # Determine confidence band
-        if contradict_conf > 0.7 or support_conf > 0.8:
-            band = 'High'
-        elif status == 'Low Confidence':
+        if status == 'Low Confidence':
             band = 'Low'
+        elif contradict_conf > 0.7 or support_conf > 0.8:
+            band = 'High'
         else:
             band = 'Medium'
         

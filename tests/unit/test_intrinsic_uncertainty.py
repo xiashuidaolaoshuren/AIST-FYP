@@ -329,6 +329,22 @@ class TestIntrinsicUncertaintyDetector:
         signal = detector.compute_signal(sample_claim, sample_evidence, metadata_no_logits)
         
         assert signal == {'mean_entropy': 0.0}
+
+    def test_compute_signal_with_token_entropies(self, sample_config, sample_claim, sample_evidence):
+        """Test intrinsic uncertainty from precomputed token entropies."""
+        detector = IntrinsicUncertaintyDetector(sample_config)
+
+        metadata = {
+            'text': 'Machine learning is a subset of AI.',
+            'tokens': ['Machine', '▁learning', '▁is', '▁a', '▁subset', '▁of', '▁AI', '.'],
+            'token_entropies': [0.5, 0.7, 0.8, 0.9, 0.6, 0.55, 0.65, 0.75]
+        }
+
+        signal = detector.compute_signal(sample_claim, sample_evidence, metadata)
+
+        assert 'mean_entropy' in signal
+        assert isinstance(signal['mean_entropy'], float)
+        assert signal['mean_entropy'] > 0.0
     
     def test_entropy_decreases_with_confidence(self, sample_config):
         """

@@ -57,5 +57,10 @@ ragas>=0.1.0
 langchain-openai>=0.1.0
 python-dotenv>=1.0.0
 
+# CiteEval single-venv support
+configobj==5.0.9
+nltk==3.9.1
+openai==1.16.2
+
 # Month 5: Gradio UI for Visualization
 gradio>=4.0.0

@@ -70,6 +70,9 @@ evaluation:
       output_dir: "outputs/ragtruth_eval/"
       batch_size: 10
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal
+      teacher_forced_intrinsic: true
+      low_confidence_ratio_threshold: 0.6
+      low_coverage_ratio_threshold: 0.3
 ```
 
 Disable multi-question splitting (recommended for RAGTruth evaluation stability):
@@ -215,9 +218,11 @@ When using `--save-results`, outputs detailed JSON file:
 2. **Sample Evaluation** (for each sample)
   - Extract question and contexts from source info
   - If `ragtruth_eval_mode: ragtruth_eval`: use dataset response + gold contexts
+  - If `teacher_forced_intrinsic: true` in `ragtruth_eval`, score the gold response with teacher forcing to compute intrinsic uncertainty (without replacing response text)
   - If `ragtruth_eval_mode: normal`: run RAG pipeline to generate responses
   - Verify each claim using VerifierHub (all detectors)
   - Aggregate signals into claim decisions
+  - Escalate sample-level hallucination when contradiction exists, or when low-confidence ratio is high and weak-evidence ratio corroborates it
   - Check if claims overlap with gold hallucination spans
   - Record predictions and ground truth
 

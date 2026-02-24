@@ -44,6 +44,7 @@ References:
 
 import json
 import os
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
@@ -60,6 +61,9 @@ from src.utils.config import Config
 from src.utils.logger import setup_logger
 from src.utils.data_structures import ClaimDecision, Claim, EvidenceChunk
 from src.generation.claim_extractor import extract_claims
+from src.mitigation.claim_filter import ClaimFilter
+from src.mitigation.re_ranker import EvidenceReRanker
+from src.mitigation.reprompt import RePrompter
 
 
 class RAGTruthEvaluator:
@@ -126,6 +130,15 @@ class RAGTruthEvaluator:
         self.verifier_hub = verifier_hub
         self.aggregator = aggregator
         self.logger = setup_logger(__name__)
+
+        mitigation_config = self.config.get('mitigation', {})
+        if not isinstance(mitigation_config, dict):
+            mitigation_config = {}
+
+        self.mitigation_enabled = bool(mitigation_config.get('enabled', False))
+        self.claim_filter = None
+        self.evidence_reranker = None
+        self.reprompter = None
         
         # Get benchmark directory from config
         if hasattr(config, 'evaluation') and hasattr(config.evaluation, 'benchmarks'):
@@ -133,12 +146,31 @@ class RAGTruthEvaluator:
                 benchmark_config = config.evaluation.benchmarks.ragtruth
                 self.benchmark_dir = Path(getattr(benchmark_config, 'dataset_path', 'benchmark/RAGTruth/dataset'))
                 self.ragtruth_eval_mode = getattr(benchmark_config, 'ragtruth_eval_mode', 'ragtruth_eval')
+                self.teacher_forced_intrinsic = bool(
+                    getattr(benchmark_config, 'teacher_forced_intrinsic', True)
+                )
+                raw_threshold = getattr(benchmark_config, 'low_confidence_ratio_threshold', 0.5)
+                try:
+                    self.low_confidence_ratio_threshold = float(raw_threshold)
+                except (TypeError, ValueError):
+                    self.low_confidence_ratio_threshold = 0.5
+                raw_low_coverage_ratio = getattr(benchmark_config, 'low_coverage_ratio_threshold', 0.3)
+                try:
+                    self.low_coverage_ratio_threshold = float(raw_low_coverage_ratio)
+                except (TypeError, ValueError):
+                    self.low_coverage_ratio_threshold = 0.3
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
+                self.teacher_forced_intrinsic = True
+                self.low_confidence_ratio_threshold = 0.5
+                self.low_coverage_ratio_threshold = 0.3
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
+            self.teacher_forced_intrinsic = True
+            self.low_confidence_ratio_threshold = 0.5
+            self.low_coverage_ratio_threshold = 0.3
 
         if isinstance(self.ragtruth_eval_mode, str):
             self.ragtruth_eval_mode = self.ragtruth_eval_mode.strip().lower()
@@ -152,6 +184,13 @@ class RAGTruthEvaluator:
                 self.ragtruth_eval_mode
             )
             self.ragtruth_eval_mode = 'ragtruth_eval'
+
+        self.low_confidence_ratio_threshold = float(
+            np.clip(self.low_confidence_ratio_threshold, 0.0, 1.0)
+        )
+        self.low_coverage_ratio_threshold = float(
+            np.clip(self.low_coverage_ratio_threshold, 0.0, 1.0)
+        )
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -161,10 +200,38 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f)",
             self.benchmark_dir,
-            self.ragtruth_eval_mode
+            self.ragtruth_eval_mode,
+            self.teacher_forced_intrinsic,
+            self.low_confidence_ratio_threshold,
+            self.low_coverage_ratio_threshold
         )
+
+        if self.mitigation_enabled:
+            try:
+                self.claim_filter = ClaimFilter(config)
+            except Exception as exc:
+                self.logger.warning("Failed to initialize ClaimFilter: %s", exc)
+
+            try:
+                self.evidence_reranker = EvidenceReRanker(config)
+            except Exception as exc:
+                self.logger.warning("Failed to initialize EvidenceReRanker: %s", exc)
+
+            try:
+                generator = getattr(self.rag_pipeline, 'generator', None)
+                if generator is not None:
+                    self.reprompter = RePrompter(config, generator)
+            except Exception as exc:
+                self.logger.warning("Failed to initialize RePrompter: %s", exc)
+
+            self.logger.info(
+                "Mitigation enabled for evaluator (filter=%s, rerank=%s, reprompt=%s)",
+                bool(self.claim_filter and self.claim_filter.enabled),
+                bool(self.evidence_reranker and self.evidence_reranker.enabled),
+                bool(self.reprompter and self.reprompter.enabled)
+            )
     
     def run_evaluation(
         self,
@@ -223,6 +290,7 @@ class RAGTruthEvaluator:
         self.logger.info(f"Max samples: {max_samples or 'all'}")
         self.logger.info(f"Batch size: {batch_size}")
         self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
+        self.logger.info(f"Teacher-forced intrinsic: {self.teacher_forced_intrinsic}")
         
         # Step 1: Load dataset
         self.logger.info("\nStep 1: Loading RAGTruth dataset...")
@@ -233,23 +301,28 @@ class RAGTruthEvaluator:
         self.logger.info("\nStep 2: Running evaluation pipeline...")
         all_results = []
         
-        # Process in batches to manage memory
-        for batch_start in range(0, len(samples), batch_size):
-            batch_end = min(batch_start + batch_size, len(samples))
-            batch = samples[batch_start:batch_end]
-            
-            self.logger.info(f"\nProcessing batch {batch_start//batch_size + 1}/{(len(samples)-1)//batch_size + 1} "
-                           f"(samples {batch_start+1}-{batch_end})")
-            
-            # Evaluate each sample in batch
-            for sample in tqdm(batch, desc="Evaluating samples", unit="sample"):
-                try:
-                    result = self._evaluate_sample(sample)
-                    all_results.append(result)
-                except Exception as e:
-                    self.logger.error(f"Error evaluating sample {sample['id']}: {str(e)}")
-                    # Continue with next sample
-                    continue
+        # Process in batches to manage memory, with one persistent progress bar
+        total_batches = (len(samples) - 1) // batch_size + 1 if samples else 0
+        with tqdm(total=len(samples), desc="Evaluating samples", unit="sample") as sample_progress:
+            for batch_start in range(0, len(samples), batch_size):
+                batch_end = min(batch_start + batch_size, len(samples))
+                batch = samples[batch_start:batch_end]
+
+                self.logger.info(
+                    f"\nProcessing batch {batch_start//batch_size + 1}/{total_batches} "
+                    f"(samples {batch_start+1}-{batch_end})"
+                )
+
+                # Evaluate each sample in batch
+                for sample in batch:
+                    try:
+                        result = self._evaluate_sample(sample)
+                        all_results.append(result)
+                    except Exception as e:
+                        self.logger.error(f"Error evaluating sample {sample['id']}: {str(e)}")
+                        # Continue with next sample
+                    finally:
+                        sample_progress.update(1)
         
         # Step 3: Compute metrics
         self.logger.info("\nStep 3: Computing evaluation metrics...")
@@ -350,6 +423,7 @@ class RAGTruthEvaluator:
                     'source_id': source_id,
                     'task_type': task_type,
                     'question': question,
+                    'dataset_prompt': source.get('prompt', ''),
                     'contexts': contexts,
                     'gold_labels': response['labels'],  # List of hallucination spans
                     'split': split,
@@ -446,7 +520,12 @@ class RAGTruthEvaluator:
         """
         sample_id = sample['id']
         question = sample['question']
+        dataset_prompt = sample.get('dataset_prompt', '')
         gold_labels = sample['gold_labels']
+        hallucination_gold_labels = [
+            label for label in gold_labels if self._is_hallucination_label(label)
+        ]
+        default_generation_metadata = {}
         
         resolved_pairs = []
         generated_response = None
@@ -466,6 +545,29 @@ class RAGTruthEvaluator:
                 'scores': [],
                 'disable_intrinsic_uncertainty': True
             }
+
+            if (
+                self.teacher_forced_intrinsic
+                and hasattr(self.rag_pipeline, 'generator')
+                and hasattr(self.rag_pipeline.generator, 'score_target_with_metadata')
+            ):
+                try:
+                    scored_metadata = self.rag_pipeline.generator.score_target_with_metadata(
+                        prompt=dataset_prompt or question,
+                        target_text=generated_response,
+                        evidence_chunks=[] if dataset_prompt else evidence_chunks
+                    )
+                    scored_metadata['original_query'] = question
+                    scored_metadata['disable_intrinsic_uncertainty'] = False
+                    metadata = scored_metadata
+                except Exception as e:
+                    self.logger.warning(
+                        "Teacher-forced intrinsic scoring failed for sample %s: %s. "
+                        "Falling back to intrinsic-disabled metadata.",
+                        sample_id,
+                        str(e)
+                    )
+
             for claim in claims:
                 if not evidence_chunks:
                     continue
@@ -546,59 +648,234 @@ class RAGTruthEvaluator:
         
         # Step 2: Verify claims if verifier is enabled
         claim_decisions = []
+        claim_signals = []
         if self.verifier_hub and self.verifier_hub.enabled and resolved_pairs:
             for pair in resolved_pairs:
                 claim = pair['claim']
                 evidence = pair['evidence']
-                metadata = pair.get('metadata') or rag_result.get('generator_metadata', {})
+                metadata = pair.get('metadata') or default_generation_metadata
                 
                 # Verify claim
                 signal = self.verifier_hub.verify_claim(claim, evidence, metadata)
+                claim_signals.append(signal)
                 
                 # Aggregate into decision
                 decision = self.aggregator.aggregate(signal)
                 claim_decisions.append(decision)
+
+        mitigation_actions = []
+
+        if self.evidence_reranker and self.evidence_reranker.enabled and resolved_pairs and claim_signals:
+            reranked_pairs = []
+            reranked_any = False
+
+            for pair, signal in zip(resolved_pairs, claim_signals):
+                evidence = pair.get('evidence') or []
+                if not evidence:
+                    reranked_pairs.append(pair)
+                    continue
+
+                verification_signals = self._build_rerank_signal_map(signal, evidence)
+                reranked_evidence = self.evidence_reranker.rerank(
+                    evidence_list=evidence,
+                    verification_signals=verification_signals
+                )
+
+                if [f"{chunk.doc_id}#{chunk.sent_id}" for chunk in reranked_evidence] != [
+                    f"{chunk.doc_id}#{chunk.sent_id}" for chunk in evidence
+                ]:
+                    reranked_any = True
+
+                reranked_pairs.append({
+                    'claim': pair['claim'],
+                    'evidence': reranked_evidence,
+                    'metadata': pair.get('metadata')
+                })
+
+            if reranked_any:
+                mitigation_actions.append('rerank')
+
+            resolved_pairs = reranked_pairs
+            claim_decisions = []
+            claim_signals = []
+            for pair in resolved_pairs:
+                claim = pair['claim']
+                evidence = pair['evidence']
+                metadata = pair.get('metadata') or default_generation_metadata
+                signal = self.verifier_hub.verify_claim(claim, evidence, metadata)
+                claim_signals.append(signal)
+                claim_decisions.append(self.aggregator.aggregate(signal))
+
+        if self.reprompter and self.reprompter.enabled and claim_decisions:
+            merged_evidence = []
+            if resolved_pairs:
+                merged_evidence = resolved_pairs[0].get('evidence', [])
+
+            reprompt_result = self.reprompter.reprompt(
+                query=question,
+                answer=generated_response,
+                decisions=claim_decisions,
+                evidence=merged_evidence,
+                claims=[pair['claim'] for pair in resolved_pairs]
+            )
+
+            if reprompt_result.get('improved', False):
+                mitigation_actions.append('reprompt')
+                generated_response = reprompt_result['final_answer']
+
+                corrected_claims = extract_claims(text=generated_response, method='auto')
+                resolved_pairs = []
+                for claim in corrected_claims:
+                    if not merged_evidence:
+                        continue
+                    resolved_pairs.append({
+                        'claim': claim,
+                        'evidence': merged_evidence,
+                        'metadata': default_generation_metadata
+                    })
+
+                claim_decisions = []
+                claim_signals = []
+                for pair in resolved_pairs:
+                    signal = self.verifier_hub.verify_claim(
+                        pair['claim'],
+                        pair['evidence'],
+                        pair['metadata']
+                    )
+                    claim_signals.append(signal)
+                    claim_decisions.append(self.aggregator.aggregate(signal))
+
+        filtered_response = generated_response
+        removed_count = 0
+        if self.claim_filter and self.claim_filter.enabled and claim_decisions:
+            filtered_response, removed_count = self.claim_filter.filter_answer(
+                answer_text=generated_response,
+                claims=[pair['claim'] for pair in resolved_pairs],
+                decisions=claim_decisions
+            )
+            if removed_count > 0:
+                mitigation_actions.append('filter')
         
         # Step 3: Compare with gold annotations
-        gold_has_hallucination = len(gold_labels) > 0
+        gold_has_hallucination = len(hallucination_gold_labels) > 0
         
         # Determine if we detected any hallucinations
-        # Count claims labeled as Contradictory or Low Confidence
-        detected_hallucinations = [
+        contradictory_count = len([
             d for d in claim_decisions
-            if d.status in ['Contradictory', 'Low Confidence']
-        ]
-        detected_hallucination = len(detected_hallucinations) > 0
+            if d.status == 'Contradictory'
+        ])
+        low_confidence_count = len([
+            d for d in claim_decisions
+            if d.status == 'Low Confidence'
+        ])
+        low_confidence_ratio = (
+            low_confidence_count / len(claim_decisions)
+            if claim_decisions else 0.0
+        )
+        low_coverage_count = len([
+            d for d in claim_decisions
+            if d.confidence.get('coverage_score', 1.0) < 0.5
+        ])
+        low_coverage_ratio = (
+            low_coverage_count / len(claim_decisions)
+            if claim_decisions else 0.0
+        )
+        detected_hallucination = (
+            contradictory_count > 0
+            or (
+                low_confidence_ratio >= self.low_confidence_ratio_threshold
+                and low_coverage_ratio >= self.low_coverage_ratio_threshold
+            )
+        )
         
         # Detailed per-claim analysis
         claim_results = []
         for idx, decision in enumerate(claim_decisions):
             claim_text = resolved_pairs[idx]['claim'].text
+            evidence_items = resolved_pairs[idx].get('evidence', [])
             
             # Check if this claim overlaps with any gold hallucination span
             overlaps_gold = self._check_overlap_with_gold(
                 claim_text,
                 generated_response,
-                gold_labels
+                hallucination_gold_labels
             )
             
             claim_results.append({
                 'claim_text': claim_text,
                 'predicted_status': decision.status,
                 'confidence': decision.confidence,
-                'overlaps_gold_hallucination': overlaps_gold
+                'overlaps_gold_hallucination': overlaps_gold,
+                'top_k_evidences': self._serialize_evidences(evidence_items)
             })
         
         return {
             'sample_id': sample_id,
             'question': question,
             'generated_response': generated_response,
+            'response_after_mitigation': filtered_response,
             'num_claims': len(claim_decisions),
             'predictions': [d.status for d in claim_decisions],
             'gold_has_hallucination': gold_has_hallucination,
             'detected_hallucination': detected_hallucination,
+            'contradictory_count': contradictory_count,
+            'low_confidence_count': low_confidence_count,
+            'low_confidence_ratio': low_confidence_ratio,
+            'low_coverage_count': low_coverage_count,
+            'low_coverage_ratio': low_coverage_ratio,
+            'mitigation_enabled': self.mitigation_enabled,
+            'mitigation_actions': mitigation_actions,
+            'filtered_claim_count': removed_count,
             'claim_results': claim_results
         }
+
+    def _build_rerank_signal_map(
+        self,
+        signal: Any,
+        evidence_items: List[EvidenceChunk]
+    ) -> Dict[str, Any]:
+        """
+        Build doc_id#sent_id -> signal mapping for EvidenceReRanker.
+
+        Supports both per-chunk verifier output and aggregate-only signals.
+        """
+        if signal is None:
+            return {}
+
+        signal_map: Dict[str, Any] = {}
+        per_chunk_signals = getattr(signal, 'per_chunk_signals', None) or []
+
+        for item in per_chunk_signals:
+            if not isinstance(item, dict):
+                continue
+            doc_id = item.get('doc_id')
+            sent_id = item.get('sent_id')
+            if doc_id is None or sent_id is None:
+                continue
+            nli = item.get('nli', {}) or {}
+            coverage = item.get('coverage', {}) or {}
+            if 'entailment' not in nli and 'entail' in nli:
+                nli = {**nli, 'entailment': nli.get('entail', 0.0)}
+            signal_map[f"{doc_id}#{sent_id}"] = SimpleNamespace(
+                nli=nli,
+                coverage=coverage
+            )
+
+        if signal_map:
+            return signal_map
+
+        base_nli = getattr(signal, 'nli', {}) or {}
+        if 'entailment' not in base_nli and 'entail' in base_nli:
+            base_nli = {**base_nli, 'entailment': base_nli.get('entail', 0.0)}
+        base_coverage = getattr(signal, 'coverage', {}) or {}
+
+        for evidence in evidence_items:
+            signal_map[f"{evidence.doc_id}#{evidence.sent_id}"] = SimpleNamespace(
+                nli=base_nli,
+                coverage=base_coverage
+            )
+
+        return signal_map
 
     def _build_evidence_from_contexts(self, contexts: List[str]) -> List[EvidenceChunk]:
         """
@@ -620,6 +897,36 @@ class RAGTruthEvaluator:
                 )
             )
         return evidence_chunks
+
+    def _serialize_evidences(self, evidence_items: List[Any]) -> List[Dict[str, Any]]:
+        """Serialize evidence items for JSON export in claim-level results."""
+        serialized = []
+        for evidence in evidence_items:
+            if isinstance(evidence, EvidenceChunk):
+                serialized.append({
+                    'doc_id': evidence.doc_id,
+                    'sent_id': evidence.sent_id,
+                    'text': evidence.text,
+                    'rank': evidence.rank,
+                    'score_dense': evidence.score_dense,
+                    'score_bm25': evidence.score_bm25,
+                    'score_hybrid': evidence.score_hybrid,
+                    'source': evidence.source,
+                    'version': evidence.version
+                })
+            elif isinstance(evidence, dict):
+                serialized.append({
+                    'doc_id': evidence.get('doc_id', ''),
+                    'sent_id': evidence.get('sent_id', -1),
+                    'text': evidence.get('text', ''),
+                    'rank': evidence.get('rank', None),
+                    'score_dense': evidence.get('score_dense', None),
+                    'score_bm25': evidence.get('score_bm25', None),
+                    'score_hybrid': evidence.get('score_hybrid', None),
+                    'source': evidence.get('source', None),
+                    'version': evidence.get('version', None)
+                })
+        return serialized
     
     def _check_overlap_with_gold(
         self,
@@ -660,6 +967,20 @@ class RAGTruthEvaluator:
                 return True
         
         return False
+
+    def _is_hallucination_label(self, label: Dict[str, Any]) -> bool:
+        """
+        Decide whether a gold label should count as hallucination.
+
+        `implicit_true=True` labels are factually correct statements not mentioned
+        in context; those are excluded from hallucination-positive targets.
+        """
+        if not isinstance(label, dict):
+            return False
+        implicit_true = label.get('implicit_true', False)
+        if isinstance(implicit_true, str):
+            implicit_true = implicit_true.strip().lower() == 'true'
+        return not bool(implicit_true)
     
     def _compute_metrics(
         self,
@@ -697,10 +1018,10 @@ class RAGTruthEvaluator:
             zero_division=0
         )
         
-        # Confusion matrix
-        cm = confusion_matrix(y_true_binary, y_pred_binary)
-        
-        # Per-class metrics
+        # Confusion matrix (force labels to ensure 2x2 output even if one class present)
+        cm = confusion_matrix(y_true_binary, y_pred_binary, labels=[0, 1])
+
+        # Per-class metrics (tn, fp, fn, tp)
         tn, fp, fn, tp = cm.ravel()
         
         metrics = {

@@ -4,10 +4,10 @@ This guide provides instructions for preparing the Wikipedia corpus and download
 
 ## 0. Virtual Environment Setup
 
-The evaluation pipeline requires two separate virtual environments to avoid dependency conflicts between the main RAG system and the CiteEval benchmark.
+The evaluation pipeline uses a single project-root virtual environment (`.venv`) for both the main RAG system and CiteEval benchmark workflows.
 
-### 1. Main Project Environment
-Used for: Wikipedia preparation, running the RAG pipeline, and RAGTruth evaluation.
+### Main Project Environment (Single Environment)
+Used for: Wikipedia preparation, running the RAG pipeline, RAGTruth evaluation, and CiteEval/CiteBench evaluation.
 ```bash
 # Root directory of AIST-FYP
 python -m venv .venv
@@ -16,16 +16,33 @@ pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 ```
 
-### 2. CiteBench Environment
-Used for: Running CiteEval-Auto evaluation metrics.
-```bash
-# Root directory of AIST-FYP
-python -m venv .venv_citeeval
-.\.venv_citeeval\Scripts\Activate.ps1  # Windows PowerShell
+---
 
-# Install CiteEval dependencies
-cd benchmark/CiteEval
-pip install -r requirements.txt
+## 0.5 Environment Configuration
+
+### Setting Up the .env File
+
+The project requires a `.env` file to configure API keys and environment variables. Follow these steps:
+
+1. **Obtain the .env file** from your project lead (Felix)
+2. **Place it in the project root directory**: `AIST-FYP/.env`
+   - This is the same directory where `config.yaml`, `README.md`, and `requirements.txt` are located
+   - The path should be: `d:\Felix_stuff\AIST-FYP\.env` (Windows) or the equivalent on your system
+3. **Do NOT commit this file to Git** - it should remain on your local machine only
+
+The `.env` file contains sensitive credentials (API keys) and is automatically loaded by the pipeline through the `python-dotenv` package. Key configurations include:
+
+**For DeepSeek API (Citation Evaluation):**
+```env
+CITEEVAL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+**For CiteEval System Path:**
+```env
+CITEEVAL_ROOT="benchmark/CiteEval"
+PYTHONPATH="${PYTHONPATH}:benchmark/CiteEval:benchmark/CiteEval/src"
 ```
 
 ---
@@ -46,7 +63,29 @@ python scripts/download_wikipedia.py --strategy validation
 Parse the downloaded Wikipedia articles into sentence-level chunks.
 ```bash
 python scripts/prepare_wikipedia_chunks.py --strategy validation
+
+# Resume from checkpoint (default behavior can also be configured in config.yaml)
+python scripts/prepare_wikipedia_chunks.py --strategy validation --resume
+
+# Force fresh run
+python scripts/prepare_wikipedia_chunks.py --strategy validation --no-resume --reset-checkpoint
 ```
+
+For **production XML dumps**, the script now uses a two-stage flow automatically:
+1) export XML into intermediate article JSONL, then 2) chunk from JSONL with deterministic line-offset resume.
+
+```bash
+# Production (automatic two-stage mode)
+python scripts/prepare_wikipedia_chunks.py --strategy production
+
+# Optional: set custom intermediate article JSONL path
+python scripts/prepare_wikipedia_chunks.py --strategy production --article-jsonl data/processed/wiki_articles_production.jsonl
+```
+
+Notes:
+- Intermediate file default: `data/processed/wiki_articles_{strategy}.jsonl`
+- If intermediate JSONL already exists, it is reused unless `--reset-checkpoint` is provided
+- Chunking resume remains checkpoint-based and deterministic on JSONL input
 
 ### Step 3: Generate Embedding Index (for Dense Retrieval)
 Generate vector embeddings and build the FAISS index.
@@ -54,14 +93,30 @@ Generate vector embeddings and build the FAISS index.
 # Generate embeddings
 python scripts/generate_embeddings.py --strategy validation
 
+# Embedding checkpoints are stored under checkpointing.checkpoint_dir
+# in config.yaml (default: data/embeddings/checkpoints/).
+# Note: legacy checkpoint file format checkpoint_{strategy}.pkl is no longer supported.
+
 # Build FAISS index
 python scripts/build_faiss_index.py --strategy validation
+
+# Resume interrupted FAISS build
+python scripts/build_faiss_index.py --strategy validation --resume
+
+# Force fresh FAISS build
+python scripts/build_faiss_index.py --strategy validation --no-resume --reset-checkpoint
 ```
 
 ### Step 4: Build BM25 Index (for Hybrid Retrieval)
 Build and cache the BM25 index for faster loading during hybrid retrieval.
 ```bash
 python scripts/build_bm25_index.py --strategy validation
+
+# Resume interrupted BM25 tokenization/build
+python scripts/build_bm25_index.py --strategy validation --resume
+
+# Force fresh BM25 build
+python scripts/build_bm25_index.py --strategy validation --no-resume --reset-checkpoint
 ```
 
 ---
@@ -77,6 +132,27 @@ The evaluation uses two primary benchmark datasets: **RAGTruth** and **CiteEval*
 ### Download CiteEval
 1. Clone or download the CiteEval repository: [https://github.com/amazon-science/CiteEval](https://github.com/amazon-science/CiteEval)
 2. Place the contents in `benchmark/CiteEval/`.
+
+### Using the Custom CiteBench Version (Modified for DeepSeek Integration)
+
+A modified version of the CiteBench benchmark (with DeepSeek API integration) has been prepared. Follow these steps:
+
+1. **Obtain the CiteBench zip file** from your project lead (Felix)
+2. **Extract the zip file** to a temporary location
+3. **Copy the extracted files** directly into `benchmark/CiteEval/`:
+   ```bash
+   # After extracting the zip file
+   # Copy the contents (maintaining directory structure) to:
+   # benchmark/CiteEval/
+   #
+   # The directory structure should look like:
+   # benchmark/CiteEval/
+   # ├── data/
+   # ├── src/
+   # ├── scripts/
+   # └── ... (other files)
+   ```
+4. **Ensure the modified files are in place** before running CiteEval evaluation scripts
 
 #### Configuration
 Set the required environment variables in your project-root `.env` file to ensure the CiteEval scripts can resolve their internal modules:

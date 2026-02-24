@@ -19,6 +19,8 @@ models:
 data:
   # Wikipedia data
   wikipedia_dump: "data/raw/enwiki-latest-pages-articles.xml.bz2"
+  # Optional pinned production dump date (YYYYMMDD). Null means use 'latest'.
+  wikipedia_dump_date: null
   wikipedia_sample_dev: "data/raw/wiki_sample_development.jsonl"
   wikipedia_sample_val: "data/raw/wiki_sample_validation.jsonl"
   
@@ -32,6 +34,8 @@ data:
   # FAISS index
   faiss_index: "data/indexes/{strategy}/faiss.index"
   index_metadata: "data/indexes/{strategy}/metadata.pkl"
+  index_config: "data/indexes/{strategy}/index_config.json"
+  bm25_index: "data/indexes/{strategy}/bm25_index.pkl"
 
 # Data Strategy Configuration
 data_strategy:
@@ -49,6 +53,7 @@ data_strategy:
   production:
     max_articles: null  # null = all articles
     name: "production"
+    dump_date: null  # Optional YYYYMMDD to pin snapshot (overrides data.wikipedia_dump_date)
 
 # Processing Parameters
 processing:
@@ -264,7 +269,7 @@ verification:
     contradiction_threshold: 0.5
     
     # Entailment threshold: Minimum NLI entailment score required for "Supported" status
-    entailment_threshold: 0.7
+    entailment_threshold: 0.65
     
     # Coverage threshold: Minimum coverage score required for "Supported" status
     # (used in combination with entailment)
@@ -291,7 +296,7 @@ verification:
 mitigation:
   # Enable/disable mitigation module for independent evaluation
   # Set to false to evaluate base system performance without mitigation
-  enabled: false
+  enabled: true
   
   # Evidence Re-Ranker Configuration
   reranker:
@@ -323,7 +328,7 @@ mitigation:
   reprompt:
     # Enable/disable re-prompting for hallucination self-correction
     # When enabled, triggers iterative refinement if hallucination rate is high
-    enabled: false
+    enabled: true
     
     # Hallucination rate threshold for triggering re-prompting
     # If (contradictory_claims / total_claims) > threshold, trigger re-prompting
@@ -349,6 +354,31 @@ checkpointing:
   # Checkpoint directory
   checkpoint_dir: "data/embeddings/checkpoints/"
 
+  # Strict checkpoint compatibility validation
+  strict_compatibility: true
+
+  # Chunk preparation checkpoint settings
+  chunking:
+    enabled: true
+    resume_by_default: true
+    checkpoint_dir: "data/checkpoints/chunking/"
+    checkpoint_interval: 1000  # Save every N processed articles
+
+  # FAISS index build checkpoint settings
+  faiss:
+    enabled: true
+    resume_by_default: true
+    checkpoint_dir: "data/checkpoints/faiss/"
+    checkpoint_interval: 200000  # Save every N added vectors
+    add_batch_size: 50000
+
+  # BM25 index build checkpoint settings
+  bm25:
+    enabled: true
+    resume_by_default: true
+    checkpoint_dir: "data/checkpoints/bm25/"
+    checkpoint_interval: 5000  # Save every N tokenized chunks
+
 # Logging Configuration
 logging:
   # Log file location
@@ -370,6 +400,9 @@ evaluation:
       output_dir: "outputs/ragtruth_eval/"
       batch_size: 10  # Process samples in batches for memory efficiency
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal
+      teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
+      low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
+      low_coverage_ratio_threshold: 0.3  # require weak-evidence corroboration when escalating from Low Confidence
     
     # Future benchmarks
     truthful_qa:

@@ -93,7 +93,8 @@ class WikipediaDownloader:
                     'text': article['text'],
                     'url': article.get('url', ''),
                     'timestamp': datetime.now().isoformat(),
-                    'source': 'huggingface_wikipedia_20220301'
+                    'source': 'huggingface_wikipedia',
+                    'version': '20231101.en'
                 }
                 
                 # Write to file
@@ -158,7 +159,8 @@ class WikipediaDownloader:
                     'text': article['text'],
                     'url': article.get('url', ''),
                     'timestamp': datetime.now().isoformat(),
-                    'source': 'huggingface_wikipedia_20220301'
+                    'source': 'huggingface_wikipedia',
+                    'version': '20231101.en'
                 }
                 
                 # Write to file
@@ -200,7 +202,11 @@ class WikipediaDownloader:
         
         # Use latest dump if no date specified
         if dump_date is None:
-            dump_date = "latest"
+            dump_date = (
+                self.config.get("data_strategy.production.dump_date")
+                or self.config.get("data.wikipedia_dump_date")
+                or "latest"
+            )
         
         # Construct URL
         # Format: https://dumps.wikimedia.org/enwiki/YYYYMMDD/enwiki-YYYYMMDD-pages-articles.xml.bz2

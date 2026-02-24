@@ -22,6 +22,7 @@ sys.path.insert(0, str(project_root))
 
 from src.data_processing import EmbeddingGenerator
 from src.utils import Config, setup_logger
+from src.utils.checkpoint_utils import file_fingerprint
 
 
 def load_chunks(chunks_file: Path) -> list:
@@ -105,8 +106,8 @@ Examples:
     parser.add_argument(
         '--checkpoint-interval',
         type=int,
-        default=10000,
-        help='Save checkpoint every N chunks (default: 10000)'
+        default=None,
+        help='Save checkpoint every N chunks (default: from config checkpointing.checkpoint_frequency)'
     )
     
     args = parser.parse_args()
@@ -128,19 +129,34 @@ Examples:
     batch_size = args.batch_size or config.processing.batch_size
     device = args.device or config.processing.device
     use_fp16 = config.processing.use_fp16 and not args.no_fp16
+    checkpoint_interval = args.checkpoint_interval or config.get('checkpointing.checkpoint_frequency', 10000)
     
     logger.info(f"Model: {model_name}")
     logger.info(f"Batch size: {batch_size}, Device: {device}, FP16: {use_fp16}")
+    logger.info(f"Checkpoint interval: {checkpoint_interval}")
     
     # Determine input/output paths
-    processed_dir = Path(config.get('paths.processed', 'data/processed'))
-    embeddings_dir = Path(config.get('paths.embeddings', 'data/embeddings'))
+    chunks_template = config.get('data.processed_chunks', 'data/processed/wiki_chunks_{strategy}.jsonl')
+    embeddings_template = config.get('data.embeddings', 'data/embeddings/wiki_embeddings_{strategy}.npy')
+    metadata_template = config.get('data.embeddings_metadata', 'data/embeddings/metadata_{strategy}.json')
+
+    chunks_file = Path(chunks_template.format(strategy=args.strategy))
+    embeddings_file = Path(embeddings_template.format(strategy=args.strategy))
+    metadata_file = Path(metadata_template.format(strategy=args.strategy))
+    embeddings_dir = embeddings_file.parent
     embeddings_dir.mkdir(parents=True, exist_ok=True)
-    
-    chunks_file = processed_dir / f"wiki_chunks_{args.strategy}.jsonl"
-    embeddings_file = embeddings_dir / f"wiki_embeddings_{args.strategy}.npy"
-    metadata_file = embeddings_dir / f"metadata_{args.strategy}.json"
-    checkpoint_file = embeddings_dir / f"checkpoint_{args.strategy}.pkl"
+
+    checkpoint_root = Path(config.get('checkpointing.checkpoint_dir', 'data/embeddings/checkpoints/'))
+    checkpoint_root.mkdir(parents=True, exist_ok=True)
+    checkpoint_manifest_file = checkpoint_root / f"embedding_{args.strategy}.manifest.json"
+    checkpoint_payload_file = checkpoint_root / f"embedding_{args.strategy}.payload.pkl"
+
+    legacy_checkpoint_file = embeddings_dir / f"checkpoint_{args.strategy}.pkl"
+    if legacy_checkpoint_file.exists():
+        raise ValueError(
+            f"Legacy embedding checkpoint format is no longer supported: {legacy_checkpoint_file}. "
+            "Delete this file and re-run embedding generation."
+        )
     
     if not chunks_file.exists():
         logger.error(
@@ -186,8 +202,13 @@ Examples:
         
         embeddings = generator.generate_embeddings(
             chunks,
-            checkpoint_path=str(checkpoint_file),
-            checkpoint_interval=args.checkpoint_interval
+            checkpoint_path=str(checkpoint_payload_file),
+            checkpoint_manifest_path=str(checkpoint_manifest_file),
+            checkpoint_metadata={
+                'strategy': args.strategy,
+                'chunks_fingerprint': file_fingerprint(chunks_file),
+            },
+            checkpoint_interval=checkpoint_interval
         )
         
         gen_time = time.time() - start_gen
@@ -215,7 +236,9 @@ Examples:
             'device': device,
             'use_fp16': use_fp16,
             'generation_time_seconds': gen_time,
-            'chunks_per_second': chunks_per_sec
+            'chunks_per_second': chunks_per_sec,
+            'corpus_source': chunks[0].get('source', 'wikipedia') if chunks else 'unknown',
+            'corpus_version': chunks[0].get('version', 'unknown') if chunks else 'unknown'
         }
         
         with open(metadata_file, 'w', encoding='utf-8') as f:
