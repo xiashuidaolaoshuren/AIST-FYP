@@ -1,0 +1,75 @@
+[project]
+name = "aist-fyp"
+version = "0.1.0"
+description = "Hallucination detection and mitigation research pipeline for RAG systems"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "transformers==4.56.2",
+  "torch==2.5.1+cu121",
+  "torchvision==0.20.1+cu121",
+  "torchaudio==2.5.1+cu121",
+  "datasets==4.1.1",
+  "sentence-transformers==5.1.1",
+  "faiss-cpu==1.12.0",
+  "rank-bm25==0.2.2",
+  "numpy==2.3.3",
+  "pandas==2.3.3",
+  "tqdm==4.67.1",
+  "scikit-learn==1.7.2",
+  "spacy==3.8.7",
+  "wikiextractor==3.0.6",
+  "accelerate==1.10.1",
+  "matplotlib==3.10.6",
+  "seaborn==0.13.2",
+  "huggingface-hub==0.35.3",
+  "tokenizers==0.22.1",
+  "safetensors==0.6.2",
+  "requests==2.32.5",
+  "PyYAML==6.0.3",
+  "pyarrow==21.0.0",
+  "python-dotenv>=1.0.0",
+  "configobj==5.0.9",
+  "nltk==3.9.1",
+  "openai==1.16.2",
+  "gradio>=4.0.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==7.4.3",
+]
+notebook = [
+  "ipython==8.37.0",
+  "ipywidgets==8.1.7",
+  "jupyterlab_widgets==3.0.15",
+  "widgetsnbextension==4.0.14",
+  "matplotlib-inline==0.1.7",
+]
+citeeval = [
+  "anyio==4.9.0",
+  "annotated-types==0.7.0",
+  "httpx==0.27.2",
+  "httpcore==1.0.9",
+  "h11==0.16.0",
+  "pydantic==2.11.5",
+  "pydantic_core==2.33.2",
+  "typing-inspection==0.4.1",
+  "typing_extensions==4.14.0",
+  "scipy==1.15.3",
+  "joblib==1.5.1",
+  "regex==2024.11.6",
+]
+
+[tool.uv]
+default-groups = ["dev", "notebook", "citeeval"]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }

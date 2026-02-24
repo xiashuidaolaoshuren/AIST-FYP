@@ -107,9 +107,9 @@ This track evaluates metric-human correlation using official CiteBench splits wi
 - Input splits: `benchmark/CiteEval/data/metric_eval/metric_dev`, `benchmark/CiteEval/data/metric_eval/metric_test`
 - Human labels: `citebench.metric_*.human.out`
 
-1. Activate the CiteBench virtual environment:
+1. Ensure dependencies are synced via uv:
 ```powershell
-.\.venv\Scripts\Activate.ps1
+uv sync
 ```
 
 2. Run CiteEval metric generation (inside CiteEval repo):

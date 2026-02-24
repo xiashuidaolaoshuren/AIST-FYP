@@ -36,7 +36,7 @@
 
 **READ-ONLY (DO NOT MODIFY):**
 - `.github/copilot-instructions.md` - Master AI agent instructions
-- `.venv/` - Virtual environment (managed by pip)
+- `.venv/` - Virtual environment (managed by uv)
 - `.git/` - Git internals
 - `reference/*.pdf` - Original research papers
 - `System_Architecture_Design _ Mermaid Chart-2025-10-03-081957.png` - Architecture diagram
@@ -48,7 +48,8 @@
 - `System_Architecture_Design.md` - Architecture specification
 - `helpful_tools.md` - Tool documentation
 - `README_ENVIRONMENT.md` - Environment setup guide
-- `requirements.txt` - Python dependencies
+- `pyproject.toml` - Canonical Python dependencies
+- `requirements.txt` - Transition compatibility dependency manifest
 - `verify_gpu.py` - GPU verification script
 - `shrimp_data/` - Task manager data
 - Python implementation files (when created in future months)
@@ -142,7 +143,7 @@
 |----------------------|-------------------|
 | `Hallucination_Project_Details.md` | `System_Architecture_Design.md`, `TODO_List.md` |
 | `System_Architecture_Design.md` | `helpful_tools.md` (if tools/libraries change) |
-| `requirements.txt` | `README_ENVIRONMENT.md` (installation instructions) |
+| `pyproject.toml` | `README_ENVIRONMENT.md` and install docs (uv commands) |
 | Any research implementation | `TODO_List.md` (mark milestones complete) |
 
 ---
@@ -256,8 +257,8 @@ Question about...                  → Check file...
 
 **Before ANY Python code execution:**
 1. **MUST verify environment:** Run `verify_gpu.py` if GPU-related work
-2. **MUST check dependencies:** Read `requirements.txt` for available libraries
-3. **MUST use venv:** Assume `.venv` is active (installation uses venv paths)
+2. **MUST check dependencies:** Read `pyproject.toml` for available libraries
+3. **MUST use uv-managed environment:** Use `uv sync` and `uv run` commands
 
 **GPU-Specific Rules:**
 - **ALWAYS check CUDA availability** before GPU operations: `torch.cuda.is_available()`
@@ -266,7 +267,7 @@ Question about...                  → Check file...
 
 ### Library Version Constraints
 
-**CRITICAL: These versions are FIXED in requirements.txt:**
+**CRITICAL: These versions are FIXED in pyproject.toml:**
 ```python
 transformers == 4.56.2
 torch == 2.5.1+cu121

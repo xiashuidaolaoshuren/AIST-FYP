@@ -30,12 +30,11 @@ Before you begin, ensure you have completed:
 
 1. **Environment Setup** (Month 1):
    ```bash
-   # Activate virtual environment
-   .\.venv\Scripts\Activate.ps1  # Windows PowerShell
-   source venv/bin/activate       # Linux/macOS
+  # Install/sync environment from pyproject.toml
+  uv sync
    
    # Verify GPU (optional but recommended)
-   python verify_gpu.py
+  uv run python verify_gpu.py
    ```
 
 2. **HuggingFace Cache Configuration** (Important for Windows):
@@ -47,8 +46,8 @@ Before you begin, ensure you have completed:
 
 3. **Dependencies Installed**:
    ```bash
-   pip install -r requirements.txt
-   python -m spacy download en_core_web_sm
+  uv sync
+  uv run python -m spacy download en_core_web_sm
    ```
 
 ## Quick Start

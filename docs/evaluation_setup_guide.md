@@ -10,11 +10,13 @@ The evaluation pipeline uses a single project-root virtual environment (`.venv`)
 Used for: Wikipedia preparation, running the RAG pipeline, RAGTruth evaluation, and CiteEval/CiteBench evaluation.
 ```bash
 # Root directory of AIST-FYP
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1  # Windows PowerShell
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm
+uv sync
+uv run python -m spacy download en_core_web_sm
 ```
+
+Notes:
+- `pyproject.toml` + `uv.lock` are the canonical dependency source.
+- PyTorch CUDA wheels are resolved via the configured `cu121` index in `pyproject.toml`.
 
 ---
 
@@ -195,7 +197,7 @@ benchmark/
 
 Once the data is prepared, you can run evaluation scripts such as:
 ```bash
-python scripts/demo_ragtruth_eval.py
+uv run python scripts/demo_ragtruth_eval.py
 ```
 Refer to the following guides for detailed evaluation metrics and procedures:
 - [RAGTruth Evaluation Guide](docs/ragtruth_evaluation_guide.md)

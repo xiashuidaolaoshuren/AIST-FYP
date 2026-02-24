@@ -1,6 +1,12 @@
 # =============================================================================
 # INSTALLATION INSTRUCTIONS
 # =============================================================================
+# NOTE:
+# - Canonical dependency management is now `pyproject.toml` with `uv`.
+# - This file is kept as a transition compatibility manifest.
+# - Preferred setup:
+#     uv sync
+#     uv run python -m spacy download en_core_web_sm
 # 
 # For CUDA-enabled PyTorch (Recommended for GPU acceleration):
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
@@ -34,7 +40,7 @@ tqdm==4.67.1
 scikit-learn==1.7.2
 
 # Month 2: Text Processing and Testing
-spacy==3.7.2
+spacy==3.8.7
 wikiextractor==3.0.6
 pytest==7.4.3
 accelerate==1.10.1

@@ -353,11 +353,12 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v2
       with:
-        python-version: '3.9'
+        python-version: '3.12'
     
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt
+        pip install uv
+        uv sync
         python -m spacy download en_core_web_sm
     
     - name: Run unit tests
