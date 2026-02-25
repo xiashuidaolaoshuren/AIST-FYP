@@ -20,7 +20,7 @@ preprocessing = [
   "sentence-transformers==5.1.1",
   "faiss-cpu==1.12.0",
   "rank-bm25==0.2.2",
-  "numpy==2.3.3",
+  "numpy==1.26.4",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
   "spacy==3.7.2",
@@ -30,7 +30,7 @@ preprocessing = [
 ]
 
 evaluation = [
-  "numpy==2.3.3",
+  "numpy==1.26.4",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
   "openai==1.16.2",
@@ -41,7 +41,7 @@ evaluation = [
 mitigation = [
   "transformers==4.56.2",
   "sentence-transformers==5.1.1",
-  "numpy==2.3.3",
+  "numpy==1.26.4",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
   "openai==1.16.2",
