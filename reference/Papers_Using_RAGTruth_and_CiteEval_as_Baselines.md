@@ -9,30 +9,37 @@ This list focuses on papers that **explicitly evaluate on RAGTruth** (hallucinat
 - **ORION Grounded in Context: Retrieval-Based Method for Hallucination Detection** (2025)
   - arXiv: https://arxiv.org/abs/2504.15771
   - Evidence (from abstract): reports an F1 score on *“RAGTruth's response-level classification task”*.
+  - **Evaluation Metrics**: F1 score of 0.83 in RAGTruth's response-level classification task.
 
 - **Osiris: A Lightweight Open-Source Hallucination Detection System** (2025)
   - arXiv: https://arxiv.org/abs/2505.04844
   - Evidence (from abstract): compares against GPT-4o and reports performance on the *“RAGTruth hallucination detection benchmark”*.
+  - **Evaluation Metrics**: Achieves better recall with a 7B model than GPT-4o, and offers competitive performance on precision and accuracy.
 
 - **LettuceDetect: A Hallucination Detection Framework for RAG Applications** (2025)
   - arXiv: https://arxiv.org/abs/2502.17125
   - Evidence (from abstract): trained on the RAGTruth benchmark and reports evaluation F1 on the RAGTruth corpus.
+  - **Evaluation Metrics**: F1 score of 79.22% for example-level detection on the RAGTruth corpus.
 
 - **HalluciNot: Hallucination Detection Through Context and Common Knowledge Verification** (2025)
   - arXiv: https://arxiv.org/abs/2504.07069
   - Evidence (from abstract): reports results and comparisons *“across RagTruth, TruthfulQA, and HDMBench”*.
+  - **Evaluation Metrics**: Out-performs existing approaches (specific numbers not in abstract).
 
 - **Detecting Hallucinations in Retrieval-Augmented Generation via Semantic-level Internal Reasoning Graph** (2026)
   - arXiv: https://arxiv.org/abs/2601.03052
   - Evidence (from abstract): states it achieves better performance than baselines on *“RAGTruth and Dolly-15k”*.
+  - **Evaluation Metrics**: Achieves better overall performance compared to state-of-the-art baselines (specific numbers not in abstract).
 
 - **100% Elimination of Hallucinations on RAGTruth for GPT-4 and GPT-3.5 Turbo** (2024)
   - arXiv: https://arxiv.org/abs/2412.05223
   - Evidence (from abstract): *“validate this method using the RAGTruth corpus”*.
+  - **Evaluation Metrics**: Eliminates 100% hallucinations for both GPT-4 and GPT-3.5 Turbo.
 
 - **First Hallucination Tokens Are Different from Conditional Ones** (2025)
   - arXiv: https://arxiv.org/abs/2507.20836
   - Evidence (from abstract): analyzes token-level signal using *“token-level annotations from the RAGTruth corpus”*.
+  - **Evaluation Metrics**: No specific evaluation metrics reported in abstract (focuses on token-level signal analysis).
 
 ## CiteEval / CiteBench (citation & attribution evaluation)
 
