@@ -7,6 +7,10 @@ This folder isolates Colab assets from the root project.
 - `notebooks/`: Colab notebooks for preprocessing and evaluations
 - `env/`: Minimal `uv` project used by Colab notebooks
 
+Notebook additions:
+
+- `notebooks/colab_ragtruth_baseline.ipynb`: Reproduce RAGTruth baseline flow in Colab (prepare dataset, local model inference, and case-level precision/recall/F1).
+
 ## Dependency model
 
 Notebooks install dependencies with:
