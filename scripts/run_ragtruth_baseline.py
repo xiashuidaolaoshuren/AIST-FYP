@@ -28,6 +28,7 @@ from typing import Dict, List
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BASELINE_DIR = PROJECT_ROOT / "benchmark" / "RAGTruth" / "baseline"
+DEFAULT_MODEL_PATH = "meta-llama/Llama-2-13b-hf"
 
 
 def _run(cmd: List[str], cwd: Path, env: Dict[str, str] | None = None, dry_run: bool = False) -> int:
@@ -259,7 +260,7 @@ def main() -> int:
     train_parser = subparsers.add_parser("train", help="Train baseline model")
     _common_parser(train_parser)
     train_parser.add_argument("--profile", choices=["exact", "single-gpu"], default="single-gpu")
-    train_parser.add_argument("--model-path", default="meta-llama/Llama-2-13b-hf")
+    train_parser.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
     train_parser.add_argument("--model-name", default="baseline")
     train_parser.add_argument("--num-train-epochs", type=float, default=1)
     train_parser.add_argument("--learning-rate", type=float, default=2e-5)
@@ -281,7 +282,7 @@ def main() -> int:
     eval_parser = subparsers.add_parser("evaluate", help="Run baseline evaluator against TGI endpoint")
     _common_parser(eval_parser)
     eval_parser.add_argument("--model-name", default="baseline")
-    eval_parser.add_argument("--tokenizer", default="meta-llama/Llama-2-13b-hf")
+    eval_parser.add_argument("--tokenizer", default=DEFAULT_MODEL_PATH)
     eval_parser.add_argument("--output-file", default="./prediction.jsonl")
     eval_parser.set_defaults(func=command_evaluate)
 
@@ -296,7 +297,7 @@ def main() -> int:
     all_parser = subparsers.add_parser("all", help="Run prepare + train (+ optional evaluate)")
     _common_parser(all_parser)
     all_parser.add_argument("--profile", choices=["exact", "single-gpu"], default="single-gpu")
-    all_parser.add_argument("--model-path", default="meta-llama/Llama-2-13b-hf")
+    all_parser.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
     all_parser.add_argument("--model-name", default="baseline")
     all_parser.add_argument("--num-train-epochs", type=float, default=1)
     all_parser.add_argument("--learning-rate", type=float, default=2e-5)
@@ -314,7 +315,7 @@ def main() -> int:
     all_parser.add_argument("--wandb-api-key", default=None)
     all_parser.add_argument("--wandb-project", default=None)
     all_parser.add_argument("--run-evaluate", action="store_true")
-    all_parser.add_argument("--tokenizer", default="meta-llama/Llama-2-13b-hf")
+    all_parser.add_argument("--tokenizer", default=DEFAULT_MODEL_PATH)
     all_parser.add_argument("--output-file", default="./prediction.jsonl")
     all_parser.set_defaults(func=command_all)
 
