@@ -89,6 +89,16 @@ Notes:
 - If intermediate JSONL already exists, it is reused unless `--reset-checkpoint` is provided
 - Chunking resume remains checkpoint-based and deterministic on JSONL input
 
+If a run is interrupted unexpectedly (for example terminal/session crash), the output file may contain a small duplicate window between the last checkpoint and the actual processed point. You can deduplicate chunks by `(doc_id, sent_id)` with:
+
+```bash
+# Safe in-place dedup (creates .bak backup by default)
+python scripts/dedup_chunks_jsonl.py --input data/processed/wiki_chunks_production.jsonl --in-place
+
+# Optional: write dedup report JSON
+python scripts/dedup_chunks_jsonl.py --input data/processed/wiki_chunks_production.jsonl --in-place --report-json outputs/dedup_report.json
+```
+
 ### Step 3: Generate Embedding Index (for Dense Retrieval)
 Generate vector embeddings and build the FAISS index.
 ```bash
