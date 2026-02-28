@@ -4,6 +4,7 @@ Deduplicate chunk JSONL files by key fields.
 Usage examples:
     python scripts/dedup_chunks_jsonl.py --input data/processed/wiki_chunks_production.jsonl --in-place
     python scripts/dedup_chunks_jsonl.py --input in.jsonl --output out.jsonl --backend memory
+    python scripts/dedup_chunks_jsonl.py --input in.jsonl --output out.jsonl --no-progress
 """
 
 import argparse
@@ -14,6 +15,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional
+from tqdm import tqdm
 
 
 @dataclass
@@ -96,6 +98,8 @@ def deduplicate_jsonl(
     key_fields: List[str],
     backend: str = 'sqlite',
     keep_invalid_lines: bool = False,
+    show_progress: bool = True,
+    progress_refresh_lines: int = 5000,
 ) -> DedupStats:
     if backend not in {'sqlite', 'memory'}:
         raise ValueError(f'Unsupported backend: {backend}')
@@ -107,11 +111,32 @@ def deduplicate_jsonl(
         key_store = SQLiteKeyStore(db_path)
 
     stats = DedupStats()
+    input_size_bytes = input_path.stat().st_size
+    progress_bar = None
 
     try:
+        if show_progress:
+            progress_bar = tqdm(
+                total=input_size_bytes,
+                unit='B',
+                unit_scale=True,
+                desc='Deduplicating chunks',
+            )
+
         with open(input_path, 'r', encoding='utf-8') as fin, open(output_path, 'w', encoding='utf-8') as fout:
             for line in fin:
                 stats.total_lines += 1
+                if progress_bar:
+                    line_size_bytes = len(line.encode('utf-8'))
+                    progress_bar.update(line_size_bytes)
+
+                if progress_bar and (stats.total_lines % progress_refresh_lines == 0):
+                    progress_bar.set_postfix(
+                        kept=stats.kept_lines,
+                        dups=stats.duplicate_lines,
+                        invalid=stats.invalid_json_lines,
+                    )
+
                 stripped = line.strip()
                 if not stripped:
                     stats.invalid_json_lines += 1
@@ -135,7 +160,16 @@ def deduplicate_jsonl(
                     stats.kept_lines += 1
                 else:
                     stats.duplicate_lines += 1
+
+            if progress_bar:
+                progress_bar.set_postfix(
+                    kept=stats.kept_lines,
+                    dups=stats.duplicate_lines,
+                    invalid=stats.invalid_json_lines,
+                )
     finally:
+        if progress_bar:
+            progress_bar.close()
         key_store.close()
 
     return stats
@@ -156,6 +190,7 @@ def main() -> None:
     parser.add_argument('--keep-invalid-lines', action='store_true', help='Keep malformed JSON lines in output')
     parser.add_argument('--report-json', default=None, help='Optional path to write dedup report JSON')
     parser.add_argument('--no-backup', action='store_true', help='Disable .bak backup when using --in-place')
+    parser.add_argument('--no-progress', action='store_true', help='Disable tqdm progress display')
 
     args = parser.parse_args()
 
@@ -178,6 +213,7 @@ def main() -> None:
         key_fields=args.key_fields,
         backend=args.backend,
         keep_invalid_lines=args.keep_invalid_lines,
+        show_progress=not args.no_progress,
     )
 
     report = {
