@@ -24,6 +24,12 @@ Extra groups used by notebooks:
 - `evaluation` → `colab_evaluation.ipynb`
 - `mitigation` → `colab_mitigation_evaluation.ipynb`
 
+### FAISS note
+
+- On Linux/Colab, dependency manifests now prefer `faiss-gpu`.
+- On Windows/macOS local environments, manifests keep `faiss-cpu` for compatibility.
+- Runtime still has CPU fallback in code if FAISS GPU runtime is unavailable.
+
 ## Notes
 
 - The notebooks still clone/use the main repo at `/content/AIST-FYP`.
