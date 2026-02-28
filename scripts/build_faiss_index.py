@@ -98,6 +98,42 @@ def create_faiss_index(
     raise ValueError(f"Unsupported index type: {index_type}")
 
 
+def faiss_gpu_available() -> bool:
+    """Return True if FAISS GPU runtime is available and a CUDA device is visible."""
+    try:
+        if not hasattr(faiss, 'StandardGpuResources'):
+            return False
+        return faiss.get_num_gpus() > 0
+    except Exception:
+        return False
+
+
+def cpu_to_gpu_index(index: faiss.Index, gpu_id: int, logger):
+    """Move CPU index to GPU if possible; otherwise return original index."""
+    if not faiss_gpu_available():
+        logger.warning("FAISS GPU requested but unavailable; continuing with CPU index")
+        return index, None
+
+    try:
+        resources = faiss.StandardGpuResources()
+        gpu_index = faiss.index_cpu_to_gpu(resources, gpu_id, index)
+        logger.info(f"Moved FAISS index to GPU {gpu_id}")
+        return gpu_index, resources
+    except Exception as exc:
+        logger.warning(f"Failed to move FAISS index to GPU; using CPU index ({exc})")
+        return index, None
+
+
+def to_cpu_index(index: faiss.Index):
+    """Convert index to CPU form when needed for serialization."""
+    if hasattr(faiss, 'index_gpu_to_cpu'):
+        try:
+            return faiss.index_gpu_to_cpu(index)
+        except Exception:
+            pass
+    return index
+
+
 def build_checkpoint_paths(checkpoint_dir: Path, strategy: str):
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = checkpoint_dir / f"faiss_build_{strategy}.json"
@@ -177,6 +213,18 @@ def main():
         type=int,
         default=None,
         help='Vectors to add per batch during index construction (default: from config)'
+    )
+    parser.add_argument(
+        '--use-gpu',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help='Enable/disable FAISS GPU index build path (default: from config retrieval.faiss.use_gpu)'
+    )
+    parser.add_argument(
+        '--gpu-id',
+        type=int,
+        default=None,
+        help='GPU device ID for FAISS GPU index build (default: from config retrieval.faiss.gpu_id)'
     )
     
     args = parser.parse_args()
@@ -267,9 +315,20 @@ def main():
     if add_batch_size <= 0:
         raise ValueError("add_batch_size must be > 0")
 
+    config_use_gpu = bool(config.get('retrieval.faiss.use_gpu', False))
+    config_gpu_id = int(config.get('retrieval.faiss.gpu_id', 0))
+
+    use_gpu = config_use_gpu if args.use_gpu is None else args.use_gpu
+    gpu_id = config_gpu_id if args.gpu_id is None else args.gpu_id
+
     # Create FAISS index manager
     embedding_dim = embeddings.shape[1]
-    manager = FAISSIndexManager(dimension=embedding_dim, index_type=adjusted_index_type)
+    manager = FAISSIndexManager(
+        dimension=embedding_dim,
+        index_type=adjusted_index_type,
+        use_gpu=use_gpu,
+        gpu_id=gpu_id,
+    )
 
     expected_manifest = {
         'schema_version': CHECKPOINT_SCHEMA_VERSION,
@@ -286,6 +345,7 @@ def main():
 
     start_idx = 0
     index = None
+    gpu_resources = None
 
     if checkpoint_enabled and resume and manifest_path.exists():
         manifest = load_manifest(manifest_path)
@@ -307,6 +367,8 @@ def main():
             )
 
         index = faiss.read_index(str(partial_index_path))
+        if use_gpu:
+            index, gpu_resources = cpu_to_gpu_index(index, gpu_id, logger)
         start_idx = int(manifest.get('added_count', 0))
 
         if index.ntotal != start_idx:
@@ -327,6 +389,8 @@ def main():
             hnsw_m=args.hnsw_m,
             logger=logger,
         )
+        if use_gpu:
+            index, gpu_resources = cpu_to_gpu_index(index, gpu_id, logger)
 
     if adjusted_index_type == 'IVFFLAT' and hasattr(index, 'nprobe'):
         index.nprobe = args.nprobe
@@ -340,7 +404,8 @@ def main():
         if checkpoint_enabled and checkpoint_interval > 0 and (
             batch_end % checkpoint_interval == 0 or batch_end == n_vectors
         ):
-            faiss.write_index(index, str(partial_index_path))
+            checkpoint_index = to_cpu_index(index)
+            faiss.write_index(checkpoint_index, str(partial_index_path))
             save_manifest(
                 manifest_path,
                 {
@@ -392,6 +457,8 @@ def main():
     logger.info(f"Embedding Dimension: {embedding_dim}")
     logger.info(f"Total Vectors: {index.ntotal:,}")
     logger.info(f"Output Directory: {output_dir}")
+    logger.info(f"FAISS Build Device: {'GPU' if use_gpu and gpu_resources is not None else 'CPU'}")
+    logger.info(f"FAISS GPU ID: {gpu_id}")
     
     if adjusted_index_type == 'IVFFLAT':
         logger.info(f"nlist (clusters): {adjusted_nlist}")

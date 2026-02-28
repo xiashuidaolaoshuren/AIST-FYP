@@ -37,8 +37,7 @@ from src.utils.checkpoint_utils import (
 )
 
 
-def _tokenize(nlp, text: str) -> List[str]:
-    doc = nlp(text)
+def _tokens_from_doc(doc) -> List[str]:
     return [token.text.lower() for token in doc if not token.is_space]
 
 
@@ -163,9 +162,19 @@ def build_index_for_strategy(
 
             logger.info(f"Resuming BM25 tokenization from {processed_count:,}/{len(chunks):,}")
 
-        for idx in tqdm(range(processed_count, len(chunks)), desc='Tokenizing', unit='chunk'):
-            tokenized_corpus.append(_tokenize(nlp, chunks[idx]['text']))
-            processed_count = idx + 1
+        remaining_texts = [chunk['text'] for chunk in chunks[processed_count:]]
+
+        for offset, doc in enumerate(
+            tqdm(
+                nlp.pipe(remaining_texts, batch_size=256),
+                total=len(remaining_texts),
+                desc='Tokenizing',
+                unit='chunk',
+            ),
+            start=1,
+        ):
+            tokenized_corpus.append(_tokens_from_doc(doc))
+            processed_count += 1
 
             if checkpoint_enabled and checkpoint_interval > 0 and (
                 processed_count % checkpoint_interval == 0 or processed_count == len(chunks)

@@ -119,10 +119,16 @@ class BM25Retriever:
         self.logger.info(f"Loaded {len(self.chunks)} chunks")
         
         # Tokenize corpus with progress bar
-        self.logger.info("Tokenizing corpus with spaCy...")
+        self.logger.info("Tokenizing corpus with spaCy (batched)...")
+        texts = [chunk['text'] for chunk in self.chunks]
         tokenized_corpus = []
-        for chunk in tqdm(self.chunks, desc="Tokenizing", unit="chunk"):
-            tokenized_corpus.append(self._tokenize(chunk['text']))
+        for doc in tqdm(
+            self.nlp.pipe(texts, batch_size=256),
+            total=len(texts),
+            desc="Tokenizing",
+            unit="chunk",
+        ):
+            tokenized_corpus.append([token.text.lower() for token in doc if not token.is_space])
         
         # Build BM25 index
         self.logger.info("Building BM25 index...")
@@ -201,12 +207,18 @@ class BM25Retriever:
             self.logger.warning(f"Empty tokenized query for: {query}")
             return []
         
+        if top_k <= 0:
+            return []
+
         # Get BM25 scores
         scores = self.bm25.get_scores(tokenized_query)
+        if len(scores) == 0:
+            return []
         
-        # Get top-k indices (argsort returns ascending, so reverse)
+        # Get top-k indices efficiently without full sort
         top_k = min(top_k, len(scores))
-        top_indices = np.argsort(scores)[-top_k:][::-1]
+        candidate_indices = np.argpartition(scores, -top_k)[-top_k:]
+        top_indices = candidate_indices[np.argsort(scores[candidate_indices])[::-1]]
         
         # Build EvidenceChunk objects
         results = []

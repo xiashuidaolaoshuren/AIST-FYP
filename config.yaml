@@ -95,6 +95,11 @@ retrieval:
   
   # HNSW parameters (if using HNSW)
   hnsw_m: 32  # Number of connections per element
+
+  # FAISS runtime acceleration settings for index build/search
+  faiss:
+    use_gpu: false  # Set true in production to prefer CUDA FAISS when available
+    gpu_id: 0  # CUDA device index for FAISS GPU operations
   
   # BM25 Sparse Retrieval Configuration
   bm25:

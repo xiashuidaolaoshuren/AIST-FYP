@@ -35,7 +35,13 @@ class FAISSIndexManager:
         >>> manager.save_index(index, metadata, 'data/indexes/dev')
     """
     
-    def __init__(self, dimension: int, index_type: str = 'IVFFLAT'):
+    def __init__(
+        self,
+        dimension: int,
+        index_type: str = 'IVFFLAT',
+        use_gpu: bool = False,
+        gpu_id: int = 0
+    ):
         """
         Initialize the FAISS index manager.
         
@@ -49,6 +55,9 @@ class FAISSIndexManager:
         self.dimension = dimension
         self.index_type = index_type.upper()
         self.logger = setup_logger(__name__)
+        self.use_gpu = use_gpu
+        self.gpu_id = gpu_id
+        self._gpu_resources = None
         
         if self.index_type not in ['FLAT', 'IVFFLAT', 'HNSW']:
             raise ValueError(
@@ -56,7 +65,48 @@ class FAISSIndexManager:
                 f"Supported types: FLAT, IVFFLAT, HNSW"
             )
         
-        self.logger.info(f"Initialized FAISSIndexManager: dimension={dimension}, type={self.index_type}")
+        self.logger.info(
+            f"Initialized FAISSIndexManager: dimension={dimension}, type={self.index_type}, "
+            f"use_gpu={self.use_gpu}, gpu_id={self.gpu_id}"
+        )
+
+    def _is_gpu_available(self) -> bool:
+        """Check whether FAISS GPU runtime is available and at least one GPU is visible."""
+        try:
+            if not hasattr(faiss, 'StandardGpuResources'):
+                return False
+            return faiss.get_num_gpus() > 0
+        except Exception:
+            return False
+
+    def _to_gpu_index(self, index: faiss.Index) -> faiss.Index:
+        """Move CPU index to GPU if configured and available."""
+        if not self.use_gpu:
+            return index
+
+        if not self._is_gpu_available():
+            self.logger.warning("FAISS GPU requested but unavailable; using CPU index")
+            return index
+
+        if self._gpu_resources is None:
+            self._gpu_resources = faiss.StandardGpuResources()
+
+        try:
+            gpu_index = faiss.index_cpu_to_gpu(self._gpu_resources, self.gpu_id, index)
+            self.logger.info(f"Moved FAISS index to GPU {self.gpu_id}")
+            return gpu_index
+        except Exception as exc:
+            self.logger.warning(f"Failed to move FAISS index to GPU; using CPU index ({exc})")
+            return index
+
+    def _to_cpu_index(self, index: faiss.Index) -> faiss.Index:
+        """Move GPU index to CPU if needed for serialization."""
+        if hasattr(faiss, 'index_gpu_to_cpu'):
+            try:
+                return faiss.index_gpu_to_cpu(index)
+            except Exception:
+                pass
+        return index
     
     def build_index(
         self,
@@ -136,6 +186,8 @@ class FAISSIndexManager:
             index = faiss.IndexHNSWFlat(self.dimension, hnsw_m, faiss.METRIC_INNER_PRODUCT)
             self.logger.info(f"Created IndexHNSWFlat with M={hnsw_m}")
         
+        index = self._to_gpu_index(index)
+
         # Add embeddings to index
         self.logger.info(f"Adding {n_vectors:,} vectors to index...")
         index.add(embeddings)
@@ -174,17 +226,19 @@ class FAISSIndexManager:
         save_path = Path(save_dir)
         save_path.mkdir(parents=True, exist_ok=True)
         
+        cpu_index = self._to_cpu_index(index)
+
         # Verify metadata matches index
-        if len(metadata) != index.ntotal:
+        if len(metadata) != cpu_index.ntotal:
             raise ValueError(
                 f"Metadata length ({len(metadata)}) doesn't match "
-                f"index size ({index.ntotal})"
+                f"index size ({cpu_index.ntotal})"
             )
         
         # Save FAISS index
         index_file = save_path / 'faiss.index'
         self.logger.info(f"Saving FAISS index to {index_file}")
-        faiss.write_index(index, str(index_file))
+        faiss.write_index(cpu_index, str(index_file))
         index_size_mb = index_file.stat().st_size / (1024 * 1024)
         self.logger.info(f"FAISS index saved: {index_size_mb:.2f} MB")
         
@@ -200,9 +254,11 @@ class FAISSIndexManager:
         config = {
             'index_type': self.index_type,
             'dimension': self.dimension,
-            'num_vectors': index.ntotal,
+            'num_vectors': cpu_index.ntotal,
             'index_size_mb': index_size_mb,
-            'metadata_size_mb': metadata_size_mb
+            'metadata_size_mb': metadata_size_mb,
+            'use_gpu': self.use_gpu,
+            'gpu_id': self.gpu_id,
         }
         
         config_file = save_path / 'index_config.json'
@@ -237,6 +293,7 @@ class FAISSIndexManager:
         
         self.logger.info(f"Loading FAISS index from {index_file}")
         index = faiss.read_index(str(index_file))
+        index = self._to_gpu_index(index)
         self.logger.info(f"FAISS index loaded: {index.ntotal:,} vectors")
         
         # Load metadata
