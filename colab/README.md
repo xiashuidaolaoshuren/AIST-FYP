@@ -26,8 +26,8 @@ Extra groups used by notebooks:
 
 ### FAISS note
 
-- On Linux/Colab, dependency manifests now prefer `faiss-gpu`.
-- On Windows/macOS local environments, manifests keep `faiss-cpu` for compatibility.
+- Colab env manifests use `faiss-cpu` for compatibility across current Python/CUDA images.
+- Local environments also use `faiss-cpu` by default.
 - Runtime still has CPU fallback in code if FAISS GPU runtime is unavailable.
 
 ## Notes

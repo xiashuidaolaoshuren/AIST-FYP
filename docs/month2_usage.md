@@ -23,6 +23,7 @@ The Month 2 Baseline RAG system is a retrieval-augmented generation pipeline tha
 - **Dense Retriever:** sentence-transformers/all-MiniLM-L6-v2 (384D embeddings)
 - **Generator LLM:** google/flan-t5-base (250M parameters)
 - **Index:** FAISS IVFFLAT (nlist=4096, nprobe=128)
+  - *Note:* FAISS is currently configured to run on **CPU** only. This is due to `faiss-gpu` compatibility issues with Python 3.11+ and CUDA 12.1 in many environments (e.g., Google Colab). GPU support is implemented in the codebase and can be enabled once stable library wheels are released for these environments.
 
 ## Prerequisites
 
