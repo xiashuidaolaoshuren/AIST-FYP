@@ -15,6 +15,7 @@ import sys
 import time
 from pathlib import Path
 import numpy as np
+from tqdm import tqdm
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -36,9 +37,13 @@ def load_chunks(chunks_file: Path) -> list:
         List of chunk dictionaries
     """
     chunks = []
+    total_size_bytes = chunks_file.stat().st_size
     with open(chunks_file, 'r', encoding='utf-8') as f:
+        progress_bar = tqdm(total=total_size_bytes, unit='B', unit_scale=True, desc='Loading chunks')
         for line in f:
+            progress_bar.update(len(line.encode('utf-8')))
             chunks.append(json.loads(line.strip()))
+        progress_bar.close()
     return chunks
 
 
