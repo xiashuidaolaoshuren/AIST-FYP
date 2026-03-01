@@ -9,7 +9,7 @@ FP16 precision, checkpointing for long-running jobs, and progress tracking.
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
-from typing import Any, List, Dict, Optional, Tuple
+from typing import Any, Iterable, List, Dict, Optional, Tuple
 from tqdm import tqdm
 import pickle
 from pathlib import Path
@@ -219,6 +219,164 @@ class EmbeddingGenerator:
             manifest_path.unlink()
             self.logger.info("Checkpoint manifest removed after successful completion")
         
+        return embeddings
+
+    def generate_embeddings_streaming(
+        self,
+        text_batches: Iterable[List[str]],
+        total_chunks: int,
+        output_path: str,
+        checkpoint_manifest_path: Optional[str] = None,
+        checkpoint_metadata: Optional[Dict[str, Any]] = None,
+        checkpoint_interval: int = 10000,
+    ) -> np.ndarray:
+        """
+        Generate embeddings from streamed text batches and write directly to disk-backed .npy.
+
+        This method avoids materializing all chunks/texts/embeddings in memory and supports
+        resume via manifest-only checkpointing.
+
+        Args:
+            text_batches: Iterable yielding lists of text strings.
+            total_chunks: Total number of chunks expected from the stream.
+            output_path: Output .npy path.
+            checkpoint_manifest_path: Path to checkpoint manifest (json, optional).
+            checkpoint_metadata: Additional strict compatibility fields.
+            checkpoint_interval: Save checkpoint every N processed chunks.
+
+        Returns:
+            Memory-mapped numpy array loaded from output_path.
+        """
+        if total_chunks < 0:
+            raise ValueError("total_chunks must be >= 0")
+        if checkpoint_interval <= 0:
+            raise ValueError("checkpoint_interval must be > 0")
+
+        if total_chunks == 0:
+            raise ValueError("total_chunks must be > 0")
+
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        manifest_path = Path(checkpoint_manifest_path) if checkpoint_manifest_path else output_file.with_suffix('.manifest.json')
+        metadata = checkpoint_metadata or {}
+
+        expected_manifest = {
+            'schema_version': CHECKPOINT_SCHEMA_VERSION,
+            'model_name': self.model_name,
+            'embedding_dim': self.embedding_dim,
+            'total_chunks': int(total_chunks),
+            'output_path': str(output_file.resolve()),
+            **metadata,
+        }
+
+        start_idx = 0
+        if manifest_path.exists():
+            manifest = load_manifest(manifest_path)
+            ensure_manifest_compatible(
+                manifest,
+                expected_manifest,
+                required_keys=['schema_version', 'model_name', 'embedding_dim', 'total_chunks', 'processed_count', 'output_path'],
+            )
+            start_idx = int(manifest.get('processed_count', 0))
+            self.logger.info(f"Resumed streaming checkpoint: {start_idx}/{total_chunks} chunks processed")
+
+        if output_file.exists():
+            embeddings_mmap = np.load(output_file, mmap_mode='r+')
+            if embeddings_mmap.shape != (total_chunks, self.embedding_dim):
+                raise ValueError(
+                    f"Existing output shape {embeddings_mmap.shape} does not match expected "
+                    f"({total_chunks}, {self.embedding_dim})"
+                )
+        else:
+            embeddings_mmap = np.lib.format.open_memmap(
+                output_file,
+                mode='w+',
+                dtype=np.float32,
+                shape=(total_chunks, self.embedding_dim),
+            )
+
+        stream_position = 0
+        processed_count = start_idx
+        start_time = time.time()
+
+        with tqdm(total=total_chunks, initial=start_idx, desc="Generating embeddings") as pbar:
+            for batch_texts in text_batches:
+                batch_size = len(batch_texts)
+                if batch_size == 0:
+                    continue
+
+                batch_start = stream_position
+                batch_end = stream_position + batch_size
+                stream_position = batch_end
+
+                if batch_start >= total_chunks:
+                    break
+
+                if batch_end <= start_idx:
+                    continue
+
+                if batch_start < start_idx:
+                    skip = start_idx - batch_start
+                    batch_texts = batch_texts[skip:]
+                    batch_start = start_idx
+
+                if batch_start + len(batch_texts) > total_chunks:
+                    batch_texts = batch_texts[: total_chunks - batch_start]
+
+                if not batch_texts:
+                    continue
+
+                try:
+                    batch_embeddings = self.model.encode(
+                        batch_texts,
+                        batch_size=self.batch_size,
+                        show_progress_bar=False,
+                        convert_to_numpy=True,
+                        normalize_embeddings=True,
+                    )
+                    batch_embeddings = np.asarray(batch_embeddings, dtype=np.float32)
+                    embeddings_mmap[batch_start:batch_start + len(batch_texts)] = batch_embeddings
+                    processed_count = batch_start + len(batch_texts)
+                    pbar.update(len(batch_texts))
+
+                    if processed_count % checkpoint_interval == 0 or processed_count == total_chunks:
+                        embeddings_mmap.flush()
+                        save_manifest(
+                            manifest_path,
+                            {
+                                **expected_manifest,
+                                'processed_count': int(processed_count),
+                            },
+                        )
+                        self.logger.info(f"Checkpoint saved at {processed_count}/{total_chunks} chunks")
+                except Exception as e:
+                    self.logger.error(f"Error processing streamed batch at offset {batch_start}: {e}")
+                    raise
+
+                if processed_count >= total_chunks:
+                    break
+
+        if processed_count != total_chunks:
+            raise ValueError(
+                f"Stream ended early: processed {processed_count} chunks, expected {total_chunks}."
+            )
+
+        embeddings_mmap.flush()
+        del embeddings_mmap
+
+        elapsed_time = time.time() - start_time
+        chunks_per_sec = total_chunks / elapsed_time if elapsed_time > 0 else 0
+        self.logger.info(
+            f"Streaming embedding generation complete: {total_chunks} chunks, "
+            f"{elapsed_time:.2f}s ({chunks_per_sec:.2f} chunks/sec)"
+        )
+
+        if manifest_path.exists():
+            manifest_path.unlink()
+            self.logger.info("Checkpoint manifest removed after successful completion")
+
+        embeddings = np.load(output_file, mmap_mode='r')
         return embeddings
     
     def _save_checkpoint(

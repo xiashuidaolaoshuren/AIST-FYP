@@ -59,6 +59,21 @@ def load_chunk_metadata(chunks_path: Path) -> list:
     return metadata
 
 
+def count_chunk_metadata(chunks_path: Path) -> int:
+    """Count metadata rows in .jsonl file without loading all entries in RAM."""
+    logger = setup_logger(__name__)
+    logger.info(f"Counting chunk metadata rows in {chunks_path}")
+
+    count = 0
+    with open(chunks_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.strip():
+                count += 1
+
+    logger.info(f"Counted {count:,} metadata rows")
+    return count
+
+
 def create_faiss_index(
     embeddings: np.ndarray,
     index_type: str,
@@ -278,12 +293,12 @@ def main():
     
     # Load data
     embeddings = load_embeddings(embeddings_path)
-    metadata = load_chunk_metadata(chunks_path)
+    metadata_count = count_chunk_metadata(chunks_path)
     
     # Verify data consistency
-    if len(embeddings) != len(metadata):
+    if len(embeddings) != metadata_count:
         logger.error(
-            f"Mismatch: {len(embeddings)} embeddings but {len(metadata)} metadata entries"
+            f"Mismatch: {len(embeddings)} embeddings but {metadata_count} metadata entries"
         )
         sys.exit(1)
     
@@ -414,6 +429,9 @@ def main():
                 }
             )
             logger.info(f"Checkpoint saved at {batch_end:,}/{n_vectors:,} vectors")
+
+            logger.info("Loading full chunk metadata for index serialization...")
+            metadata = load_chunk_metadata(chunks_path)
     
     # Save index and metadata
     logger.info(f"Saving index to {output_dir}")

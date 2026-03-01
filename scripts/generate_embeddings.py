@@ -13,6 +13,7 @@ import argparse
 import json
 import sys
 import time
+from typing import Dict, Iterator, List, Optional
 from pathlib import Path
 import numpy as np
 from tqdm import tqdm
@@ -26,25 +27,49 @@ from src.utils import Config, setup_logger
 from src.utils.checkpoint_utils import file_fingerprint
 
 
-def load_chunks(chunks_file: Path) -> list:
-    """
-    Load chunks from JSONL file.
-    
-    Args:
-        chunks_file: Path to JSONL file with chunks
-    
-    Returns:
-        List of chunk dictionaries
-    """
-    chunks = []
+def count_chunks(chunks_file: Path) -> int:
+    """Count valid JSONL rows without loading them into memory."""
     total_size_bytes = chunks_file.stat().st_size
+    count = 0
     with open(chunks_file, 'r', encoding='utf-8') as f:
-        progress_bar = tqdm(total=total_size_bytes, unit='B', unit_scale=True, desc='Loading chunks')
+        progress_bar = tqdm(total=total_size_bytes, unit='B', unit_scale=True, desc='Counting chunks')
         for line in f:
             progress_bar.update(len(line.encode('utf-8')))
-            chunks.append(json.loads(line.strip()))
+            if line.strip():
+                count += 1
         progress_bar.close()
-    return chunks
+    return count
+
+
+def read_first_chunk(chunks_file: Path) -> Optional[Dict]:
+    """Read first valid chunk row for metadata fields."""
+    with open(chunks_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped:
+                return json.loads(stripped)
+    return None
+
+
+def iter_text_batches(chunks_file: Path, batch_size: int) -> Iterator[List[str]]:
+    """Yield text batches from JSONL file in streaming mode."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+
+    batch: List[str] = []
+    with open(chunks_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            chunk = json.loads(stripped)
+            batch.append(chunk['text'])
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+
+    if batch:
+        yield batch
 
 
 def main():
@@ -154,7 +179,6 @@ Examples:
     checkpoint_root = Path(config.get('checkpointing.checkpoint_dir', 'data/embeddings/checkpoints/'))
     checkpoint_root.mkdir(parents=True, exist_ok=True)
     checkpoint_manifest_file = checkpoint_root / f"embedding_{args.strategy}.manifest.json"
-    checkpoint_payload_file = checkpoint_root / f"embedding_{args.strategy}.payload.pkl"
 
     legacy_checkpoint_file = embeddings_dir / f"checkpoint_{args.strategy}.pkl"
     if legacy_checkpoint_file.exists():
@@ -173,16 +197,20 @@ Examples:
     logger.info(f"Input chunks: {chunks_file}")
     logger.info(f"Output embeddings: {embeddings_file}")
     logger.info(f"Output metadata: {metadata_file}")
-    
-    # Load chunks
-    logger.info("Loading chunks...")
-    start_load = time.time()
-    chunks = load_chunks(chunks_file)
-    load_time = time.time() - start_load
-    logger.info(f"Loaded {len(chunks)} chunks in {load_time:.2f}s")
-    
-    if len(chunks) == 0:
+
+    logger.info("Counting chunks (streaming pre-pass)...")
+    start_count = time.time()
+    total_chunks = count_chunks(chunks_file)
+    count_time = time.time() - start_count
+    logger.info(f"Counted {total_chunks} chunks in {count_time:.2f}s")
+
+    if total_chunks == 0:
         logger.error("No chunks loaded. Exiting.")
+        sys.exit(1)
+
+    first_chunk = read_first_chunk(chunks_file)
+    if first_chunk is None:
+        logger.error("Failed to read first chunk metadata. Exiting.")
         sys.exit(1)
     
     # Initialize embedding generator
@@ -204,10 +232,11 @@ Examples:
     try:
         logger.info("Generating embeddings...")
         start_gen = time.time()
-        
-        embeddings = generator.generate_embeddings(
-            chunks,
-            checkpoint_path=str(checkpoint_payload_file),
+
+        embeddings = generator.generate_embeddings_streaming(
+            text_batches=iter_text_batches(chunks_file, batch_size),
+            total_chunks=total_chunks,
+            output_path=str(embeddings_file),
             checkpoint_manifest_path=str(checkpoint_manifest_file),
             checkpoint_metadata={
                 'strategy': args.strategy,
@@ -215,10 +244,10 @@ Examples:
             },
             checkpoint_interval=checkpoint_interval
         )
-        
+
         gen_time = time.time() - start_gen
-        chunks_per_sec = len(chunks) / gen_time if gen_time > 0 else 0
-        
+        chunks_per_sec = total_chunks / gen_time if gen_time > 0 else 0
+
         logger.info(f"Generation complete in {gen_time:.2f}s ({chunks_per_sec:.2f} chunks/sec)")
         logger.info(f"Embeddings shape: {embeddings.shape}")
         
@@ -226,24 +255,20 @@ Examples:
         logger.error(f"Embedding generation failed: {e}")
         raise
     
-    # Save embeddings
+    # Save metadata
     try:
-        logger.info(f"Saving embeddings to {embeddings_file}...")
-        np.save(embeddings_file, embeddings)
-        
-        # Save metadata
         metadata = {
             'model_name': model_name,
             'embedding_dimension': embedding_dim,
-            'num_chunks': len(chunks),
+            'num_chunks': total_chunks,
             'strategy': args.strategy,
             'batch_size': batch_size,
             'device': device,
             'use_fp16': use_fp16,
             'generation_time_seconds': gen_time,
             'chunks_per_second': chunks_per_sec,
-            'corpus_source': chunks[0].get('source', 'wikipedia') if chunks else 'unknown',
-            'corpus_version': chunks[0].get('version', 'unknown') if chunks else 'unknown'
+            'corpus_source': first_chunk.get('source', 'wikipedia'),
+            'corpus_version': first_chunk.get('version', 'unknown')
         }
         
         with open(metadata_file, 'w', encoding='utf-8') as f:
@@ -266,7 +291,7 @@ Strategy:              {args.strategy}
 Model:                 {model_name}
 Input Chunks:          {chunks_file}
 Output Embeddings:     {embeddings_file}
-Total Chunks:          {len(chunks):,}
+Total Chunks:          {total_chunks:,}
 Embedding Dimension:   {embedding_dim}
 Embeddings Shape:      {embeddings.shape}
 Embeddings Size:       {embeddings_size_mb:.2f} MB
