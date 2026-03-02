@@ -49,9 +49,9 @@ data_strategy:
     max_articles: 100000
     name: "validation"
   
-  # Production: Full Wikipedia corpus
+  # Production: Capped Wikipedia corpus
   production:
-    max_articles: null  # null = all articles
+    max_articles: 1500000
     name: "production"
     dump_date: null  # Optional YYYYMMDD to pin snapshot (overrides data.wikipedia_dump_date)
 

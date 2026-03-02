@@ -73,7 +73,10 @@ python scripts/prepare_wikipedia_chunks.py --strategy validation --resume
 python scripts/prepare_wikipedia_chunks.py --strategy validation --no-resume --reset-checkpoint
 ```
 
-For **production XML dumps**, the script now uses a two-stage flow automatically:
+For **production XML dumps**, the script now uses a two-stage flow automatically.
+By default, production is capped to `1,500,000` articles via `data_strategy.production.max_articles` in `config.yaml`.
+
+Flow:
 1) export XML into intermediate article JSONL, then 2) chunk from JSONL with deterministic line-offset resume.
 
 ```bash
@@ -88,6 +91,7 @@ Notes:
 - Intermediate file default: `data/processed/wiki_articles_{strategy}.jsonl`
 - If intermediate JSONL already exists, it is reused unless `--reset-checkpoint` is provided
 - Chunking resume remains checkpoint-based and deterministic on JSONL input
+- If you changed `data_strategy.production.max_articles` from an earlier value, run once with `--reset-checkpoint` to avoid strict checkpoint mismatch on resume
 
 If a run is interrupted unexpectedly (for example terminal/session crash), the output file may contain a small duplicate window between the last checkpoint and the actual processed point. You can deduplicate chunks by `(doc_id, sent_id)` with:
 

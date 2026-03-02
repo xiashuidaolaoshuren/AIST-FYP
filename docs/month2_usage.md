@@ -69,9 +69,9 @@ python scripts/download_wikipedia.py --strategy development
 python scripts/download_wikipedia.py --strategy validation
 ```
 
-**Production (Full Wikipedia):**
+**Production (Capped, 1.5M articles by default):**
 ```bash
-# Download full dump (~20GB, several hours)
+# Download production dump source (~20GB, several hours)
 python scripts/download_wikipedia.py --strategy production
 
 # Or pin a specific snapshot explicitly
@@ -83,6 +83,9 @@ Production snapshot selection priority:
 - `data_strategy.production.dump_date` in `config.yaml`
 - `data.wikipedia_dump_date` in `config.yaml`
 - falls back to `latest`
+
+Production chunking limit source:
+- `data_strategy.production.max_articles` in `config.yaml` (default: `1500000`)
 
 ### 2. Process Wikipedia Data
 
