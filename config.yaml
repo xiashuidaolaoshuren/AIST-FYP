@@ -130,6 +130,13 @@ generation:
 verification:
   # Enable/disable verification module (default: false for backward compatibility)
   enabled: true
+
+  # Per-detector module toggles (used for independent verifier evaluation / ablation)
+  modules:
+    intrinsic: true
+    grounded: true
+    nli: true
+    self_agreement: true
   
   # Multi-evidence verification (Month 4, Task 2)
   # If True, verify claims against ALL retrieved evidence chunks and aggregate results

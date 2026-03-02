@@ -201,16 +201,16 @@ python scripts/run_citebench_eval.py --track system --system-input benchmark/Cit
 python scripts/run_citebench_eval.py --track both --dry-run
 ```
 
-### Paired Baseline vs Mitigation (System Track)
+### Module-Level Evaluation (System Track)
 
-To compare mitigation impact directly on CiteBench system evaluation (same query set, two variants):
+To compare module impact directly on CiteBench system evaluation (same query set, multiple variants):
 
 ```powershell
 python scripts/evaluate_mitigation_citebench.py --max-samples 10 --provider deepseek --model-name deepseek-chat
 ```
 
 This runner will:
-- Create temporary variant configs for `baseline` and `mitigation_all`
+- Create temporary variant configs for selected module variants
 - Generate per-variant system inputs from identical queries
 - Run CiteEval system-track scoring for each variant
 - Write `summary.json` and `summary.md` under `outputs/mitigation_eval_citebench/<timestamp>/`
@@ -218,7 +218,7 @@ This runner will:
 Optional full variant arguments:
 
 ```powershell
-python scripts/evaluate_mitigation_citebench.py --variants baseline mitigation_all --strategy validation --system-source benchmark/CiteEval/data/system_eval/system_eval_examples.json
+python scripts/evaluate_mitigation_citebench.py --variants baseline full_pipeline mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only --strategy validation --system-source benchmark/CiteEval/data/system_eval/system_eval_examples.json
 ```
 
 ## 5. Integrating with Verifier Signals

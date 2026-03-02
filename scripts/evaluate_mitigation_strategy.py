@@ -1,17 +1,17 @@
 """
-Run paired baseline-vs-mitigation evaluation on RAGTruth.
+Run module-level evaluation variants on RAGTruth.
 
 This script automates a fair comparison by:
-1. Creating temporary config variants (baseline, mitigation_all, ablations)
+1. Creating temporary config variants (verifier-only, mitigation-only, full pipeline)
 2. Running `scripts/demo_ragtruth_eval.py` with identical dataset settings
 3. Saving per-variant metrics and a delta summary report
 
 Usage examples:
-    # Quick paired check (baseline vs full mitigation)
+    # Quick paired check (baseline vs full pipeline)
     python scripts/evaluate_mitigation_strategy.py --max-samples 30
 
-    # Full ablation matrix
-    python scripts/evaluate_mitigation_strategy.py --variants baseline mitigation_all filter_only rerank_only reprompt_only
+    # Full independent module matrix
+    python scripts/evaluate_mitigation_strategy.py --variants baseline full_pipeline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only
 
     # Save into custom output directory
     python scripts/evaluate_mitigation_strategy.py --output-dir outputs/mitigation_eval/run_01
@@ -41,53 +41,139 @@ def _deep_update(target: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
 
 
 def _variant_patch(name: str) -> dict[str, Any]:
+    all_verifiers_enabled = {
+        "verification": {
+            "enabled": True,
+            "modules": {
+                "intrinsic": True,
+                "grounded": True,
+                "nli": True,
+                "self_agreement": True,
+            },
+        }
+    }
+
+    all_mitigation_enabled = {
+        "mitigation": {
+            "enabled": True,
+            "reranker": {"enabled": True},
+            "filter": {"enabled": True},
+            "reprompt": {"enabled": True},
+        }
+    }
+
+    all_mitigation_disabled = {
+        "mitigation": {
+            "enabled": False,
+            "reranker": {"enabled": False},
+            "filter": {"enabled": False},
+            "reprompt": {"enabled": False},
+        }
+    }
+
     if name == "baseline":
+        return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
+
+    if name in {"full_pipeline", "mitigation_all"}:
+        return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_enabled))
+
+    if name == "verifier_intrinsic_only":
         return {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": True,
+                    "grounded": False,
+                    "nli": False,
+                    "self_agreement": False,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+
+    if name == "verifier_grounded_only":
+        return {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": False,
+                    "grounded": True,
+                    "nli": False,
+                    "self_agreement": False,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+
+    if name == "verifier_nli_only":
+        return {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": False,
+                    "grounded": False,
+                    "nli": True,
+                    "self_agreement": False,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+
+    if name == "verifier_self_agreement_only":
+        return {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": False,
+                    "grounded": False,
+                    "nli": False,
+                    "self_agreement": True,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+
+    if name == "mitigation_filter_only":
+        return {
+            **deepcopy(all_verifiers_enabled),
             "mitigation": {
-                "enabled": False,
+                "enabled": True,
                 "reranker": {"enabled": False},
+                "filter": {"enabled": True},
+                "reprompt": {"enabled": False},
+            },
+        }
+
+    if name in {"mitigation_rerank_only", "rerank_only"}:
+        return {
+            **deepcopy(all_verifiers_enabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": True},
                 "filter": {"enabled": False},
                 "reprompt": {"enabled": False},
             }
         }
 
-    if name == "mitigation_all":
+    if name in {"mitigation_reprompt_only", "reprompt_only"}:
         return {
+            **deepcopy(all_verifiers_enabled),
             "mitigation": {
                 "enabled": True,
-                "reranker": {"enabled": True},
-                "filter": {"enabled": True},
+                "reranker": {"enabled": False},
+                "filter": {"enabled": False},
                 "reprompt": {"enabled": True},
             }
         }
 
-    if name == "filter_only":
+    if name in {"mitigation_filter_only", "filter_only"}:
         return {
+            **deepcopy(all_verifiers_enabled),
             "mitigation": {
                 "enabled": True,
                 "reranker": {"enabled": False},
                 "filter": {"enabled": True},
                 "reprompt": {"enabled": False},
-            }
-        }
-
-    if name == "rerank_only":
-        return {
-            "mitigation": {
-                "enabled": True,
-                "reranker": {"enabled": True},
-                "filter": {"enabled": False},
-                "reprompt": {"enabled": False},
-            }
-        }
-
-    if name == "reprompt_only":
-        return {
-            "mitigation": {
-                "enabled": True,
-                "reranker": {"enabled": False},
-                "filter": {"enabled": False},
-                "reprompt": {"enabled": True},
             }
         }
 
@@ -195,7 +281,7 @@ def _write_summary(
     baseline = variant_metrics[baseline_name]
 
     lines = [
-        "# Mitigation Evaluation Summary",
+        "# Module Evaluation Summary (RAGTruth)",
         "",
         "## Overall Metrics",
         "",
@@ -232,7 +318,7 @@ def _write_summary(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run paired baseline-vs-mitigation RAGTruth evaluations and summarize deltas."
+        description="Run verifier/mitigation/full-pipeline RAGTruth evaluation variants and summarize deltas."
     )
     parser.add_argument("--config", type=str, default="config.yaml", help="Base config file path")
     parser.add_argument("--split", type=str, default="test", choices=["train", "test"])
@@ -249,9 +335,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--variants",
         nargs="+",
-        default=["baseline", "mitigation_all"],
-        choices=["baseline", "mitigation_all", "filter_only", "rerank_only", "reprompt_only"],
-        help="Mitigation variants to evaluate"
+        default=[
+            "baseline",
+            "full_pipeline",
+            "verifier_intrinsic_only",
+            "verifier_grounded_only",
+            "verifier_nli_only",
+            "verifier_self_agreement_only",
+            "mitigation_filter_only",
+            "mitigation_rerank_only",
+            "mitigation_reprompt_only",
+        ],
+        choices=[
+            "baseline",
+            "full_pipeline",
+            "mitigation_all",
+            "verifier_intrinsic_only",
+            "verifier_grounded_only",
+            "verifier_nli_only",
+            "verifier_self_agreement_only",
+            "mitigation_filter_only",
+            "mitigation_rerank_only",
+            "mitigation_reprompt_only",
+            "filter_only",
+            "rerank_only",
+            "reprompt_only",
+        ],
+        help="Evaluation variants to run"
     )
     parser.add_argument(
         "--output-dir",

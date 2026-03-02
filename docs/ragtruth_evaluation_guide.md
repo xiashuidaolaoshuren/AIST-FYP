@@ -90,15 +90,33 @@ Ensure verification is enabled:
 ```yaml
 verification:
   enabled: true
-  intrinsic_uncertainty:
-    enabled: true
-  retrieval_grounded:
-    enabled: true
-  nli:
-    enabled: true
-  self_agreement:
-    enabled: true
+  modules:
+    intrinsic: true
+    grounded: true
+    nli: true
+    self_agreement: true
 ```
+
+### Independent Module Evaluation (Verifier + Mitigation + Full Pipeline)
+
+Run all key variants in one command:
+
+```bash
+python scripts/evaluate_mitigation_strategy.py \
+  --split test \
+  --strategy validation \
+  --variants baseline full_pipeline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only
+```
+
+Quick smoke test:
+
+```bash
+python scripts/evaluate_mitigation_strategy.py --max-samples 20
+```
+
+Artifacts are saved under `outputs/mitigation_eval/<timestamp>/`:
+- `summary.json`: machine-readable aggregate metrics by variant
+- `summary.md`: human-readable comparison table with deltas vs baseline
 
 ## Understanding the Metrics
 

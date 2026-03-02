@@ -90,6 +90,15 @@ class VerifierHub:
             self.verify_all_evidence = False
             self.aggregation_method = 'max'
             self.strict_logits = False
+
+        # Per-module enable flags (default: all enabled)
+        self.module_flags = self._resolve_module_flags()
+
+        # Detector placeholders for consistent status/introspection
+        self.uncertainty_detector = None
+        self.grounded_detector = None
+        self.nli_detector = None
+        self.self_agreement_detector = None
         
         if not self.enabled:
             self.logger.warning("VerifierHub initialized but verification is disabled")
@@ -100,34 +109,46 @@ class VerifierHub:
             self.logger.info("Initializing verification detectors...")
             
             # Initialize Intrinsic Uncertainty Detector
-            self.uncertainty_detector = IntrinsicUncertaintyDetector(config)
-            self.logger.info("✓ IntrinsicUncertaintyDetector initialized")
+            if self.module_flags['intrinsic']:
+                self.uncertainty_detector = IntrinsicUncertaintyDetector(config)
+                self.logger.info("✓ IntrinsicUncertaintyDetector initialized")
+            else:
+                self.logger.info("IntrinsicUncertaintyDetector disabled by config")
             
             # Initialize Retrieval-Grounded Detector
-            self.grounded_detector = RetrievalGroundedDetector(config)
-            self.logger.info("✓ RetrievalGroundedDetector initialized")
+            if self.module_flags['grounded']:
+                self.grounded_detector = RetrievalGroundedDetector(config)
+                self.logger.info("✓ RetrievalGroundedDetector initialized")
+            else:
+                self.logger.info("RetrievalGroundedDetector disabled by config")
             
             # Initialize NLI Detector (Month 4, Task 3)
-            try:
-                self.nli_detector = NLIDetector(config)
-                self.logger.info("✓ NLIDetector initialized")
-            except Exception as e:
-                self.logger.warning(f"NLIDetector initialization failed: {str(e)}")
-                self.logger.warning("Continuing without NLI detector")
-                self.nli_detector = None
+            if self.module_flags['nli']:
+                try:
+                    self.nli_detector = NLIDetector(config)
+                    self.logger.info("✓ NLIDetector initialized")
+                except Exception as e:
+                    self.logger.warning(f"NLIDetector initialization failed: {str(e)}")
+                    self.logger.warning("Continuing without NLI detector")
+                    self.nli_detector = None
+            else:
+                self.logger.info("NLIDetector disabled by config")
             
             # Initialize Self-Agreement Detector (Month 4, Task 4)
-            try:
-                if generator is not None:
-                    self.self_agreement_detector = SelfAgreementDetector(config, generator)
-                    self.logger.info("✓ SelfAgreementDetector initialized")
-                else:
+            if self.module_flags['self_agreement']:
+                try:
+                    if generator is not None:
+                        self.self_agreement_detector = SelfAgreementDetector(config, generator)
+                        self.logger.info("✓ SelfAgreementDetector initialized")
+                    else:
+                        self.self_agreement_detector = None
+                        self.logger.warning("Generator not provided, Self-Agreement detector disabled")
+                except Exception as e:
+                    self.logger.warning(f"SelfAgreementDetector initialization failed: {str(e)}")
+                    self.logger.warning("Continuing without Self-Agreement detector")
                     self.self_agreement_detector = None
-                    self.logger.warning("Generator not provided, Self-Agreement detector disabled")
-            except Exception as e:
-                self.logger.warning(f"SelfAgreementDetector initialization failed: {str(e)}")
-                self.logger.warning("Continuing without Self-Agreement detector")
-                self.self_agreement_detector = None
+            else:
+                self.logger.info("SelfAgreementDetector disabled by config")
             
             self.logger.info("VerifierHub initialization complete")
             
@@ -136,6 +157,35 @@ class VerifierHub:
             self.logger.error(error_msg)
             self.logger.error(traceback.format_exc())
             raise RuntimeError(error_msg) from e
+
+    def _resolve_module_flags(self) -> Dict[str, bool]:
+        """Resolve per-detector enable flags from config with safe defaults."""
+        defaults = {
+            'intrinsic': True,
+            'grounded': True,
+            'nli': True,
+            'self_agreement': True,
+        }
+
+        if not hasattr(self.config, 'verification'):
+            return defaults
+
+        verification = self.config.verification
+        modules_cfg = getattr(verification, 'modules', None)
+
+        if modules_cfg is not None:
+            return {
+                name: bool(getattr(modules_cfg, name, defaults[name]))
+                for name in defaults
+            }
+
+        # Backward-compatible fallback for older config style
+        return {
+            'intrinsic': bool(getattr(getattr(verification, 'intrinsic', None), 'enabled', True)),
+            'grounded': bool(getattr(getattr(verification, 'grounded', None), 'enabled', True)),
+            'nli': bool(getattr(getattr(verification, 'nli', None), 'enabled', True)),
+            'self_agreement': bool(getattr(getattr(verification, 'self_agreement', None), 'enabled', True)),
+        }
     
     def verify_claim(
         self,
@@ -232,7 +282,9 @@ class VerifierHub:
             # Compute intrinsic uncertainty signal
             uncertainty_signal = None
             disable_intrinsic = bool(metadata.get('disable_intrinsic_uncertainty'))
-            if disable_intrinsic:
+            if self.uncertainty_detector is None:
+                uncertainty_signal = {'mean_entropy': 0.0}
+            elif disable_intrinsic:
                 uncertainty_signal = {'mean_entropy': 0.0}
             else:
                 try:
@@ -265,39 +317,46 @@ class VerifierHub:
             
             # Compute retrieval-grounded signal
             grounded_signal = None
-            try:
-                grounded_signal = self.grounded_detector.compute_signal(
-                    claim, evidence, metadata
-                )
-                self.logger.debug(
-                    f"Grounded signal computed for claim {claim.claim_id}: "
-                    f"entities={grounded_signal.get('entities', 0.0):.2f}, "
-                    f"numbers={grounded_signal.get('numbers', 0.0):.2f}, "
-                    f"tokens={grounded_signal.get('tokens_overlap', 0.0):.2f}"
-                )
-                self.logger.info(
-                    "verifier_grounded",
-                    extra={
-                        "event": "verifier_grounded",
-                        "data": {
-                            "claim_id": claim.claim_id,
-                            "entities": grounded_signal.get('entities', 0.0),
-                            "numbers": grounded_signal.get('numbers', 0.0),
-                            "tokens_overlap": grounded_signal.get('tokens_overlap', 0.0)
-                        }
-                    }
-                )
-            except Exception as e:
-                self.logger.error(
-                    f"RetrievalGroundedDetector failed for claim {claim.claim_id}: {str(e)}"
-                )
-                self.logger.debug(traceback.format_exc())
-                # Use default fallback values
+            if self.grounded_detector is None:
                 grounded_signal = {
                     'entities': 0.0,
                     'numbers': 0.0,
                     'tokens_overlap': 0.0
                 }
+            else:
+                try:
+                    grounded_signal = self.grounded_detector.compute_signal(
+                        claim, evidence, metadata
+                    )
+                    self.logger.debug(
+                        f"Grounded signal computed for claim {claim.claim_id}: "
+                        f"entities={grounded_signal.get('entities', 0.0):.2f}, "
+                        f"numbers={grounded_signal.get('numbers', 0.0):.2f}, "
+                        f"tokens={grounded_signal.get('tokens_overlap', 0.0):.2f}"
+                    )
+                    self.logger.info(
+                        "verifier_grounded",
+                        extra={
+                            "event": "verifier_grounded",
+                            "data": {
+                                "claim_id": claim.claim_id,
+                                "entities": grounded_signal.get('entities', 0.0),
+                                "numbers": grounded_signal.get('numbers', 0.0),
+                                "tokens_overlap": grounded_signal.get('tokens_overlap', 0.0)
+                            }
+                        }
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"RetrievalGroundedDetector failed for claim {claim.claim_id}: {str(e)}"
+                    )
+                    self.logger.debug(traceback.format_exc())
+                    # Use default fallback values
+                    grounded_signal = {
+                        'entities': 0.0,
+                        'numbers': 0.0,
+                        'tokens_overlap': 0.0
+                    }
             
             # Compute NLI signal (Month 4, Task 3)
             nli_signal = None
@@ -393,7 +452,7 @@ class VerifierHub:
                 uncertainty=uncertainty_signal,
                 consistency=consistency_signal,
                 citation_span_match=grounded_signal.get('tokens_overlap', 0.0),
-                numeric_check=grounded_signal.get('numbers', 0.0) == 1.0
+                numeric_check=grounded_signal.get('numbers', 0.0) >= 0.999
             )
             
             self.logger.debug(f"VerifierSignal created for claim {claim.claim_id}")
@@ -433,15 +492,18 @@ class VerifierHub:
             for chunk in evidence_list:
                 try:
                     # Compute uncertainty and grounded signals for this chunk
-                    if metadata.get('disable_intrinsic_uncertainty'):
+                    if self.uncertainty_detector is None or metadata.get('disable_intrinsic_uncertainty'):
                         uncertainty_signal = {'mean_entropy': 0.0}
                     else:
                         uncertainty_signal = self.uncertainty_detector.compute_signal(
                             claim, chunk, metadata
                         )
-                    grounded_signal = self.grounded_detector.compute_signal(
-                        claim, chunk, metadata
-                    )
+                    if self.grounded_detector is None:
+                        grounded_signal = {'entities': 0.0, 'numbers': 0.0, 'tokens_overlap': 0.0}
+                    else:
+                        grounded_signal = self.grounded_detector.compute_signal(
+                            claim, chunk, metadata
+                        )
                     
                     # Compute NLI signal if detector available
                     nli_signal = None
@@ -462,7 +524,7 @@ class VerifierHub:
                         'coverage': grounded_signal,
                         'uncertainty': uncertainty_signal,
                         'citation_span_match': grounded_signal.get('tokens_overlap', 0.0),
-                        'numeric_check': grounded_signal.get('numbers', 0.0) == 1.0
+                        'numeric_check': grounded_signal.get('numbers', 0.0) >= 0.999
                     }
                     if nli_signal is not None:
                         chunk_data['nli'] = nli_signal
@@ -523,7 +585,7 @@ class VerifierHub:
                             f"variance={sa_result.get('variance', 0.0):.3f}"
                         )
                     else:
-                        self.logger.warning(f"No original_query in metadata, skipping self-agreement")
+                        self.logger.warning("No original_query in metadata, skipping self-agreement")
                 except Exception as e:
                     self.logger.error(f"Self-agreement failed: {str(e)}")
                     self.logger.debug(traceback.format_exc())
@@ -673,6 +735,10 @@ class VerifierHub:
         
         return {
             'enabled': True,
+            'configured_intrinsic': self.module_flags['intrinsic'],
+            'configured_grounded': self.module_flags['grounded'],
+            'configured_nli': self.module_flags['nli'],
+            'configured_self_agreement': self.module_flags['self_agreement'],
             'intrinsic': self.uncertainty_detector is not None,
             'grounded': self.grounded_detector is not None,
             'nli': self.nli_detector is not None,

@@ -1,8 +1,8 @@
 """
-Run paired baseline-vs-mitigation evaluation on CiteBench system track.
+Run module-level evaluation variants on CiteBench system track.
 
 This script automates a fair comparison by:
-1. Creating temporary config variants (baseline, mitigation_all)
+1. Creating temporary config variants (verifier-only, mitigation-only, full pipeline)
 2. Generating CiteEval system-input JSON for each variant from identical queries
 3. Running CiteBench/CiteEval system evaluation for each variant
 4. Writing a delta summary report
@@ -69,24 +69,129 @@ def _deep_update(target: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
 
 
 def _variant_patch(name: str) -> dict[str, Any]:
+    all_verifiers_enabled = {
+        "verification": {
+            "enabled": True,
+            "modules": {
+                "intrinsic": True,
+                "grounded": True,
+                "nli": True,
+                "self_agreement": True,
+            },
+        }
+    }
+
+    all_mitigation_enabled = {
+        "mitigation": {
+            "enabled": True,
+            "reranker": {"enabled": True},
+            "filter": {"enabled": True},
+            "reprompt": {"enabled": True},
+        }
+    }
+
+    all_mitigation_disabled = {
+        "mitigation": {
+            "enabled": False,
+            "reranker": {"enabled": False},
+            "filter": {"enabled": False},
+            "reprompt": {"enabled": False},
+        }
+    }
+
     if name == "baseline":
+        return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
+
+    if name in {"full_pipeline", "mitigation_all"}:
+        return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_enabled))
+
+    if name == "verifier_intrinsic_only":
         return {
-            "mitigation": {
-                "enabled": False,
-                "reranker": {"enabled": False},
-                "filter": {"enabled": False},
-                "reprompt": {"enabled": False},
-            }
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": True,
+                    "grounded": False,
+                    "nli": False,
+                    "self_agreement": False,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
         }
 
-    if name == "mitigation_all":
+    if name == "verifier_grounded_only":
         return {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": False,
+                    "grounded": True,
+                    "nli": False,
+                    "self_agreement": False,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+
+    if name == "verifier_nli_only":
+        return {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": False,
+                    "grounded": False,
+                    "nli": True,
+                    "self_agreement": False,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+
+    if name == "verifier_self_agreement_only":
+        return {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": False,
+                    "grounded": False,
+                    "nli": False,
+                    "self_agreement": True,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+
+    if name in {"mitigation_filter_only", "filter_only"}:
+        return {
+            **deepcopy(all_verifiers_enabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": False},
+                "filter": {"enabled": True},
+                "reprompt": {"enabled": False},
+            },
+        }
+
+    if name in {"mitigation_rerank_only", "rerank_only"}:
+        return {
+            **deepcopy(all_verifiers_enabled),
             "mitigation": {
                 "enabled": True,
                 "reranker": {"enabled": True},
-                "filter": {"enabled": True},
+                "filter": {"enabled": False},
+                "reprompt": {"enabled": False},
+            },
+        }
+
+    if name in {"mitigation_reprompt_only", "reprompt_only"}:
+        return {
+            **deepcopy(all_verifiers_enabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": False},
+                "filter": {"enabled": False},
                 "reprompt": {"enabled": True},
-            }
+            },
         }
 
     raise ValueError(f"Unknown variant: {name}")
@@ -419,7 +524,7 @@ def _evaluate_system_summary(
 def _write_summary(summary_path: Path, metrics: dict[str, dict[str, float]], baseline_name: str = "baseline") -> None:
     baseline = metrics[baseline_name]
     lines = [
-        "# CiteBench Mitigation Evaluation Summary",
+        "# CiteBench Module Evaluation Summary",
         "",
         "| Variant | Statement Rating | Response Rating | Length | Density | ΔStatement vs Baseline | ΔResponse vs Baseline |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -435,13 +540,38 @@ def _write_summary(summary_path: Path, metrics: dict[str, dict[str, float]], bas
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run paired baseline-vs-mitigation CiteBench system evaluation and summarize deltas."
+        description="Run verifier/mitigation/full-pipeline CiteBench system evaluation variants and summarize deltas."
     )
     parser.add_argument("--config", type=str, default="config.yaml", help="Base config file path")
     parser.add_argument("--strategy", type=str, default="validation", choices=["development", "validation", "production"])
     parser.add_argument("--system-source", type=str, default="benchmark/CiteEval/data/system_eval/system_eval_examples.json")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of source queries for smoke testing")
-    parser.add_argument("--variants", nargs="+", default=["baseline", "mitigation_all"], choices=["baseline", "mitigation_all"])
+    parser.add_argument(
+        "--variants",
+        nargs="+",
+        default=[
+            "baseline",
+            "full_pipeline",
+            "mitigation_filter_only",
+            "mitigation_rerank_only",
+            "mitigation_reprompt_only",
+        ],
+        choices=[
+            "baseline",
+            "full_pipeline",
+            "mitigation_all",
+            "verifier_intrinsic_only",
+            "verifier_grounded_only",
+            "verifier_nli_only",
+            "verifier_self_agreement_only",
+            "mitigation_filter_only",
+            "mitigation_rerank_only",
+            "mitigation_reprompt_only",
+            "filter_only",
+            "rerank_only",
+            "reprompt_only",
+        ],
+    )
     parser.add_argument("--provider", type=str, default="deepseek", choices=["openai", "deepseek"])
     parser.add_argument("--model-name", type=str, default="deepseek-chat")
     parser.add_argument("--version", type=str, default="citeeval-auto-12272024")
