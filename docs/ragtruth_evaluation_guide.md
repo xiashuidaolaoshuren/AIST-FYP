@@ -108,6 +108,47 @@ python scripts/evaluate_mitigation_strategy.py \
   --variants baseline full_pipeline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only
 ```
 
+## Baseline Training & Serving
+
+The RAGTruth baseline involves training a hallucination detector and evaluating it using a specific prompt format. An automation runner is provided in `scripts/run_ragtruth_baseline.py`.
+
+### 1. Local/Hybrid Workflow
+
+Use the unified runner script from the project root:
+
+```powershell
+# Step 1: Prepare train/dev/test datasets
+python scripts/run_ragtruth_baseline.py prepare
+
+# Step 2: Train the baseline detector
+# Use --profile single-gpu for local setups or --profile exact for FSDP multi-GPU
+python scripts/run_ragtruth_baseline.py train --profile single-gpu --model-name baseline
+
+# Step 3: Serve the model (Docker required for TGI)
+# This command prints the docker run command to execute in your shell
+python scripts/run_ragtruth_baseline.py serve-cmd --model-subdir baseline --port 8300
+
+# Step 4: Run evaluation against the TGI endpoint
+python scripts/run_ragtruth_baseline.py evaluate --model-name baseline --port 8300
+```
+
+### 2. Google Colab Workflow
+
+For environments without Docker or high-VRAM local GPUs, use the specialized notebook:
+
+- Path: [colab/notebooks/colab_ragtruth_baseline.ipynb](colab/notebooks/colab_ragtruth_baseline.ipynb)
+- **Features**: Automates dataset prep, performs local model inference (transformers), and calculates RAGTruth case-level metrics (Precision/Recall/F1).
+
+### 3. CLI Options Reference
+
+| Subcommand | Purpose | Key Flags |
+| --- | --- | --- |
+| `prepare` | Splits `response.jsonl` into `train/dev/test` | `--baseline-dir` |
+| `train` | Fine-tunes Llama-2-13B (or other) | `--profile`, `--model-path`, `--report-to-wandb` |
+| `serve-cmd` | Generates TGI Docker command | `--gpu-device`, `--port` |
+| `evaluate` | Hits endpoint and computes metrics | `--tokenizer`, `--output-file` |
+| `all` | Runs prepare + train + evaluate sequence | `--run-evaluate` |
+
 Quick smoke test:
 
 ```bash
