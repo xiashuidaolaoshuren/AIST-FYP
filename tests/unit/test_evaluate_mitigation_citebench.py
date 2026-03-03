@@ -1,5 +1,4 @@
 from pathlib import Path
-
 import pytest
 
 from scripts.evaluate_mitigation_citebench import (

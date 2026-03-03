@@ -18,6 +18,8 @@ from src.utils.data_structures import ClaimEvidencePair, EvidenceChunk, Claim, V
 from src.utils.config import Config
 from src.utils.logger import setup_logger
 from src.verification.verifier_hub import VerifierHub
+from src.verification.rule_based_aggregator import RuleBasedAggregator
+from src.mitigation.orchestrator import MitigationOrchestrator
 
 
 class BaselineRAGPipeline:
@@ -71,16 +73,36 @@ class BaselineRAGPipeline:
         if config and hasattr(config, 'verification') and hasattr(config.verification, 'enabled') and config.verification.enabled:
             try:
                 self.verifier_hub = VerifierHub(config, generator)
+                self.aggregator = RuleBasedAggregator(config)
                 self.verifier_enabled = True
                 self.logger.info("BaselineRAGPipeline initialized with VerifierHub enabled")
             except Exception as e:
                 self.logger.error(f"Failed to initialize VerifierHub: {str(e)}")
                 self.logger.warning("Continuing without verification")
+                self.aggregator = None
                 self.verifier_enabled = False
         else:
             self.verifier_hub = None
+            self.aggregator = None
             self.verifier_enabled = False
             self.logger.info("BaselineRAGPipeline initialized (verification disabled)")
+
+        self.mitigation_orchestrator = None
+        if config and self.verifier_enabled and self.verifier_hub is not None and self.aggregator is not None:
+            try:
+                self.mitigation_orchestrator = MitigationOrchestrator(
+                    config=config,
+                    verifier_hub=self.verifier_hub,
+                    aggregator=self.aggregator,
+                    generator=generator,
+                )
+                self.logger.info(
+                    "Mitigation orchestrator initialized (enabled=%s)",
+                    self.mitigation_orchestrator.enabled
+                )
+            except Exception as exc:
+                self.logger.warning("Failed to initialize mitigation orchestrator: %s", exc)
+                self.mitigation_orchestrator = None
     
     def _split_query_by_questions(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -492,10 +514,54 @@ class BaselineRAGPipeline:
         # Step 5: Format output
         # Get unique evidence doc_ids for metadata
         unique_evidence_doc_ids = list(dict.fromkeys([chunk.doc_id for chunk in all_evidence_chunks[:top_k * len(sub_queries)]]))
+
+        mitigation_result = {
+            'final_answer': combined_response,
+            'actions': [],
+            'filtered_claim_count': 0,
+            'claim_records': []
+        }
+        if self.mitigation_orchestrator and self.mitigation_orchestrator.enabled:
+            claim_records = []
+            evidence_for_mitigation = all_evidence_chunks[:top_k]
+            for claim in all_claims:
+                verification_metadata = None
+                for entry in all_generation_metadata:
+                    span = entry['char_span']
+                    if (
+                        claim.answer_char_span[0] >= span[0]
+                        and claim.answer_char_span[1] <= span[1]
+                    ):
+                        verification_metadata = dict(entry['metadata'])
+                        verification_metadata.setdefault('original_query', entry['sub_query'])
+                        break
+
+                if verification_metadata is None:
+                    verification_metadata = {
+                        'text': combined_response,
+                        'original_query': query,
+                        'tokens': [],
+                        'scores': []
+                    }
+
+                claim_records.append({
+                    'claim': claim,
+                    'evidence': evidence_for_mitigation,
+                    'metadata': verification_metadata
+                })
+
+            mitigation_result = self.mitigation_orchestrator.apply(
+                query=query,
+                answer_text=combined_response,
+                claim_records=claim_records,
+            )
         
         output = {
             'query': query,
             'draft_response': combined_response,
+            'response_after_mitigation': mitigation_result['final_answer'],
+            'mitigation_actions': mitigation_result['actions'],
+            'filtered_claim_count': mitigation_result['filtered_claim_count'],
             'sub_answers': all_sub_answers,
             'claims_by_sub_answer': all_claims_by_sub_answer,
             'claim_evidence_pairs': [pair.to_dict() for pair in claim_evidence_pairs],
@@ -513,6 +579,15 @@ class BaselineRAGPipeline:
                 'evidence_doc_ids': unique_evidence_doc_ids[:10]  # Limit to top 10 for display
             }
         }
+
+        if mitigation_result.get('claim_records'):
+            output['mitigation_claims'] = [
+                record['claim'].to_dict() for record in mitigation_result['claim_records']
+            ]
+            output['mitigation_evidence_map'] = {
+                record['claim'].claim_id: [chunk.to_dict() for chunk in record.get('evidence', [])]
+                for record in mitigation_result['claim_records']
+            }
         
         # Add verifier signals if computed (Month 3)
         if verifier_signals:

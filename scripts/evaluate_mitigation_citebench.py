@@ -35,27 +35,16 @@ project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 from src.citation.citation_formatter import CitationFormatter
-from src.generation.claim_extractor import extract_claims
-from src.mitigation.claim_filter import ClaimFilter
-from src.mitigation.re_ranker import EvidenceReRanker
-from src.mitigation.reprompt import RePrompter
 from src.pipelines.baseline_rag import BaselineRAGPipeline
 from src.utils.config import Config
-from src.utils.data_structures import Claim, ClaimDecision, EvidenceChunk, VerifierSignal
-from src.verification.rule_based_aggregator import RuleBasedAggregator
-from src.verification.verifier_hub import VerifierHub
+from src.utils.data_structures import Claim, EvidenceChunk
 
 
 @dataclass
 class VariantRuntime:
     config: Config
     pipeline: BaselineRAGPipeline
-    verifier_hub: VerifierHub
-    aggregator: RuleBasedAggregator
     citation_formatter: CitationFormatter
-    claim_filter: ClaimFilter | None
-    reranker: EvidenceReRanker | None
-    reprompter: RePrompter | None
     mitigation_enabled: bool
 
 
@@ -238,133 +227,18 @@ def _build_evidence_map(claim_evidence_pairs: list[dict[str, Any]]) -> dict[str,
     return evidence_map
 
 
-def _to_signal_map(signals: list[VerifierSignal]) -> dict[str, VerifierSignal]:
-    signal_map: dict[str, VerifierSignal] = {}
-    for signal in signals:
-        signal_map[f"{signal.doc_id}#{signal.sent_id}"] = signal
-    return signal_map
-
-
-def _verify_and_decide(
-    *,
-    verifier_hub: VerifierHub,
-    aggregator: RuleBasedAggregator,
-    claims: list[Claim],
-    evidence_map: dict[str, list[EvidenceChunk]],
-    generation_metadata: dict[str, Any],
-) -> tuple[list[VerifierSignal], list[ClaimDecision]]:
-    signals: list[VerifierSignal] = []
-    decisions: list[ClaimDecision] = []
-
-    for claim in claims:
-        evidence = evidence_map.get(claim.claim_id, [])
-        if not evidence:
-            continue
-
-        signal = verifier_hub.verify_claim(claim, evidence, generation_metadata)
-        if signal is None:
-            continue
-
-        signals.append(signal)
-        decisions.append(aggregator.aggregate(signal))
-
-    return signals, decisions
-
-
-def _apply_mitigation(
-    *,
-    runtime: VariantRuntime,
-    query: str,
-    answer_text: str,
-    claims: list[Claim],
-    evidence_map: dict[str, list[EvidenceChunk]],
-    generation_metadata: dict[str, Any],
-) -> tuple[str, list[Claim], dict[str, list[EvidenceChunk]]]:
-    signals, decisions = _verify_and_decide(
-        verifier_hub=runtime.verifier_hub,
-        aggregator=runtime.aggregator,
-        claims=claims,
-        evidence_map=evidence_map,
-        generation_metadata=generation_metadata,
-    )
-
-    if runtime.reranker and runtime.reranker.enabled and signals:
-        signal_map = _to_signal_map(signals)
-        reranked_map: dict[str, list[EvidenceChunk]] = {}
-        for claim in claims:
-            chunks = evidence_map.get(claim.claim_id, [])
-            if chunks:
-                reranked_map[claim.claim_id] = runtime.reranker.rerank(chunks, signal_map)
-        evidence_map = reranked_map or evidence_map
-        signals, decisions = _verify_and_decide(
-            verifier_hub=runtime.verifier_hub,
-            aggregator=runtime.aggregator,
-            claims=claims,
-            evidence_map=evidence_map,
-            generation_metadata=generation_metadata,
-        )
-
-    if runtime.reprompter and runtime.reprompter.enabled and decisions and claims:
-        pooled_evidence: list[EvidenceChunk] = []
-        for chunk_list in evidence_map.values():
-            pooled_evidence.extend(chunk_list)
-        if pooled_evidence:
-            reprompt_result = runtime.reprompter.reprompt(
-                query=query,
-                answer=answer_text,
-                decisions=decisions,
-                evidence=pooled_evidence,
-                claims=claims,
-            )
-            if reprompt_result.get("improved"):
-                answer_text = reprompt_result.get("final_answer", answer_text)
-                claims = extract_claims(answer_text, method="auto")
-                default_evidence = pooled_evidence[:5]
-                evidence_map = {
-                    claim.claim_id: default_evidence
-                    for claim in claims
-                }
-                signals, decisions = _verify_and_decide(
-                    verifier_hub=runtime.verifier_hub,
-                    aggregator=runtime.aggregator,
-                    claims=claims,
-                    evidence_map=evidence_map,
-                    generation_metadata=generation_metadata,
-                )
-
-    if runtime.claim_filter and runtime.claim_filter.enabled and decisions and claims:
-        answer_text, _ = runtime.claim_filter.filter_answer(
-            answer_text=answer_text,
-            claims=claims,
-            decisions=decisions,
-        )
-
-    return answer_text, claims, evidence_map
-
-
 def _build_runtime(config_path: Path, strategy: str) -> VariantRuntime:
     config = Config(str(config_path))
     pipeline = BaselineRAGPipeline.from_config(config_path=str(config_path), strategy=strategy)
-    verifier_hub = VerifierHub(config, pipeline.generator)
-    aggregator = RuleBasedAggregator(config)
     citation_formatter = CitationFormatter(config)
 
     mitigation_cfg = config.get("mitigation", {})
     mitigation_enabled = bool(mitigation_cfg.get("enabled", False))
 
-    claim_filter = ClaimFilter(config) if mitigation_enabled and mitigation_cfg.get("filter", {}).get("enabled", False) else None
-    reranker = EvidenceReRanker(config) if mitigation_enabled and mitigation_cfg.get("reranker", {}).get("enabled", False) else None
-    reprompter = RePrompter(config, pipeline.generator) if mitigation_enabled and mitigation_cfg.get("reprompt", {}).get("enabled", False) else None
-
     return VariantRuntime(
         config=config,
         pipeline=pipeline,
-        verifier_hub=verifier_hub,
-        aggregator=aggregator,
         citation_formatter=citation_formatter,
-        claim_filter=claim_filter,
-        reranker=reranker,
-        reprompter=reprompter,
         mitigation_enabled=mitigation_enabled,
     )
 
@@ -384,20 +258,31 @@ def _generate_system_input(
             continue
 
         pipeline_output = runtime.pipeline.run(query)
-        answer_text = pipeline_output.get("draft_response", "")
-        claims = _flatten_claims(pipeline_output.get("claims_by_sub_answer", []))
-        evidence_map = _build_evidence_map(pipeline_output.get("claim_evidence_pairs", []))
-        generation_metadata = pipeline_output.get("generator_metadata", {})
+        answer_text = (
+            pipeline_output.get("response_after_mitigation", "")
+            if runtime.mitigation_enabled
+            else pipeline_output.get("draft_response", "")
+        )
+        if not answer_text:
+            answer_text = pipeline_output.get("draft_response", "")
 
-        if runtime.mitigation_enabled and claims and evidence_map:
-            answer_text, claims, evidence_map = _apply_mitigation(
-                runtime=runtime,
-                query=query,
-                answer_text=answer_text,
-                claims=claims,
-                evidence_map=evidence_map,
-                generation_metadata=generation_metadata,
-            )
+        mitigation_claims = pipeline_output.get("mitigation_claims", [])
+        if mitigation_claims:
+            claims = [Claim(**item) for item in mitigation_claims]
+        else:
+            claims = _flatten_claims(pipeline_output.get("claims_by_sub_answer", []))
+
+        mitigation_evidence_map = pipeline_output.get("mitigation_evidence_map", {})
+        if mitigation_evidence_map:
+            evidence_map = {
+                claim_id: [
+                    item if isinstance(item, EvidenceChunk) else EvidenceChunk(**item)
+                    for item in chunks
+                ]
+                for claim_id, chunks in mitigation_evidence_map.items()
+            }
+        else:
+            evidence_map = _build_evidence_map(pipeline_output.get("claim_evidence_pairs", []))
 
         formatted_output = runtime.citation_formatter.format_with_citations(
             answer_text=answer_text,

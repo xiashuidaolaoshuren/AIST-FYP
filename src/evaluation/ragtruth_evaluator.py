@@ -61,9 +61,7 @@ from src.utils.config import Config
 from src.utils.logger import setup_logger
 from src.utils.data_structures import ClaimDecision, Claim, EvidenceChunk
 from src.generation.claim_extractor import extract_claims
-from src.mitigation.claim_filter import ClaimFilter
-from src.mitigation.re_ranker import EvidenceReRanker
-from src.mitigation.reprompt import RePrompter
+from src.mitigation.orchestrator import MitigationOrchestrator
 
 
 class RAGTruthEvaluator:
@@ -136,9 +134,7 @@ class RAGTruthEvaluator:
             mitigation_config = {}
 
         self.mitigation_enabled = bool(mitigation_config.get('enabled', False))
-        self.claim_filter = None
-        self.evidence_reranker = None
-        self.reprompter = None
+        self.mitigation_orchestrator = None
         
         # Get benchmark directory from config
         if hasattr(config, 'evaluation') and hasattr(config.evaluation, 'benchmarks'):
@@ -210,27 +206,19 @@ class RAGTruthEvaluator:
 
         if self.mitigation_enabled:
             try:
-                self.claim_filter = ClaimFilter(config)
-            except Exception as exc:
-                self.logger.warning("Failed to initialize ClaimFilter: %s", exc)
-
-            try:
-                self.evidence_reranker = EvidenceReRanker(config)
-            except Exception as exc:
-                self.logger.warning("Failed to initialize EvidenceReRanker: %s", exc)
-
-            try:
                 generator = getattr(self.rag_pipeline, 'generator', None)
-                if generator is not None:
-                    self.reprompter = RePrompter(config, generator)
+                self.mitigation_orchestrator = MitigationOrchestrator(
+                    config=config,
+                    verifier_hub=self.verifier_hub,
+                    aggregator=self.aggregator,
+                    generator=generator,
+                )
             except Exception as exc:
-                self.logger.warning("Failed to initialize RePrompter: %s", exc)
+                self.logger.warning("Failed to initialize MitigationOrchestrator: %s", exc)
 
             self.logger.info(
-                "Mitigation enabled for evaluator (filter=%s, rerank=%s, reprompt=%s)",
-                bool(self.claim_filter and self.claim_filter.enabled),
-                bool(self.evidence_reranker and self.evidence_reranker.enabled),
-                bool(self.reprompter and self.reprompter.enabled)
+                "Mitigation enabled for evaluator (orchestrator=%s)",
+                bool(self.mitigation_orchestrator and self.mitigation_orchestrator.enabled)
             )
     
     def run_evaluation(
@@ -664,97 +652,21 @@ class RAGTruthEvaluator:
                 claim_decisions.append(decision)
 
         mitigation_actions = []
-
-        if self.evidence_reranker and self.evidence_reranker.enabled and resolved_pairs and claim_signals:
-            reranked_pairs = []
-            reranked_any = False
-
-            for pair, signal in zip(resolved_pairs, claim_signals):
-                evidence = pair.get('evidence') or []
-                if not evidence:
-                    reranked_pairs.append(pair)
-                    continue
-
-                verification_signals = self._build_rerank_signal_map(signal, evidence)
-                reranked_evidence = self.evidence_reranker.rerank(
-                    evidence_list=evidence,
-                    verification_signals=verification_signals
-                )
-
-                if [f"{chunk.doc_id}#{chunk.sent_id}" for chunk in reranked_evidence] != [
-                    f"{chunk.doc_id}#{chunk.sent_id}" for chunk in evidence
-                ]:
-                    reranked_any = True
-
-                reranked_pairs.append({
-                    'claim': pair['claim'],
-                    'evidence': reranked_evidence,
-                    'metadata': pair.get('metadata')
-                })
-
-            if reranked_any:
-                mitigation_actions.append('rerank')
-
-            resolved_pairs = reranked_pairs
-            claim_decisions = []
-            claim_signals = []
-            for pair in resolved_pairs:
-                claim = pair['claim']
-                evidence = pair['evidence']
-                metadata = pair.get('metadata') or default_generation_metadata
-                signal = self.verifier_hub.verify_claim(claim, evidence, metadata)
-                claim_signals.append(signal)
-                claim_decisions.append(self.aggregator.aggregate(signal))
-
-        if self.reprompter and self.reprompter.enabled and claim_decisions:
-            merged_evidence = []
-            if resolved_pairs:
-                merged_evidence = resolved_pairs[0].get('evidence', [])
-
-            reprompt_result = self.reprompter.reprompt(
-                query=question,
-                answer=generated_response,
-                decisions=claim_decisions,
-                evidence=merged_evidence,
-                claims=[pair['claim'] for pair in resolved_pairs]
-            )
-
-            if reprompt_result.get('improved', False):
-                mitigation_actions.append('reprompt')
-                generated_response = reprompt_result['final_answer']
-
-                corrected_claims = extract_claims(text=generated_response, method='auto')
-                resolved_pairs = []
-                for claim in corrected_claims:
-                    if not merged_evidence:
-                        continue
-                    resolved_pairs.append({
-                        'claim': claim,
-                        'evidence': merged_evidence,
-                        'metadata': default_generation_metadata
-                    })
-
-                claim_decisions = []
-                claim_signals = []
-                for pair in resolved_pairs:
-                    signal = self.verifier_hub.verify_claim(
-                        pair['claim'],
-                        pair['evidence'],
-                        pair['metadata']
-                    )
-                    claim_signals.append(signal)
-                    claim_decisions.append(self.aggregator.aggregate(signal))
-
         filtered_response = generated_response
         removed_count = 0
-        if self.claim_filter and self.claim_filter.enabled and claim_decisions:
-            filtered_response, removed_count = self.claim_filter.filter_answer(
+        if self.mitigation_orchestrator and self.mitigation_orchestrator.enabled and resolved_pairs:
+            mitigation_result = self.mitigation_orchestrator.apply(
+                query=question,
                 answer_text=generated_response,
-                claims=[pair['claim'] for pair in resolved_pairs],
-                decisions=claim_decisions
+                claim_records=resolved_pairs,
+                objective_override='ragtruth',
             )
-            if removed_count > 0:
-                mitigation_actions.append('filter')
+            mitigation_actions = mitigation_result.get('actions', [])
+            filtered_response = mitigation_result.get('final_answer', generated_response)
+            removed_count = mitigation_result.get('filtered_claim_count', 0)
+            resolved_pairs = mitigation_result.get('claim_records', resolved_pairs)
+            claim_decisions = mitigation_result.get('decisions', claim_decisions)
+            claim_signals = mitigation_result.get('signals', claim_signals)
         
         # Step 3: Compare with gold annotations
         gold_has_hallucination = len(hallucination_gold_labels) > 0
