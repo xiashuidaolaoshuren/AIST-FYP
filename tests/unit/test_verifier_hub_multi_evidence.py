@@ -317,3 +317,53 @@ def test_config_flag_aggregation_method(config_multi_max, config_multi_mean):
     
     assert hub_max.aggregation_method == 'max'
     assert hub_mean.aggregation_method == 'mean'
+
+
+def test_contradiction_first_fusion_preserves_max_contradiction():
+    """Contradiction-first fusion should keep strongest contradiction and select its chunk as primary."""
+    config = Config()
+    config.verification = type('obj', (object,), {
+        'enabled': True,
+        'verify_all_evidence': True,
+        'aggregation_method': 'max',
+        'contradiction_first_fusion': True,
+        'contradiction_priority_threshold': 0.5,
+        'contradiction_priority_margin': 0.0,
+        'modules': type('obj', (object,), {
+            'intrinsic': False,
+            'grounded': False,
+            'nli': False,
+            'self_agreement': False,
+        })(),
+        'intrinsic': type('obj', (object,), {
+            'strict_logits': False,
+            'epsilon': 1e-10,
+        })(),
+    })()
+
+    hub = VerifierHub(config)
+    per_chunk_signals = [
+        {
+            'doc_id': 'doc_1',
+            'sent_id': 1,
+            'coverage': {'entities': 0.8, 'numbers': 1.0, 'tokens_overlap': 0.8},
+            'uncertainty': {'mean_entropy': 0.9},
+            'citation_span_match': 0.8,
+            'numeric_check': True,
+            'nli': {'entailment': 0.70, 'neutral': 0.20, 'contradiction': 0.20},
+        },
+        {
+            'doc_id': 'doc_2',
+            'sent_id': 2,
+            'coverage': {'entities': 0.5, 'numbers': 0.0, 'tokens_overlap': 0.5},
+            'uncertainty': {'mean_entropy': 1.1},
+            'citation_span_match': 0.5,
+            'numeric_check': False,
+            'nli': {'entailment': 0.10, 'neutral': 0.10, 'contradiction': 0.85},
+        },
+    ]
+
+    aggregated, primary_idx = hub._aggregate_signals(per_chunk_signals)
+
+    assert primary_idx == 1
+    assert aggregated['nli']['contradiction'] == pytest.approx(0.85)

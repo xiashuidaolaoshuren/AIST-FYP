@@ -83,12 +83,32 @@ class VerifierHub:
         if hasattr(config, 'verification'):
             self.verify_all_evidence = getattr(config.verification, 'verify_all_evidence', False)
             self.aggregation_method = getattr(config.verification, 'aggregation_method', 'max')
+            self.contradiction_first_fusion = bool(
+                getattr(config.verification, 'contradiction_first_fusion', False)
+            )
+            agg_config = getattr(config.verification, 'aggregator', None)
+            default_contradiction_threshold = float(
+                getattr(agg_config, 'contradiction_threshold', 0.5)
+            )
+            self.contradiction_priority_threshold = float(
+                getattr(
+                    config.verification,
+                    'contradiction_priority_threshold',
+                    default_contradiction_threshold
+                )
+            )
+            self.contradiction_priority_margin = float(
+                getattr(config.verification, 'contradiction_priority_margin', 0.0)
+            )
             self.strict_logits = bool(
                 getattr(getattr(config.verification, 'intrinsic', None), 'strict_logits', False)
             )
         else:
             self.verify_all_evidence = False
             self.aggregation_method = 'max'
+            self.contradiction_first_fusion = False
+            self.contradiction_priority_threshold = 0.5
+            self.contradiction_priority_margin = 0.0
             self.strict_logits = False
 
         # Per-module enable flags (default: all enabled)
@@ -655,13 +675,36 @@ class VerifierHub:
         
         if self.aggregation_method == 'max':
             # Optimistic: best coverage, lowest uncertainty, highest entailment
-            # Track which chunk contributed the max entailment (primary evidence)
+            # Track primary evidence chunk (entailment-first by default,
+            # contradiction-first when explicitly enabled)
             if nli_available:
                 max_entailment = max(entailments)
-                primary_chunk_idx = entailments.index(max_entailment)
-                self.logger.debug(
-                    f"Primary evidence: chunk {primary_chunk_idx} with entailment={max_entailment:.3f}"
+                max_contradiction = max(contradictions)
+                entailment_chunk_idx = entailments.index(max_entailment)
+                contradiction_chunk_idx = contradictions.index(max_contradiction)
+
+                use_contradiction_primary = (
+                    self.contradiction_first_fusion
+                    and max_contradiction >= self.contradiction_priority_threshold
+                    and max_contradiction >= (max_entailment + self.contradiction_priority_margin)
                 )
+
+                primary_chunk_idx = (
+                    contradiction_chunk_idx
+                    if use_contradiction_primary
+                    else entailment_chunk_idx
+                )
+                if use_contradiction_primary:
+                    self.logger.debug(
+                        "Primary evidence switched to contradiction-first: "
+                        f"chunk {primary_chunk_idx} with contradiction={max_contradiction:.3f}, "
+                        f"entailment_max={max_entailment:.3f}"
+                    )
+                else:
+                    self.logger.debug(
+                        f"Primary evidence: chunk {primary_chunk_idx} "
+                        f"with entailment={max_entailment:.3f}"
+                    )
             
             result = {
                 'coverage': {
@@ -679,7 +722,11 @@ class VerifierHub:
                 result['nli'] = {
                     'entailment': max_entailment,  # Best entailment
                     'neutral': min(neutrals),  # Least neutral (most decisive)
-                    'contradiction': min(contradictions)  # Least contradiction
+                    'contradiction': (
+                        max_contradiction
+                        if self.contradiction_first_fusion
+                        else min(contradictions)
+                    )
                 }
             return result, primary_chunk_idx
         else:  # mean
