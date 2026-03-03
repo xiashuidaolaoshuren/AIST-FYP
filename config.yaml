@@ -51,7 +51,7 @@ data_strategy:
   
   # Production: Capped Wikipedia corpus
   production:
-    max_articles: 1500000
+    max_articles: 1000000
     name: "production"
     dump_date: null  # Optional YYYYMMDD to pin snapshot (overrides data.wikipedia_dump_date)
 
