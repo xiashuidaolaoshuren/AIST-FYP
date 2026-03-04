@@ -116,6 +116,9 @@ python scripts/generate_embeddings.py --strategy validation
 # Build FAISS index
 python scripts/build_faiss_index.py --strategy validation
 
+# Disable progress bar output (useful for CI/log-only runs)
+python scripts/build_faiss_index.py --strategy validation --no-progress
+
 # Resume interrupted FAISS build
 python scripts/build_faiss_index.py --strategy validation --resume
 

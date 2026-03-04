@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 import numpy as np
 import faiss
+from tqdm import tqdm
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -241,6 +242,11 @@ def main():
         default=None,
         help='GPU device ID for FAISS GPU index build (default: from config retrieval.faiss.gpu_id)'
     )
+    parser.add_argument(
+        '--no-progress',
+        action='store_true',
+        help='Disable tqdm progress bar during FAISS vector add phase'
+    )
     
     args = parser.parse_args()
     
@@ -411,7 +417,17 @@ def main():
         index.nprobe = args.nprobe
 
     logger.info("Adding vectors to FAISS index in batches...")
-    for i in range(start_idx, n_vectors, add_batch_size):
+    batch_iterator = range(start_idx, n_vectors, add_batch_size)
+    if not args.no_progress:
+        total_batches = (max(n_vectors - start_idx, 0) + add_batch_size - 1) // add_batch_size
+        batch_iterator = tqdm(
+            batch_iterator,
+            total=total_batches,
+            desc="FAISS add",
+            unit="batch",
+        )
+
+    for i in batch_iterator:
         batch_end = min(i + add_batch_size, n_vectors)
         batch_vectors = np.asarray(embeddings[i:batch_end], dtype=np.float32)
         index.add(batch_vectors)
@@ -432,6 +448,10 @@ def main():
 
             logger.info("Loading full chunk metadata for index serialization...")
             metadata = load_chunk_metadata(chunks_path)
+
+    if 'metadata' not in locals():
+        logger.info("Loading full chunk metadata for index serialization...")
+        metadata = load_chunk_metadata(chunks_path)
     
     # Save index and metadata
     logger.info(f"Saving index to {output_dir}")

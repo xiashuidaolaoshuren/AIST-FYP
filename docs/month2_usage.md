@@ -140,6 +140,9 @@ Create a FAISS index for efficient similarity search:
 ```bash
 # Build FAISS index using helper script
 python scripts/build_faiss_index.py --strategy development
+
+# Disable progress bar output (useful for CI/log-only runs)
+python scripts/build_faiss_index.py --strategy development --no-progress
 ```
 
 **Optional: Customize index type:**
