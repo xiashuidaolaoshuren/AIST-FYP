@@ -330,6 +330,14 @@ def main():
         sys.exit(1)
     
     logger.info(f"Data verified: {len(embeddings):,} vectors ready for indexing")
+    prep_progress = tqdm(
+        total=5,
+        desc="FAISS prep",
+        unit="stage",
+        disable=args.no_progress,
+    )
+    prep_progress.set_postfix_str("data consistency verified")
+    prep_progress.update(1)
     
     # Adjust parameters based on dataset size
     n_vectors = len(embeddings)
@@ -362,6 +370,8 @@ def main():
 
     use_gpu = config_use_gpu if args.use_gpu is None else args.use_gpu
     gpu_id = config_gpu_id if args.gpu_id is None else args.gpu_id
+    prep_progress.set_postfix_str("parameter/GPU resolution completed")
+    prep_progress.update(1)
 
     # Create FAISS index manager
     embedding_dim = embeddings.shape[1]
@@ -384,6 +394,8 @@ def main():
         'input_chunks': file_fingerprint(chunks_path),
         'n_vectors': int(n_vectors),
     }
+    prep_progress.set_postfix_str("manifest/setup prepared")
+    prep_progress.update(1)
 
     start_idx = 0
     index = None
@@ -434,6 +446,9 @@ def main():
         if use_gpu:
             index, gpu_resources = cpu_to_gpu_index(index, gpu_id, logger)
 
+    prep_progress.set_postfix_str("index prepared")
+    prep_progress.update(1)
+
     if adjusted_index_type == 'IVFFLAT' and hasattr(index, 'nprobe'):
         index.nprobe = args.nprobe
 
@@ -447,6 +462,10 @@ def main():
             desc="FAISS add",
             unit="batch",
         )
+
+    prep_progress.set_postfix_str("add-loop configured")
+    prep_progress.update(1)
+    prep_progress.close()
 
     for i in batch_iterator:
         batch_end = min(i + add_batch_size, n_vectors)
