@@ -46,31 +46,51 @@ def load_embeddings(embeddings_path: Path) -> np.ndarray:
     return embeddings
 
 
-def load_chunk_metadata(chunks_path: Path) -> list:
+def load_chunk_metadata(chunks_path: Path, no_progress: bool = False) -> list:
     """Load chunk metadata from .jsonl file."""
     logger = setup_logger(__name__)
     logger.info(f"Loading chunk metadata from {chunks_path}")
-    
+    total_size_bytes = chunks_path.stat().st_size
+
     metadata = []
     with open(chunks_path, 'r', encoding='utf-8') as f:
+        progress_bar = tqdm(
+            total=total_size_bytes,
+            unit='B',
+            unit_scale=True,
+            desc='Loading metadata',
+            disable=no_progress,
+        )
         for line in f:
+            progress_bar.update(len(line.encode('utf-8')))
             metadata.append(json.loads(line))
+        progress_bar.close()
     
     logger.info(f"Loaded {len(metadata):,} chunk metadata entries")
     
     return metadata
 
 
-def count_chunk_metadata(chunks_path: Path) -> int:
+def count_chunk_metadata(chunks_path: Path, no_progress: bool = False) -> int:
     """Count metadata rows in .jsonl file without loading all entries in RAM."""
     logger = setup_logger(__name__)
     logger.info(f"Counting chunk metadata rows in {chunks_path}")
+    total_size_bytes = chunks_path.stat().st_size
 
     count = 0
     with open(chunks_path, 'r', encoding='utf-8') as f:
+        progress_bar = tqdm(
+            total=total_size_bytes,
+            unit='B',
+            unit_scale=True,
+            desc='Counting metadata',
+            disable=no_progress,
+        )
         for line in f:
+            progress_bar.update(len(line.encode('utf-8')))
             if line.strip():
                 count += 1
+        progress_bar.close()
 
     logger.info(f"Counted {count:,} metadata rows")
     return count
@@ -300,7 +320,7 @@ def main():
     
     # Load data
     embeddings = load_embeddings(embeddings_path)
-    metadata_count = count_chunk_metadata(chunks_path)
+    metadata_count = count_chunk_metadata(chunks_path, no_progress=args.no_progress)
     
     # Verify data consistency
     if len(embeddings) != metadata_count:
@@ -452,7 +472,7 @@ def main():
     gc.collect()
 
     logger.info("Loading full chunk metadata for index serialization...")
-    metadata = load_chunk_metadata(chunks_path)
+    metadata = load_chunk_metadata(chunks_path, no_progress=args.no_progress)
     
     # Save index and metadata
     logger.info(f"Saving index to {output_dir}")

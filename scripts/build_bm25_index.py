@@ -41,12 +41,22 @@ def _tokens_from_doc(doc) -> List[str]:
     return [token.text.lower() for token in doc if not token.is_space]
 
 
-def _count_jsonl_rows(path: Path) -> int:
+def _count_jsonl_rows(path: Path, no_progress: bool = False) -> int:
+    total_size_bytes = path.stat().st_size
     count = 0
     with open(path, 'r', encoding='utf-8') as f:
+        progress_bar = tqdm(
+            total=total_size_bytes,
+            unit='B',
+            unit_scale=True,
+            desc='Counting corpus rows',
+            disable=no_progress,
+        )
         for line in f:
+            progress_bar.update(len(line.encode('utf-8')))
             if line.strip():
                 count += 1
+        progress_bar.close()
     return count
 
 
@@ -134,7 +144,7 @@ def build_index_for_strategy(
 
     # Build index with tokenization-progress checkpointing
     try:
-        total_chunks = _count_jsonl_rows(corpus_path)
+        total_chunks = _count_jsonl_rows(corpus_path, no_progress=no_progress)
         logger.info(f"Corpus size: {total_chunks:,} chunks")
         logger.info(
             f"Tokenization batches: text_batch={tokenize_batch_size}, "
@@ -223,7 +233,12 @@ def build_index_for_strategy(
             desc='Tokenizing',
             unit='chunk',
             disable=no_progress,
-        ) as progress_bar:
+        ) as progress_bar, tqdm(
+            total=total_chunks,
+            desc='Loading corpus',
+            unit='chunk',
+            disable=no_progress,
+        ) as loading_bar:
             with open(corpus_path, 'r', encoding='utf-8') as f:
                 chunk_idx = 0
                 for line in f:
@@ -232,6 +247,7 @@ def build_index_for_strategy(
 
                     chunk = json.loads(line)
                     chunks.append(chunk)
+                    loading_bar.update(1)
 
                     if chunk_idx < processed_count:
                         chunk_idx += 1
