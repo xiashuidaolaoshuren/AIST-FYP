@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import gc
 import json
 import sys
 from pathlib import Path
@@ -446,12 +447,12 @@ def main():
             )
             logger.info(f"Checkpoint saved at {batch_end:,}/{n_vectors:,} vectors")
 
-            logger.info("Loading full chunk metadata for index serialization...")
-            metadata = load_chunk_metadata(chunks_path)
+    test_query = np.asarray(embeddings[0:1], dtype=np.float32) if n_vectors > 0 else None
+    del embeddings
+    gc.collect()
 
-    if 'metadata' not in locals():
-        logger.info("Loading full chunk metadata for index serialization...")
-        metadata = load_chunk_metadata(chunks_path)
+    logger.info("Loading full chunk metadata for index serialization...")
+    metadata = load_chunk_metadata(chunks_path)
     
     # Save index and metadata
     logger.info(f"Saving index to {output_dir}")
@@ -469,18 +470,21 @@ def main():
     logger.info("\n" + "="*60)
     logger.info("Testing index with sample query...")
     logger.info("="*60)
+
+    if test_query is None:
+        logger.warning("No vectors in index; skipping sample search test")
+        distances, indices = [], []
+    else:
+        distances, indices = manager.search(index, test_query, top_k=5)
     
-    # Use first embedding as test query
-    test_query = embeddings[0:1]  # Shape (1, dimension)
-    distances, indices = manager.search(index, test_query, top_k=5)
-    
-    logger.info("\nTest query (first embedding in dataset):")
-    logger.info("Top 5 results:")
-    for i, (idx, score) in enumerate(zip(indices[0], distances[0]), 1):
-        chunk = metadata[idx]
-        logger.info(f"\n{i}. Score: {score:.4f}, Index: {idx}")
-        logger.info(f"   Doc ID: {chunk.get('doc_id', 'N/A')}")
-        logger.info(f"   Text: {chunk['text'][:100]}...")
+    if test_query is not None:
+        logger.info("\nTest query (first embedding in dataset):")
+        logger.info("Top 5 results:")
+        for i, (idx, score) in enumerate(zip(indices[0], distances[0]), 1):
+            chunk = metadata[idx]
+            logger.info(f"\n{i}. Score: {score:.4f}, Index: {idx}")
+            logger.info(f"   Doc ID: {chunk.get('doc_id', 'N/A')}")
+            logger.info(f"   Text: {chunk['text'][:100]}...")
     
     # Print summary statistics
     logger.info("\n" + "="*60)

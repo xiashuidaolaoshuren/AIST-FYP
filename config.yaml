@@ -105,6 +105,8 @@ retrieval:
   bm25:
     k1: 1.5  # Term frequency saturation parameter (standard: 1.2-2.0)
     b: 0.75  # Length normalization parameter (standard: 0.75)
+    tokenize_batch_size: 2048  # Buffered texts per tokenization flush (lower => less RAM)
+    spacy_pipe_batch_size: 256  # spaCy nlp.pipe batch size (lower => less RAM)
   
   # Hybrid Retrieval Configuration
   hybrid:

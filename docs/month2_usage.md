@@ -392,6 +392,11 @@ Confidence: 0.88
     use_fp16: true
   ```
 - Process in smaller batches with checkpointing
+- For large index builds, reduce build batch sizes:
+  ```bash
+  python scripts/build_faiss_index.py --strategy development --add-batch-size 10000
+  python scripts/build_bm25_index.py --strategy development --tokenize-batch-size 512 --spacy-pipe-batch-size 128
+  ```
 
 #### 2. Import Errors
 

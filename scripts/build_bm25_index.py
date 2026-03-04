@@ -41,6 +41,15 @@ def _tokens_from_doc(doc) -> List[str]:
     return [token.text.lower() for token in doc if not token.is_space]
 
 
+def _count_jsonl_rows(path: Path) -> int:
+    count = 0
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.strip():
+                count += 1
+    return count
+
+
 def build_index_for_strategy(
     strategy: str,
     config_path: str = 'config.yaml',
@@ -48,6 +57,9 @@ def build_index_for_strategy(
     reset_checkpoint: bool = False,
     checkpoint_dir_override: str = None,
     checkpoint_interval_override: int = None,
+    tokenize_batch_size_override: int = None,
+    spacy_pipe_batch_size_override: int = None,
+    no_progress: bool = False,
 ):
     """
     Build and cache BM25 index for a specific dataset strategy.
@@ -63,9 +75,16 @@ def build_index_for_strategy(
     checkpoint_enabled = config.get('checkpointing.bm25.enabled', True)
     strict_compatibility = config.get('checkpointing.strict_compatibility', True)
     checkpoint_interval = checkpoint_interval_override or config.get('checkpointing.bm25.checkpoint_interval', 5000)
+    tokenize_batch_size = tokenize_batch_size_override or config.get('retrieval.bm25.tokenize_batch_size', 2048)
+    spacy_pipe_batch_size = spacy_pipe_batch_size_override or config.get('retrieval.bm25.spacy_pipe_batch_size', 256)
     checkpoint_dir = Path(
         checkpoint_dir_override or config.get('checkpointing.bm25.checkpoint_dir', 'data/checkpoints/bm25/')
     )
+
+    if tokenize_batch_size <= 0:
+        raise ValueError('tokenize_batch_size must be > 0')
+    if spacy_pipe_batch_size <= 0:
+        raise ValueError('spacy_pipe_batch_size must be > 0')
     
     logger.info(f"Building BM25 index for strategy: {strategy}")
     
@@ -115,15 +134,16 @@ def build_index_for_strategy(
 
     # Build index with tokenization-progress checkpointing
     try:
-        chunks = []
-        with open(corpus_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                chunks.append(json.loads(line))
-
-        logger.info(f"Loaded {len(chunks):,} chunks from corpus")
+        total_chunks = _count_jsonl_rows(corpus_path)
+        logger.info(f"Corpus size: {total_chunks:,} chunks")
+        logger.info(
+            f"Tokenization batches: text_batch={tokenize_batch_size}, "
+            f"spacy_pipe_batch={spacy_pipe_batch_size}"
+        )
 
         processed_count = 0
         tokenized_corpus = []
+        chunks = []
 
         if checkpoint_enabled and resume and checkpoint_manifest.exists() != checkpoint_tokens.exists():
             raise ValueError(
@@ -160,37 +180,75 @@ def build_index_for_strategy(
                     f"tokenized_entries={len(tokenized_corpus)}"
                 )
 
-            logger.info(f"Resuming BM25 tokenization from {processed_count:,}/{len(chunks):,}")
+            logger.info(f"Resuming BM25 tokenization from {processed_count:,}/{total_chunks:,}")
 
-        remaining_texts = [chunk['text'] for chunk in chunks[processed_count:]]
+        if processed_count > total_chunks:
+            raise ValueError(
+                f"Invalid BM25 checkpoint: processed_count={processed_count} exceeds corpus rows={total_chunks}"
+            )
 
-        for offset, doc in enumerate(
-            tqdm(
-                nlp.pipe(remaining_texts, batch_size=256),
-                total=len(remaining_texts),
-                desc='Tokenizing',
-                unit='chunk',
-            ),
-            start=1,
-        ):
-            tokenized_corpus.append(_tokens_from_doc(doc))
-            processed_count += 1
+        pending_texts = []
 
-            if checkpoint_enabled and checkpoint_interval > 0 and (
-                processed_count % checkpoint_interval == 0 or processed_count == len(chunks)
-            ):
-                save_manifest(
-                    checkpoint_manifest,
-                    {
-                        **expected_manifest,
-                        'processed_count': processed_count,
-                    }
-                )
+        def flush_pending_texts(progress_bar):
+            nonlocal processed_count
+            if not pending_texts:
+                return
 
-                with open(checkpoint_tokens, 'wb') as f:
-                    pickle.dump({'tokenized_corpus': tokenized_corpus}, f)
+            for doc in nlp.pipe(pending_texts, batch_size=spacy_pipe_batch_size):
+                tokenized_corpus.append(_tokens_from_doc(doc))
+                processed_count += 1
+                progress_bar.update(1)
 
-                logger.info(f"Checkpoint saved at {processed_count:,}/{len(chunks):,} chunks")
+                if checkpoint_enabled and checkpoint_interval > 0 and (
+                    processed_count % checkpoint_interval == 0 or processed_count == total_chunks
+                ):
+                    save_manifest(
+                        checkpoint_manifest,
+                        {
+                            **expected_manifest,
+                            'processed_count': processed_count,
+                        }
+                    )
+
+                    with open(checkpoint_tokens, 'wb') as f:
+                        pickle.dump({'tokenized_corpus': tokenized_corpus}, f)
+
+                    logger.info(f"Checkpoint saved at {processed_count:,}/{total_chunks:,} chunks")
+
+            pending_texts.clear()
+
+        remaining_chunks = total_chunks - processed_count
+        with tqdm(
+            total=remaining_chunks,
+            desc='Tokenizing',
+            unit='chunk',
+            disable=no_progress,
+        ) as progress_bar:
+            with open(corpus_path, 'r', encoding='utf-8') as f:
+                chunk_idx = 0
+                for line in f:
+                    if not line.strip():
+                        continue
+
+                    chunk = json.loads(line)
+                    chunks.append(chunk)
+
+                    if chunk_idx < processed_count:
+                        chunk_idx += 1
+                        continue
+
+                    pending_texts.append(chunk['text'])
+                    if len(pending_texts) >= tokenize_batch_size:
+                        flush_pending_texts(progress_bar)
+
+                    chunk_idx += 1
+
+            flush_pending_texts(progress_bar)
+
+        if len(tokenized_corpus) != len(chunks):
+            raise ValueError(
+                f"Tokenized corpus length ({len(tokenized_corpus)}) does not match chunk count ({len(chunks)})"
+            )
 
         logger.info("Building BM25 index from tokenized corpus...")
         bm25 = BM25Okapi(tokenized_corpus, k1=k1, b=b)
@@ -275,6 +333,23 @@ def main():
         default=None,
         help='Save checkpoint every N tokenized chunks (default: from config)'
     )
+    parser.add_argument(
+        '--tokenize-batch-size',
+        type=int,
+        default=None,
+        help='Number of texts buffered before calling spaCy pipe (default: from config retrieval.bm25.tokenize_batch_size)'
+    )
+    parser.add_argument(
+        '--spacy-pipe-batch-size',
+        type=int,
+        default=None,
+        help='spaCy nlp.pipe batch size (default: from config retrieval.bm25.spacy_pipe_batch_size)'
+    )
+    parser.add_argument(
+        '--no-progress',
+        action='store_true',
+        help='Disable tqdm progress bar during BM25 tokenization'
+    )
     
     args = parser.parse_args()
     
@@ -307,6 +382,9 @@ def main():
                 reset_checkpoint=args.reset_checkpoint,
                 checkpoint_dir_override=args.checkpoint_dir,
                 checkpoint_interval_override=args.checkpoint_interval,
+                tokenize_batch_size_override=args.tokenize_batch_size,
+                spacy_pipe_batch_size_override=args.spacy_pipe_batch_size,
+                no_progress=args.no_progress,
             )
             if success:
                 success_count += 1
@@ -324,6 +402,9 @@ def main():
             reset_checkpoint=args.reset_checkpoint,
             checkpoint_dir_override=args.checkpoint_dir,
             checkpoint_interval_override=args.checkpoint_interval,
+            tokenize_batch_size_override=args.tokenize_batch_size,
+            spacy_pipe_batch_size_override=args.spacy_pipe_batch_size,
+            no_progress=args.no_progress,
         )
         if not success:
             sys.exit(1)

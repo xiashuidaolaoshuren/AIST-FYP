@@ -131,6 +131,9 @@ Build and cache the BM25 index for faster loading during hybrid retrieval.
 ```bash
 python scripts/build_bm25_index.py --strategy validation
 
+# Lower memory usage for large corpora
+python scripts/build_bm25_index.py --strategy validation --tokenize-batch-size 512 --spacy-pipe-batch-size 128
+
 # Resume interrupted BM25 tokenization/build
 python scripts/build_bm25_index.py --strategy validation --resume
 
