@@ -6,6 +6,8 @@ and file fingerprint utilities used by chunking and index-building scripts.
 """
 
 import json
+import os
+import pickle
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
@@ -30,8 +32,23 @@ def save_manifest(manifest_path: Path, data: Dict[str, Any]) -> None:
 
     with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
 
     tmp_path.replace(manifest_path)
+
+
+def write_pickle_atomic(file_path: Path, data: Any) -> None:
+    """Atomically write pickle data with fsync durability."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = file_path.with_suffix(file_path.suffix + '.tmp')
+
+    with open(tmp_path, 'wb') as f:
+        pickle.dump(data, f)
+        f.flush()
+        os.fsync(f.fileno())
+
+    tmp_path.replace(file_path)
 
 
 def load_manifest(manifest_path: Path) -> Dict[str, Any]:

@@ -38,6 +38,7 @@ def _base_args(**overrides):
         "wandb_project": None,
         "tokenizer": baseline.DEFAULT_MODEL_PATH,
         "output_file": "./prediction.jsonl",
+        "metrics_file": "./baseline_eval_metrics.json",
         "run_evaluate": False,
         "container_name": "baseline",
         "model_subdir": "baseline",
@@ -151,6 +152,7 @@ def test_command_evaluate_builds_expected_command(monkeypatch, tmp_path: Path):
         model_name="m1",
         tokenizer="tok",
         output_file="./pred.jsonl",
+        metrics_file="./metrics.json",
         dry_run=True,
     )
     captured = {}
@@ -173,6 +175,8 @@ def test_command_evaluate_builds_expected_command(monkeypatch, tmp_path: Path):
         "./test.jsonl",
         "--output_file",
         "./pred.jsonl",
+        "--metrics_output",
+        "./metrics.json",
         "--model_name",
         "m1",
         "--tokenizer",

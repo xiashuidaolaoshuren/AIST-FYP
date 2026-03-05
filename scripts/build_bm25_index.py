@@ -34,6 +34,7 @@ from src.utils.checkpoint_utils import (
     file_fingerprint,
     load_manifest,
     save_manifest,
+    write_pickle_atomic,
 )
 
 
@@ -142,6 +143,9 @@ def build_index_for_strategy(
         'spacy_model': spacy_model,
     }
 
+    processed_count = 0
+    tokenized_corpus = []
+
     # Build index with tokenization-progress checkpointing
     try:
         total_chunks = _count_jsonl_rows(corpus_path, no_progress=no_progress)
@@ -151,8 +155,6 @@ def build_index_for_strategy(
             f"spacy_pipe_batch={spacy_pipe_batch_size}"
         )
 
-        processed_count = 0
-        tokenized_corpus = []
         chunks = []
 
         if checkpoint_enabled and resume and checkpoint_manifest.exists() != checkpoint_tokens.exists():
@@ -219,9 +221,10 @@ def build_index_for_strategy(
                             'processed_count': processed_count,
                         }
                     )
-
-                    with open(checkpoint_tokens, 'wb') as f:
-                        pickle.dump({'tokenized_corpus': tokenized_corpus}, f)
+                    write_pickle_atomic(
+                        checkpoint_tokens,
+                        {'tokenized_corpus': tokenized_corpus},
+                    )
 
                     logger.info(f"Checkpoint saved at {processed_count:,}/{total_chunks:,} chunks")
 
@@ -293,6 +296,24 @@ def build_index_for_strategy(
         logger.info(f"Successfully built and cached BM25 index for {strategy}")
         logger.info(f"Index contains {len(chunks)} chunks")
         return True
+    except KeyboardInterrupt:
+        logger.warning("BM25 build interrupted by user; attempting to persist latest checkpoint...")
+        if checkpoint_enabled:
+            write_pickle_atomic(
+                checkpoint_tokens,
+                {'tokenized_corpus': tokenized_corpus},
+            )
+            save_manifest(
+                checkpoint_manifest,
+                {
+                    **expected_manifest,
+                    'processed_count': int(processed_count),
+                },
+            )
+            logger.warning(
+                "Saved interrupt-safe BM25 checkpoint. Resume with --resume or reset with --reset-checkpoint."
+            )
+        raise
         
     except Exception as e:
         logger.error(f"Failed to build BM25 index: {e}")

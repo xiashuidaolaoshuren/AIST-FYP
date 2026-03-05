@@ -209,6 +209,8 @@ def command_evaluate(args: argparse.Namespace) -> int:
         "./test.jsonl",
         "--output_file",
         args.output_file,
+        "--metrics_output",
+        args.metrics_file,
         "--model_name",
         args.model_name,
         "--tokenizer",
@@ -284,6 +286,7 @@ def main() -> int:
     eval_parser.add_argument("--model-name", default="baseline")
     eval_parser.add_argument("--tokenizer", default=DEFAULT_MODEL_PATH)
     eval_parser.add_argument("--output-file", default="./prediction.jsonl")
+    eval_parser.add_argument("--metrics-file", default="./baseline_eval_metrics.json")
     eval_parser.set_defaults(func=command_evaluate)
 
     serve_parser = subparsers.add_parser("serve-cmd", help="Print recommended TGI docker command")
@@ -317,6 +320,7 @@ def main() -> int:
     all_parser.add_argument("--run-evaluate", action="store_true")
     all_parser.add_argument("--tokenizer", default=DEFAULT_MODEL_PATH)
     all_parser.add_argument("--output-file", default="./prediction.jsonl")
+    all_parser.add_argument("--metrics-file", default="./baseline_eval_metrics.json")
     all_parser.set_defaults(func=command_all)
 
     args = parser.parse_args()

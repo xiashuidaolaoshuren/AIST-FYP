@@ -178,6 +178,29 @@ def build_checkpoint_paths(checkpoint_dir: Path, strategy: str):
     return manifest_path, partial_index_path
 
 
+def commit_faiss_checkpoint(
+    index: faiss.Index,
+    partial_index_path: Path,
+    manifest_path: Path,
+    expected_manifest: dict,
+    added_count: int,
+    logger,
+):
+    """Write FAISS checkpoint data first, then manifest as commit marker."""
+    checkpoint_index = to_cpu_index(index)
+    tmp_index_path = partial_index_path.with_suffix(partial_index_path.suffix + '.tmp')
+    faiss.write_index(checkpoint_index, str(tmp_index_path))
+    tmp_index_path.replace(partial_index_path)
+    save_manifest(
+        manifest_path,
+        {
+            **expected_manifest,
+            'added_count': int(added_count),
+        },
+    )
+    logger.info(f"Checkpoint saved at {added_count:,}/{expected_manifest['n_vectors']:,} vectors")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Build FAISS index from embeddings')
     parser.add_argument(
@@ -467,24 +490,39 @@ def main():
     prep_progress.update(1)
     prep_progress.close()
 
-    for i in batch_iterator:
-        batch_end = min(i + add_batch_size, n_vectors)
-        batch_vectors = np.asarray(embeddings[i:batch_end], dtype=np.float32)
-        index.add(batch_vectors)
+    try:
+        for i in batch_iterator:
+            batch_end = min(i + add_batch_size, n_vectors)
+            batch_vectors = np.asarray(embeddings[i:batch_end], dtype=np.float32)
+            index.add(batch_vectors)
 
-        if checkpoint_enabled and checkpoint_interval > 0 and (
-            batch_end % checkpoint_interval == 0 or batch_end == n_vectors
-        ):
-            checkpoint_index = to_cpu_index(index)
-            faiss.write_index(checkpoint_index, str(partial_index_path))
-            save_manifest(
-                manifest_path,
-                {
-                    **expected_manifest,
-                    'added_count': int(batch_end),
-                }
+            if checkpoint_enabled and checkpoint_interval > 0 and (
+                batch_end % checkpoint_interval == 0 or batch_end == n_vectors
+            ):
+                commit_faiss_checkpoint(
+                    index=index,
+                    partial_index_path=partial_index_path,
+                    manifest_path=manifest_path,
+                    expected_manifest=expected_manifest,
+                    added_count=batch_end,
+                    logger=logger,
+                )
+    except KeyboardInterrupt:
+        logger.warning("FAISS build interrupted by user; attempting to persist latest checkpoint...")
+        if checkpoint_enabled:
+            committed_count = int(index.ntotal)
+            commit_faiss_checkpoint(
+                index=index,
+                partial_index_path=partial_index_path,
+                manifest_path=manifest_path,
+                expected_manifest=expected_manifest,
+                added_count=committed_count,
+                logger=logger,
             )
-            logger.info(f"Checkpoint saved at {batch_end:,}/{n_vectors:,} vectors")
+            logger.warning(
+                "Saved interrupt-safe FAISS checkpoint. Resume with --resume or reset with --reset-checkpoint."
+            )
+        raise
 
     test_query = np.asarray(embeddings[0:1], dtype=np.float32) if n_vectors > 0 else None
     del embeddings
