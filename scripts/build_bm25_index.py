@@ -61,6 +61,30 @@ def _count_jsonl_rows(path: Path, no_progress: bool = False) -> int:
     return count
 
 
+def commit_bm25_checkpoint(
+    checkpoint_tokens: Path,
+    checkpoint_manifest: Path,
+    expected_manifest: dict,
+    tokenized_corpus: list,
+    processed_count: int,
+    total_chunks: int,
+    logger,
+):
+    """Persist token data first, then manifest as commit marker."""
+    write_pickle_atomic(
+        checkpoint_tokens,
+        {'tokenized_corpus': tokenized_corpus},
+    )
+    save_manifest(
+        checkpoint_manifest,
+        {
+            **expected_manifest,
+            'processed_count': int(processed_count),
+        }
+    )
+    logger.info(f"Checkpoint saved at {processed_count:,}/{total_chunks:,} chunks")
+
+
 def build_index_for_strategy(
     strategy: str,
     config_path: str = 'config.yaml',
@@ -187,10 +211,21 @@ def build_index_for_strategy(
             processed_count = int(manifest.get('processed_count', len(tokenized_corpus)))
 
             if processed_count != len(tokenized_corpus):
-                raise ValueError(
-                    f"BM25 checkpoint mismatch: processed_count={processed_count}, "
-                    f"tokenized_entries={len(tokenized_corpus)}"
-                )
+                if processed_count > len(tokenized_corpus):
+                    logger.warning(
+                        "BM25 checkpoint mismatch detected: processed_count=%s, tokenized_entries=%s. "
+                        "Recovering by resuming from tokenized_entries.",
+                        f"{processed_count:,}",
+                        f"{len(tokenized_corpus):,}",
+                    )
+                else:
+                    logger.warning(
+                        "BM25 checkpoint mismatch detected: processed_count=%s, tokenized_entries=%s. "
+                        "Recovering by advancing to tokenized_entries.",
+                        f"{processed_count:,}",
+                        f"{len(tokenized_corpus):,}",
+                    )
+                processed_count = len(tokenized_corpus)
 
             logger.info(f"Resuming BM25 tokenization from {processed_count:,}/{total_chunks:,}")
 
@@ -214,19 +249,15 @@ def build_index_for_strategy(
                 if checkpoint_enabled and checkpoint_interval > 0 and (
                     processed_count % checkpoint_interval == 0 or processed_count == total_chunks
                 ):
-                    save_manifest(
-                        checkpoint_manifest,
-                        {
-                            **expected_manifest,
-                            'processed_count': processed_count,
-                        }
+                    commit_bm25_checkpoint(
+                        checkpoint_tokens=checkpoint_tokens,
+                        checkpoint_manifest=checkpoint_manifest,
+                        expected_manifest=expected_manifest,
+                        tokenized_corpus=tokenized_corpus,
+                        processed_count=processed_count,
+                        total_chunks=total_chunks,
+                        logger=logger,
                     )
-                    write_pickle_atomic(
-                        checkpoint_tokens,
-                        {'tokenized_corpus': tokenized_corpus},
-                    )
-
-                    logger.info(f"Checkpoint saved at {processed_count:,}/{total_chunks:,} chunks")
 
             pending_texts.clear()
 
@@ -299,16 +330,14 @@ def build_index_for_strategy(
     except KeyboardInterrupt:
         logger.warning("BM25 build interrupted by user; attempting to persist latest checkpoint...")
         if checkpoint_enabled:
-            write_pickle_atomic(
-                checkpoint_tokens,
-                {'tokenized_corpus': tokenized_corpus},
-            )
-            save_manifest(
-                checkpoint_manifest,
-                {
-                    **expected_manifest,
-                    'processed_count': int(processed_count),
-                },
+            commit_bm25_checkpoint(
+                checkpoint_tokens=checkpoint_tokens,
+                checkpoint_manifest=checkpoint_manifest,
+                expected_manifest=expected_manifest,
+                tokenized_corpus=tokenized_corpus,
+                processed_count=int(processed_count),
+                total_chunks=total_chunks,
+                logger=logger,
             )
             logger.warning(
                 "Saved interrupt-safe BM25 checkpoint. Resume with --resume or reset with --reset-checkpoint."
