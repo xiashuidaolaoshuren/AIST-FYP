@@ -449,9 +449,23 @@ def main():
         start_idx = int(manifest.get('added_count', 0))
 
         if index.ntotal != start_idx:
-            raise ValueError(
-                f"Checkpoint mismatch: index.ntotal={index.ntotal}, added_count={start_idx}"
-            )
+            # On network-backed filesystems (e.g., Colab Google Drive mount),
+            # the manifest can be persisted before the large FAISS index file.
+            # Recover by trusting the actual index size when manifest is ahead.
+            if index.ntotal < start_idx:
+                logger.warning(
+                    "Checkpoint mismatch detected: index.ntotal=%s, added_count=%s. "
+                    "Recovering by resuming from index.ntotal to avoid data loss.",
+                    f"{index.ntotal:,}",
+                    f"{start_idx:,}",
+                )
+                start_idx = int(index.ntotal)
+            else:
+                raise ValueError(
+                    "Checkpoint mismatch: index contains more vectors than manifest "
+                    f"(index.ntotal={index.ntotal}, added_count={start_idx}). "
+                    "Use --reset-checkpoint to rebuild."
+                )
 
         logger.info(f"Resumed FAISS build from checkpoint at {start_idx:,}/{n_vectors:,} vectors")
 
