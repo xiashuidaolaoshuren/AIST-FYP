@@ -85,8 +85,12 @@ def main():
         '--ragtruth-eval-mode',
         type=str,
         default='ragtruth_eval',
-        choices=['ragtruth_eval', 'normal'],
-        help='Evaluation mode: ragtruth_eval uses dataset responses; normal uses pipeline responses'
+        choices=['ragtruth_eval', 'normal', 'gold_context_generation'],
+        help=(
+            'Evaluation mode: ragtruth_eval uses benchmark responses; '
+            'normal uses pipeline responses with local retrieval; '
+            'gold_context_generation generates responses from benchmark gold contexts'
+        )
     )
     
     args = parser.parse_args()

@@ -7,7 +7,7 @@ This script automates a fair comparison by:
 3. Saving per-variant metrics and a delta summary report
 
 Usage examples:
-    # Quick paired check (baseline vs full pipeline)
+    # Quick paired check (baseline vs full pipeline) in gold-context generation mode
     python scripts/evaluate_mitigation_strategy.py --max-samples 30
 
     # Full independent module matrix
@@ -254,6 +254,7 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
     metrics = payload.get("metrics", {})
     overall = metrics.get("overall", {})
     confusion = metrics.get("confusion_matrix", {})
+    statistics = metrics.get("statistics", {})
 
     return {
         "accuracy": float(overall.get("accuracy", 0.0)),
@@ -265,11 +266,25 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "tn": int(confusion.get("true_negatives", 0)),
         "fp": int(confusion.get("false_positives", 0)),
         "fn": int(confusion.get("false_negatives", 0)),
+        "sample_hallucinations": int(statistics.get("detected_hallucinations", 0)),
+        "claim_hallucinations": int(statistics.get("detected_claim_hallucinations", 0)),
+        "total_claims": int(statistics.get("total_claims", 0)),
+        "avg_claim_hallucinations_per_sample": float(statistics.get("avg_claim_hallucinations_per_sample", 0.0)),
     }
 
 
 def _delta(base: float, current: float) -> float:
     return current - base
+
+
+def _drop_abs(base: int, current: int) -> int:
+    return base - current
+
+
+def _drop_pct(base: int, current: int) -> float | None:
+    if base <= 0:
+        return None
+    return ((base - current) / base) * 100.0
 
 
 def _write_summary(
@@ -301,6 +316,28 @@ def _write_summary(
 
     lines.extend([
         "",
+        "## Hallucination Reduction vs Baseline",
+        "",
+        "| Variant | Hallucinated Samples | Sample Drop (Abs) | Sample Drop (%) | Hallucinated Claims | Claim Drop (Abs) | Claim Drop (%) | Avg Claim Hallucinations / Sample |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+
+    for name, metric in variant_metrics.items():
+        sample_drop_abs = _drop_abs(baseline['sample_hallucinations'], metric['sample_hallucinations'])
+        claim_drop_abs = _drop_abs(baseline['claim_hallucinations'], metric['claim_hallucinations'])
+        sample_drop_pct = _drop_pct(baseline['sample_hallucinations'], metric['sample_hallucinations'])
+        claim_drop_pct = _drop_pct(baseline['claim_hallucinations'], metric['claim_hallucinations'])
+        sample_drop_pct_display = "N/A" if sample_drop_pct is None else f"{sample_drop_pct:+.2f}%"
+        claim_drop_pct_display = "N/A" if claim_drop_pct is None else f"{claim_drop_pct:+.2f}%"
+        lines.append(
+            "| "
+            f"{name} | {metric['sample_hallucinations']} | {sample_drop_abs:+d} | {sample_drop_pct_display} | "
+            f"{metric['claim_hallucinations']} | {claim_drop_abs:+d} | {claim_drop_pct_display} | "
+            f"{metric['avg_claim_hallucinations_per_sample']:.4f} |"
+        )
+
+    lines.extend([
+        "",
         "## Confusion Matrix Counts",
         "",
         "| Variant | TP | TN | FP | FN |",
@@ -328,9 +365,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ragtruth-eval-mode",
         type=str,
-        default="ragtruth_eval",
-        choices=["ragtruth_eval", "normal"],
-        help="ragtruth_eval uses benchmark responses; normal uses pipeline generation"
+        default="gold_context_generation",
+        choices=["ragtruth_eval", "normal", "gold_context_generation"],
+        help=(
+            "ragtruth_eval uses benchmark responses; "
+            "normal uses pipeline generation with local retrieval; "
+            "gold_context_generation uses benchmark contexts for generation"
+        )
     )
     parser.add_argument(
         "--variants",
@@ -424,9 +465,35 @@ def main() -> int:
             "strategy": args.strategy,
             "ragtruth_eval_mode": args.ragtruth_eval_mode,
             "variants": args.variants,
+            "hallucination_drop_definition": {
+                "sample": "baseline_detected_hallucinated_samples - variant_detected_hallucinated_samples",
+                "claim": "baseline_detected_contradictory_claims - variant_detected_contradictory_claims",
+                "percent": "(drop_abs / baseline_count) * 100, or null when baseline_count == 0"
+            }
         },
         "metrics": variant_metrics,
+        "deltas_vs_baseline": {},
     }
+
+    baseline_metrics = variant_metrics["baseline"]
+    for variant_name, metric in variant_metrics.items():
+        summary_payload["deltas_vs_baseline"][variant_name] = {
+            "f1_delta": _delta(baseline_metrics["f1"], metric["f1"]),
+            "recall_delta": _delta(baseline_metrics["recall"], metric["recall"]),
+            "precision_delta": _delta(baseline_metrics["precision"], metric["precision"]),
+            "sample_hallucination_drop_abs": _drop_abs(
+                baseline_metrics["sample_hallucinations"], metric["sample_hallucinations"]
+            ),
+            "sample_hallucination_drop_pct": _drop_pct(
+                baseline_metrics["sample_hallucinations"], metric["sample_hallucinations"]
+            ),
+            "claim_hallucination_drop_abs": _drop_abs(
+                baseline_metrics["claim_hallucinations"], metric["claim_hallucinations"]
+            ),
+            "claim_hallucination_drop_pct": _drop_pct(
+                baseline_metrics["claim_hallucinations"], metric["claim_hallucinations"]
+            ),
+        }
 
     summary_json = output_dir / "summary.json"
     summary_json.write_text(json.dumps(summary_payload, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -173,11 +173,13 @@ class RAGTruthEvaluator:
         else:
             self.ragtruth_eval_mode = 'ragtruth_eval'
 
-        if self.ragtruth_eval_mode not in {'ragtruth_eval', 'normal'}:
+        valid_modes = {'ragtruth_eval', 'normal', 'gold_context_generation'}
+        if self.ragtruth_eval_mode not in valid_modes:
             self.logger.warning(
-                "Invalid ragtruth_eval_mode '%s' (expected 'ragtruth_eval' or 'normal'); "
+                "Invalid ragtruth_eval_mode '%s' (expected one of %s); "
                 "defaulting to 'ragtruth_eval'",
-                self.ragtruth_eval_mode
+                self.ragtruth_eval_mode,
+                sorted(valid_modes)
             )
             self.ragtruth_eval_mode = 'ragtruth_eval'
 
@@ -517,8 +519,12 @@ class RAGTruthEvaluator:
         
         resolved_pairs = []
         generated_response = None
+        context_source = 'rag_db'
+        evaluation_track = 'mitigation'
 
         if self.ragtruth_eval_mode == 'ragtruth_eval':
+            context_source = 'gold_context'
+            evaluation_track = 'verifier'
             generated_response = sample.get('gold_response', '')
             evidence_chunks = self._build_evidence_from_contexts(sample.get('contexts', []))
             claims = extract_claims(
@@ -565,12 +571,17 @@ class RAGTruthEvaluator:
                     'metadata': metadata
                 })
         else:
-            # Step 1: Run RAG pipeline
-            # Note: RAGTruth contexts are gold passages, but we'll use retrieval for realism
-            rag_result = self.rag_pipeline.run(
-                query=question,
-                top_k=5  # Retrieve top 5 passages
-            )
+            if self.ragtruth_eval_mode == 'normal':
+                context_source = 'rag_db'
+                rag_result = self.rag_pipeline.run(
+                    query=question,
+                    top_k=5  # Retrieve top 5 passages
+                )
+            elif self.ragtruth_eval_mode == 'gold_context_generation':
+                context_source = 'gold_context'
+                rag_result = self._run_gold_context_generation(sample)
+            else:
+                raise ValueError(f"Unsupported ragtruth_eval_mode: {self.ragtruth_eval_mode}")
             
             generated_response = rag_result['draft_response']
             claim_evidence_pairs = rag_result.get('claim_evidence_pairs', [])
@@ -726,6 +737,9 @@ class RAGTruthEvaluator:
             'question': question,
             'generated_response': generated_response,
             'response_after_mitigation': filtered_response,
+            'ragtruth_eval_mode': self.ragtruth_eval_mode,
+            'evaluation_track': evaluation_track,
+            'context_source': context_source,
             'num_claims': len(claim_decisions),
             'predictions': [d.status for d in claim_decisions],
             'gold_has_hallucination': gold_has_hallucination,
@@ -739,6 +753,126 @@ class RAGTruthEvaluator:
             'mitigation_actions': mitigation_actions,
             'filtered_claim_count': removed_count,
             'claim_results': claim_results
+        }
+
+    def _run_gold_context_generation(self, sample: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate a response using benchmark-provided gold contexts as evidence.
+
+        This path bypasses retrieval so mitigation quality can be evaluated
+        independently from local index coverage.
+        """
+        question = sample.get('question', '')
+        evidence_chunks = self._build_evidence_from_contexts(sample.get('contexts', []))
+        generator = getattr(self.rag_pipeline, 'generator', None)
+        if generator is None:
+            raise ValueError("RAG pipeline has no generator; cannot run gold_context_generation mode")
+
+        generation_params = {
+            'max_new_tokens': 256,
+            'temperature': 0.7,
+            'top_p': 0.9,
+            'do_sample': True,
+        }
+
+        pipeline_config = getattr(self.rag_pipeline, 'config', None)
+        if pipeline_config is not None:
+            generation_config = getattr(pipeline_config, 'generation', None)
+            if generation_config is not None:
+                generation_params = {
+                    'max_new_tokens': getattr(generation_config, 'max_new_tokens', 256),
+                    'temperature': getattr(generation_config, 'temperature', 0.7),
+                    'top_p': getattr(generation_config, 'top_p', 0.9),
+                    'do_sample': getattr(generation_config, 'do_sample', True),
+                }
+
+        split_enabled = True
+        processing_config = getattr(pipeline_config, 'processing', None)
+        query_split_config = getattr(processing_config, 'query_split', None) if processing_config is not None else None
+        if query_split_config is not None:
+            split_enabled = bool(getattr(query_split_config, 'enabled', True))
+
+        if split_enabled and hasattr(self.rag_pipeline, '_split_query_by_questions'):
+            sub_queries = self.rag_pipeline._split_query_by_questions(question)
+        else:
+            sub_queries = [{'text': question.strip() if question else '', 'sub_query_id': 0}]
+
+        if not sub_queries:
+            sub_queries = [{'text': question.strip() if question else '', 'sub_query_id': 0}]
+
+        if not evidence_chunks:
+            self.logger.warning(
+                "Sample %s has no gold contexts; generating without evidence.",
+                sample.get('id')
+            )
+
+        combined_response_parts: List[str] = []
+        all_claims = []
+        claims_by_sub_answer = []
+        sub_answer_metadata = []
+
+        for sub_query_data in sub_queries:
+            sub_query_text = sub_query_data.get('text', '')
+            sub_query_id = sub_query_data.get('sub_query_id', 0)
+
+            generation_output = generator.generate_with_metadata(
+                prompt=sub_query_text,
+                evidence_chunks=evidence_chunks,
+                **generation_params
+            )
+            generation_output['original_query'] = sub_query_text
+
+            generated_text = generation_output.get('text', '')
+            sub_claims = extract_claims(text=generated_text, method='auto')
+
+            char_start = len(' '.join(combined_response_parts) + (' ' if combined_response_parts else ''))
+            combined_response_parts.append(generated_text)
+            char_end = len(' '.join(combined_response_parts))
+
+            for claim in sub_claims:
+                original_span = claim.answer_char_span
+                claim.answer_char_span = [
+                    original_span[0] + char_start,
+                    original_span[1] + char_start,
+                ]
+
+            claims_by_sub_answer.append({
+                'sub_answer_id': sub_query_id,
+                'sub_text': generated_text,
+                'sub_query': sub_query_text,
+                'claims': sub_claims,
+            })
+            sub_answer_metadata.append({
+                'sub_answer_id': sub_query_id,
+                'char_span': [char_start, char_end],
+                'sub_query': sub_query_text,
+                'metadata': generation_output,
+            })
+            all_claims.extend(sub_claims)
+
+        combined_response = ' '.join(combined_response_parts)
+        claim_evidence_pairs = [
+            {
+                'claim': claim,
+                'evidence': evidence_chunks,
+            }
+            for claim in all_claims
+            if evidence_chunks
+        ]
+
+        return {
+            'query': question,
+            'draft_response': combined_response,
+            'sub_answers': [{'text': text} for text in combined_response_parts],
+            'claims_by_sub_answer': claims_by_sub_answer,
+            'claim_evidence_pairs': claim_evidence_pairs,
+            'generator_metadata': {
+                'sub_answer_metadata': sub_answer_metadata,
+            },
+            'retrieval_metadata': {
+                'context_source': 'gold_context',
+                'retrieved_count': len(evidence_chunks),
+            },
         }
 
     def _build_rerank_signal_map(
@@ -936,6 +1070,10 @@ class RAGTruthEvaluator:
         # Per-class metrics (tn, fp, fn, tp)
         tn, fp, fn, tp = cm.ravel()
         
+        total_claims = sum(int(r.get('num_claims', 0)) for r in results)
+        total_claim_hallucinations = sum(int(r.get('contradictory_count', 0)) for r in results)
+        total_low_confidence_claims = sum(int(r.get('low_confidence_count', 0)) for r in results)
+
         metrics = {
             'overall': {
                 'accuracy': float(accuracy),
@@ -956,7 +1094,19 @@ class RAGTruthEvaluator:
                 'detected_hallucinations': sum(y_pred_binary),
                 'correct_detections': int(tp),
                 'missed_hallucinations': int(fn),
-                'false_alarms': int(fp)
+                'false_alarms': int(fp),
+                'total_claims': int(total_claims),
+                'detected_claim_hallucinations': int(total_claim_hallucinations),
+                'detected_low_confidence_claims': int(total_low_confidence_claims),
+                'avg_claims_per_sample': float(total_claims / len(results)) if results else 0.0,
+                'avg_claim_hallucinations_per_sample': float(total_claim_hallucinations / len(results)) if results else 0.0
+            },
+            'definitions': {
+                'sample_hallucination': (
+                    'Sample is hallucinated when at least one Contradictory claim exists, '
+                    'or when low_confidence_ratio >= threshold and low_coverage_ratio >= threshold.'
+                ),
+                'claim_hallucination': 'Claim is counted as hallucinated when predicted status is Contradictory.'
             }
         }
         
@@ -982,7 +1132,8 @@ class RAGTruthEvaluator:
             'metadata': {
                 'evaluator': 'RAGTruthEvaluator',
                 'num_samples': len(results),
-                'benchmark': 'RAGTruth'
+                'benchmark': 'RAGTruth',
+                'ragtruth_eval_mode': self.ragtruth_eval_mode
             }
         }
         
