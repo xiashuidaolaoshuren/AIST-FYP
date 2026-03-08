@@ -35,9 +35,17 @@ project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 from src.citation.citation_formatter import CitationFormatter
+from src.generation.claim_extractor import extract_claims
 from src.pipelines.baseline_rag import BaselineRAGPipeline
 from src.utils.config import Config
 from src.utils.data_structures import Claim, EvidenceChunk
+
+
+ORACLE_DATASET_PRESETS = {
+    "asqa": "benchmark/CiteEval/data/dev/asqa_oracle.dev.jsonl",
+    "eli5": "benchmark/CiteEval/data/dev/eli5_oracle.dev.jsonl",
+    "msmarco": "benchmark/CiteEval/data/dev/msmarco_oracle.dev.jsonl",
+}
 
 
 @dataclass
@@ -243,21 +251,238 @@ def _build_runtime(config_path: Path, strategy: str) -> VariantRuntime:
     )
 
 
+def _resolve_oracle_source(project_root: Path, oracle_source: str | None, oracle_dataset: str) -> Path:
+    if oracle_source:
+        resolved = (project_root / oracle_source).resolve()
+    else:
+        resolved = (project_root / ORACLE_DATASET_PRESETS[oracle_dataset]).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"Oracle source not found: {resolved}")
+    return resolved
+
+
+def _load_oracle_rows(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for idx, line in enumerate(handle, start=1):
+            payload = line.strip()
+            if not payload:
+                continue
+            row = json.loads(payload)
+            if not isinstance(row, dict):
+                raise ValueError(f"Expected object on line {idx} in {path}")
+            rows.append(row)
+    if not rows:
+        raise ValueError(f"Expected non-empty JSONL oracle file at {path}")
+    return rows
+
+
+def _generation_params(runtime: VariantRuntime) -> dict[str, Any]:
+    return {
+        "max_new_tokens": getattr(runtime.config.generation, "max_new_tokens", 256),
+        "temperature": getattr(runtime.config.generation, "temperature", 0.7),
+        "top_p": getattr(runtime.config.generation, "top_p", 0.9),
+        "do_sample": getattr(runtime.config.generation, "do_sample", True),
+    }
+
+
+def _build_oracle_evidence_chunks(row: dict[str, Any]) -> list[EvidenceChunk]:
+    passages = row.get("passages", [])
+    chunks: list[EvidenceChunk] = []
+    for idx, passage in enumerate(passages):
+        if not isinstance(passage, dict):
+            continue
+        text = str(passage.get("text", "")).strip()
+        if not text:
+            continue
+        doc_id = str(passage.get("id", f"oracle_doc_{idx}"))
+        score_dense = passage.get("score", 1.0)
+        try:
+            score_dense = float(score_dense)
+        except (TypeError, ValueError):
+            score_dense = 1.0
+
+        chunks.append(
+            EvidenceChunk(
+                doc_id=doc_id,
+                sent_id=idx,
+                text=text,
+                char_start=0,
+                char_end=len(text),
+                score_dense=score_dense,
+                rank=idx,
+                source="oracle",
+                version="citebench_dev",
+            )
+        )
+    return chunks
+
+
+def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str, Any]) -> dict[str, Any]:
+    evidence_chunks = _build_oracle_evidence_chunks(row)
+    if not evidence_chunks:
+        raise ValueError("Oracle row has no usable passages")
+
+    split_enabled = bool(getattr(getattr(runtime.config.processing, "query_split", None), "enabled", True))
+    if split_enabled and hasattr(runtime.pipeline, "_split_query_by_questions"):
+        sub_queries = runtime.pipeline._split_query_by_questions(query)
+    else:
+        sub_queries = [{"text": query, "sub_query_id": 0}]
+
+    if not sub_queries:
+        sub_queries = [{"text": query, "sub_query_id": 0}]
+
+    combined_response_parts: list[str] = []
+    all_claims: list[Claim] = []
+    claims_by_sub_answer: list[dict[str, Any]] = []
+    sub_answer_metadata: list[dict[str, Any]] = []
+    generation_params = _generation_params(runtime)
+
+    for sub_query_data in sub_queries:
+        sub_query_text = str(sub_query_data.get("text", "")).strip()
+        sub_query_id = int(sub_query_data.get("sub_query_id", 0))
+
+        generation_output = runtime.pipeline.generator.generate_with_metadata(
+            prompt=sub_query_text,
+            evidence_chunks=evidence_chunks,
+            **generation_params,
+        )
+        generation_output["original_query"] = sub_query_text
+        generated_text = generation_output.get("text", "")
+
+        sub_claims = extract_claims(text=generated_text, method="auto")
+
+        char_start = len(" ".join(combined_response_parts) + (" " if combined_response_parts else ""))
+        combined_response_parts.append(generated_text)
+        char_end = len(" ".join(combined_response_parts))
+
+        for claim in sub_claims:
+            original_span = claim.answer_char_span
+            claim.answer_char_span = [
+                original_span[0] + char_start,
+                original_span[1] + char_start,
+            ]
+
+        claims_by_sub_answer.append(
+            {
+                "sub_answer_id": sub_query_id,
+                "sub_text": generated_text,
+                "sub_query": sub_query_text,
+                "claims": sub_claims,
+            }
+        )
+        sub_answer_metadata.append(
+            {
+                "sub_answer_id": sub_query_id,
+                "char_span": [char_start, char_end],
+                "sub_query": sub_query_text,
+                "metadata": generation_output,
+            }
+        )
+        all_claims.extend(sub_claims)
+
+    draft_response = " ".join(combined_response_parts)
+    mitigation_result = {
+        "final_answer": draft_response,
+        "actions": [],
+        "filtered_claim_count": 0,
+        "claim_records": [],
+    }
+
+    if runtime.pipeline.mitigation_orchestrator and runtime.pipeline.mitigation_orchestrator.enabled:
+        claim_records = []
+        for claim in all_claims:
+            verification_metadata = None
+            for entry in sub_answer_metadata:
+                span = entry["char_span"]
+                if claim.answer_char_span[0] >= span[0] and claim.answer_char_span[1] <= span[1]:
+                    verification_metadata = dict(entry["metadata"])
+                    verification_metadata.setdefault("original_query", entry["sub_query"])
+                    break
+            if verification_metadata is None:
+                verification_metadata = {
+                    "text": draft_response,
+                    "original_query": query,
+                    "tokens": [],
+                    "scores": [],
+                }
+            claim_records.append(
+                {
+                    "claim": claim,
+                    "evidence": evidence_chunks,
+                    "metadata": verification_metadata,
+                }
+            )
+
+        mitigation_result = runtime.pipeline.mitigation_orchestrator.apply(
+            query=query,
+            answer_text=draft_response,
+            claim_records=claim_records,
+        )
+
+    claim_evidence_pairs = [
+        {
+            "claim_id": claim.claim_id,
+            "evidence_spans": [chunk.to_dict() for chunk in evidence_chunks],
+        }
+        for claim in all_claims
+    ]
+
+    output = {
+        "query": query,
+        "draft_response": draft_response,
+        "response_after_mitigation": mitigation_result["final_answer"],
+        "mitigation_actions": mitigation_result["actions"],
+        "filtered_claim_count": mitigation_result["filtered_claim_count"],
+        "claims_by_sub_answer": claims_by_sub_answer,
+        "claim_evidence_pairs": claim_evidence_pairs,
+        "generator_metadata": {
+            "sub_answer_metadata": sub_answer_metadata,
+            "original_query": query,
+            "num_sub_questions": len(sub_queries),
+        },
+        "retrieval_metadata": {
+            "context_source": "oracle",
+            "num_retrieved": len(evidence_chunks),
+            "evidence_doc_ids": [chunk.doc_id for chunk in evidence_chunks[:10]],
+        },
+    }
+
+    if mitigation_result.get("claim_records"):
+        output["mitigation_claims"] = [record["claim"].to_dict() for record in mitigation_result["claim_records"]]
+        output["mitigation_evidence_map"] = {
+            record["claim"].claim_id: [chunk.to_dict() for chunk in record.get("evidence", [])]
+            for record in mitigation_result["claim_records"]
+        }
+
+    return output
+
+
 def _generate_system_input(
     *,
     runtime: VariantRuntime,
     source_queries: list[dict[str, Any]],
+    context_source: str,
     output_path: Path,
-) -> None:
+) -> dict[str, int]:
     records: list[dict[str, Any]] = []
+    skipped_missing_query = 0
+    skipped_missing_passages = 0
 
     for row in source_queries:
         sample_id = str(row.get("id", f"sample_{len(records) + 1}"))
         query = str(row.get("query", "")).strip()
         if not query:
+            skipped_missing_query += 1
             continue
 
-        pipeline_output = runtime.pipeline.run(query)
+        if context_source == "oracle":
+            if not row.get("passages"):
+                skipped_missing_passages += 1
+                continue
+            pipeline_output = _run_with_oracle_context(runtime, query, row)
+        else:
+            pipeline_output = runtime.pipeline.run(query)
         answer_text = (
             pipeline_output.get("response_after_mitigation", "")
             if runtime.mitigation_enabled
@@ -298,12 +523,19 @@ def _generate_system_input(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {
+        "total_rows": len(source_queries),
+        "generated_rows": len(records),
+        "skipped_missing_query": skipped_missing_query,
+        "skipped_missing_passages": skipped_missing_passages,
+    }
 
 
 def _run_system_eval(
     *,
     project_root: Path,
     system_input: Path,
+    context_source: str,
     provider: str,
     model_name: str,
     version: str,
@@ -314,10 +546,14 @@ def _run_system_eval(
     command = [
         sys.executable,
         "scripts/run_citebench_eval.py",
+        "--evaluation-role",
+        "mitigation",
         "--track",
         "system",
         "--system-input",
         str(system_input),
+        "--context-source",
+        context_source,
         "--provider",
         provider,
         "--model-name",
@@ -406,10 +642,20 @@ def _evaluate_system_summary(
     return _parse_evaluate_system_stdout(proc.stdout)
 
 
-def _write_summary(summary_path: Path, metrics: dict[str, dict[str, float]], baseline_name: str = "baseline") -> None:
+def _write_summary(
+    summary_path: Path,
+    metrics: dict[str, dict[str, float]],
+    *,
+    context_source: str,
+    baseline_name: str = "baseline",
+) -> None:
     baseline = metrics[baseline_name]
+    comparable = "yes" if context_source == "retrieval" else "no (diagnostic/oracle)"
     lines = [
         "# CiteBench Module Evaluation Summary",
+        "",
+        f"Context source: `{context_source}`",
+        f"Benchmark comparable: `{comparable}`",
         "",
         "| Variant | Statement Rating | Response Rating | Length | Density | ΔStatement vs Baseline | ΔResponse vs Baseline |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -428,8 +674,35 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run verifier/mitigation/full-pipeline CiteBench system evaluation variants and summarize deltas."
     )
     parser.add_argument("--config", type=str, default="config.yaml", help="Base config file path")
+    parser.add_argument(
+        "--dataset-role",
+        type=str,
+        default="mitigation",
+        choices=["mitigation"],
+        help="Dataset role for this script. Only mitigation role is supported here.",
+    )
     parser.add_argument("--strategy", type=str, default="validation", choices=["development", "validation", "production"])
     parser.add_argument("--system-source", type=str, default="benchmark/CiteEval/data/system_eval/system_eval_examples.json")
+    parser.add_argument(
+        "--context-source",
+        type=str,
+        default="retrieval",
+        choices=["retrieval", "oracle"],
+        help="Use retrieval pipeline input source or oracle dev passages as generation context",
+    )
+    parser.add_argument(
+        "--oracle-source",
+        type=str,
+        default=None,
+        help="Optional explicit oracle JSONL source path (overrides --oracle-dataset preset)",
+    )
+    parser.add_argument(
+        "--oracle-dataset",
+        type=str,
+        default="asqa",
+        choices=["asqa", "eli5", "msmarco"],
+        help="Oracle dataset preset when --context-source=oracle and --oracle-source is not set",
+    )
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of source queries for smoke testing")
     parser.add_argument(
         "--variants",
@@ -475,18 +748,23 @@ def main() -> int:
     if not base_config_path.exists():
         raise FileNotFoundError(f"Base config not found: {base_config_path}")
 
-    source_path = (project_root / args.system_source).resolve()
-    if not source_path.exists():
-        raise FileNotFoundError(f"System source not found: {source_path}")
+    if args.context_source == "oracle":
+        source_path = _resolve_oracle_source(project_root, args.oracle_source, args.oracle_dataset)
+        source_rows = _load_oracle_rows(source_path)
+    else:
+        source_path = (project_root / args.system_source).resolve()
+        if not source_path.exists():
+            raise FileNotFoundError(f"System source not found: {source_path}")
+        source_rows = json.loads(source_path.read_text(encoding="utf-8"))
+        if not isinstance(source_rows, list) or not source_rows:
+            raise ValueError(f"Expected non-empty list JSON at {source_path}")
 
-    source_rows = json.loads(source_path.read_text(encoding="utf-8"))
-    if not isinstance(source_rows, list) or not source_rows:
-        raise ValueError(f"Expected non-empty list JSON at {source_path}")
     if args.max_samples is not None:
         source_rows = source_rows[: args.max_samples]
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(args.output_dir) if args.output_dir else (project_root / "outputs" / "mitigation_eval_citebench" / timestamp)
+    root_output_dir = Path(args.output_dir) if args.output_dir else (project_root / "outputs" / "mitigation_eval_citebench" / timestamp)
+    output_dir = root_output_dir / args.context_source
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config_dir = output_dir / "configs"
@@ -494,6 +772,7 @@ def main() -> int:
 
     base_config = _load_yaml(base_config_path)
     summary_metrics: dict[str, dict[str, float]] = {}
+    generation_stats: dict[str, dict[str, int]] = {}
 
     citeeval_output_root = project_root / "benchmark" / "CiteEval" / "data" / "system_eval_outputs"
     citeeval_root = project_root / "benchmark" / "CiteEval"
@@ -507,15 +786,17 @@ def main() -> int:
         runtime = _build_runtime(variant_config_path, args.strategy)
 
         system_input_json = system_input_dir / f"system_eval_{variant}.json"
-        _generate_system_input(
+        generation_stats[variant] = _generate_system_input(
             runtime=runtime,
             source_queries=source_rows,
+            context_source=args.context_source,
             output_path=system_input_json,
         )
 
         _run_system_eval(
             project_root=project_root,
             system_input=system_input_json,
+            context_source=args.context_source,
             provider=args.provider,
             model_name=args.model_name,
             version=args.version,
@@ -543,6 +824,9 @@ def main() -> int:
     payload = {
         "metadata": {
             "timestamp": timestamp,
+            "dataset_role": args.dataset_role,
+            "context_source": args.context_source,
+            "baseline_comparable": args.context_source == "retrieval",
             "strategy": args.strategy,
             "system_source": str(source_path),
             "num_queries": len(source_rows),
@@ -555,13 +839,14 @@ def main() -> int:
             "variants": args.variants,
         },
         "metrics": summary_metrics,
+        "generation_stats": generation_stats,
     }
 
     summary_json = output_dir / "summary.json"
     summary_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     summary_md = output_dir / "summary.md"
-    _write_summary(summary_md, summary_metrics)
+    _write_summary(summary_md, summary_metrics, context_source=args.context_source)
 
     print("\nCiteBench mitigation evaluation completed.")
     print(f"Summary JSON: {summary_json}")

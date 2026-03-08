@@ -158,6 +158,24 @@ def _require_path(path: Path, description: str) -> None:
         raise FileNotFoundError(f"Missing {description}: {path}")
 
 
+def _resolve_track_from_role(evaluation_role: str | None, track: str) -> str:
+    role_to_track = {
+        "baseline": "metric",
+        "mitigation": "system",
+        "both": "both",
+    }
+    if not evaluation_role:
+        return track
+
+    expected_track = role_to_track[evaluation_role]
+    if track != "both" and track != expected_track:
+        raise ValueError(
+            f"--evaluation-role={evaluation_role} is incompatible with --track={track}. "
+            f"Use --track {expected_track} or omit --track."
+        )
+    return expected_track
+
+
 def preflight(paths: EvalPaths, track: str, metric_split: str, system_input: Path | None) -> None:
     _require_path(paths.citeeval_root, "CiteEval root")
     _require_path(paths.citeeval_src, "CiteEval src directory")
@@ -239,7 +257,6 @@ def run_metric_track(paths: EvalPaths, env: dict[str, str], args: argparse.Names
         step="metric.run_citeeval",
     )
 
-    ca_out = _module_output_file(paths.metric_output_root, metric_file, args.version, "ca", args.model_name)
     cr_iter_out = _module_output_file(paths.metric_output_root, metric_file, args.version, "cr_itercoe", args.model_name)
     cr_edit_out = _module_output_file(paths.metric_output_root, metric_file, args.version, "cr_editdist", args.model_name)
 
@@ -365,6 +382,12 @@ def run_system_track(paths: EvalPaths, env: dict[str, str], args: argparse.Names
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run CiteBench/CiteEval metric and system evaluation with preflight checks.")
+    parser.add_argument(
+        "--evaluation-role",
+        choices=["baseline", "mitigation", "both"],
+        default=None,
+        help="Role preset: baseline=metric track, mitigation=system track, both=runs both tracks",
+    )
     parser.add_argument("--track", choices=["metric", "system", "both"], default="both")
     parser.add_argument("--metric-split", choices=["dev", "test"], default="test")
     parser.add_argument(
@@ -377,6 +400,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", type=str, default="citeeval-auto-12272024")
     parser.add_argument("--provider", choices=["openai", "deepseek"], default=None, help="Override CITEEVAL_PROVIDER from environment")
     parser.add_argument("--model-name", type=str, default=None, help="LLM model. If omitted, defaults to deepseek-chat for deepseek provider, otherwise gpt-4o")
+    parser.add_argument(
+        "--context-source",
+        choices=["retrieval", "oracle"],
+        default="retrieval",
+        help="System track context source label used for run metadata and comparability notes",
+    )
     parser.add_argument("--n-threads", type=int, default=8)
     parser.add_argument("--max-examples", type=int, default=None, help="Limit evaluation to first N examples for quick testing")
     parser.add_argument("--cited-only", action="store_true", help="Use cited-only scenario for system evaluation summary")
@@ -390,6 +419,7 @@ def main() -> int:
     project_root = Path(__file__).resolve().parents[1]
 
     try:
+        args.track = _resolve_track_from_role(args.evaluation_role, args.track)
         paths = resolve_paths(project_root)
         system_input = Path(args.system_input).resolve() if args.track in {"system", "both"} else None
         preflight(paths, args.track, args.metric_split, system_input)
@@ -402,7 +432,19 @@ def main() -> int:
             check_credentials=not args.dry_run,
         )
         args.model_name = resolved_model_name
-        print(f"[config] provider={provider}, model={args.model_name}, dry_run={args.dry_run}")
+        if args.track == "metric":
+            dataset_lane = "metric_eval"
+        elif args.track == "system":
+            dataset_lane = "system_eval"
+        else:
+            dataset_lane = "metric_eval+system_eval"
+        baseline_comparable = args.context_source == "retrieval"
+        print(
+            "[config] "
+            f"provider={provider}, model={args.model_name}, dry_run={args.dry_run}, "
+            f"evaluation_role={args.evaluation_role or 'custom'}, dataset_lane={dataset_lane}, "
+            f"context_source={args.context_source}, baseline_comparable={baseline_comparable}"
+        )
 
         if args.track in {"metric", "both"}:
             run_metric_track(paths, env, args)
