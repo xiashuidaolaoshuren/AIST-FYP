@@ -83,9 +83,6 @@ wandb/
 *.bz2
 *.xml
 /data/*
-!/data/.gitkeep
-!/data/*/
-!/data/**/.gitkeep
 datasets/
 corpus/
 
