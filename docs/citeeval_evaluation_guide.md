@@ -221,7 +221,79 @@ Optional full variant arguments:
 python scripts/evaluate_mitigation_citebench.py --variants baseline full_pipeline mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only --strategy validation --system-source benchmark/CiteEval/data/system_eval/system_eval_examples.json
 ```
 
-## 5. Integrating with Verifier Signals
+## 6. Two-Method Comparison Workflow (RAGTruth Baseline vs LettuceDetect)
+
+This workflow is designed for your method comparison requirement:
+
+1. Run or collect official RAGTruth baseline output.
+2. Run LettuceDetect pretrained inference and collect raw output.
+3. Convert both outputs into the same CiteEval system-eval JSON schema.
+4. Evaluate both with identical CiteEval settings and save JSON summaries.
+
+### Step A: Convert official RAGTruth output to CiteEval format
+
+If you have baseline prediction output from `benchmark/RAGTruth/baseline/predict_and_evaluate.py`
+or `outputs/ragtruth_eval/*.json`, convert with:
+
+```powershell
+python scripts/convert_ragtruth_baseline_to_citeeval.py \
+    --input outputs/ragtruth_eval/ragtruth_eval_test_10.json \
+    --output benchmark/CiteEval/data/system_eval/ragtruth_baseline_system_eval.json \
+    --report-json outputs/method_comparison/ragtruth_conversion_report.json
+```
+
+Use `--strict` to drop rows that have empty `pred` or `passages`.
+
+### Step B: Convert LettuceDetect pretrained output to CiteEval format
+
+The LettuceDetect adapter is field-configurable because upstream output structures can vary.
+
+```powershell
+python scripts/convert_lettucedetect_to_citeeval.py \
+    --input outputs/lettucedetect/raw_predictions.json \
+    --output benchmark/CiteEval/data/system_eval/lettucedetect_system_eval.json \
+    --id-key id \
+    --query-key query \
+    --pred-key response \
+    --passages-key passages \
+    --report-json outputs/method_comparison/lettucedetect_conversion_report.json
+```
+
+If your raw fields differ, change the dotted key paths (for example `result.answer_text`).
+
+### Step C: Run controlled comparison and save metrics JSON
+
+```powershell
+python scripts/compare_citebench_methods.py \
+    --ragtruth-input benchmark/CiteEval/data/system_eval/ragtruth_baseline_system_eval.json \
+    --lettuce-input benchmark/CiteEval/data/system_eval/lettucedetect_system_eval.json \
+    --provider deepseek \
+    --model-name deepseek-chat \
+    --context-source oracle \
+    --max-samples 30
+```
+
+The script writes a timestamped run directory under `outputs/method_comparison/` with:
+
+- `ragtruth_aligned.json`
+- `lettucedetect_aligned.json`
+- `aligned_ids.json`
+- `summary.json` (method metrics and deltas)
+- `run_logs.json` (stdout/stderr for both evaluation runs)
+
+### Output Contract for Verifier Comparison
+
+Use `summary.json` as the canonical machine-readable artifact for downstream comparison
+against your verifier outputs.
+
+Minimum expected fields:
+
+- `run.aligned_count`
+- `method_metrics.ragtruth`
+- `method_metrics.lettucedetect`
+- `delta` (lettucedetect - ragtruth for available mean ratings)
+
+## 7. Integrating with Verifier Signals
 
 Our custom verifier signals (NLI, Entropy, Coverage) can be compared against CiteEval scores to validate their effectiveness as "trainless" hallucination detectors.
 
