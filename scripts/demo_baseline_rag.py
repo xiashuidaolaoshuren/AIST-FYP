@@ -13,8 +13,34 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import numpy as np
+
 from src.pipelines import BaselineRAGPipeline
 from src.utils.logger import setup_logger
+
+
+def make_json_serializable(obj):
+    """
+    Recursively convert numpy arrays and other non-JSON-serializable objects.
+    
+    Args:
+        obj: Object to convert (dict, list, numpy array, etc.)
+        
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    else:
+        return obj
 
 
 def detect_available_strategies() -> list:
@@ -297,6 +323,9 @@ def run_demo():
                         ]
                     claims_by_sub_answer_serialized.append(sub_data_copy)
                 result['claims_by_sub_answer'] = claims_by_sub_answer_serialized
+            
+            # Apply recursive serialization to handle any remaining numpy arrays
+            result = make_json_serializable(result)
             
             json_results.append({
                 'query_index': result_obj['query_index'],

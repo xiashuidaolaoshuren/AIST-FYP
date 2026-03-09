@@ -84,32 +84,73 @@ class GeneratorWrapper:
         
         # Load model with appropriate settings
         try:
+            # Prefer safetensors to avoid torch.load CVE guard for .bin checkpoints
+            # in environments pinned below torch 2.6.
+            safe_tensor_kwargs = {'use_safetensors': True}
+
             if load_in_8bit:
                 # 8-bit quantization for memory efficiency
-                self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                    model_name,
-                    load_in_8bit=True,
-                    device_map='auto'
-                )
+                try:
+                    self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                        model_name,
+                        load_in_8bit=True,
+                        device_map='auto',
+                        **safe_tensor_kwargs
+                    )
+                except Exception as load_err:
+                    self.logger.warning(
+                        "Safetensors loading failed for %s: %s",
+                        model_name,
+                        load_err
+                    )
+                    self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                        model_name,
+                        load_in_8bit=True,
+                        device_map='auto'
+                    )
                 self.logger.info("Model loaded with 8-bit quantization")
             else:
                 # Standard loading
                 if is_cuda_device and torch.cuda.is_available():
-                    model_kwargs = {'device_map': 'auto'}
+                    model_kwargs = {'device_map': 'auto', **safe_tensor_kwargs}
                     if dtype is not None:
                         model_kwargs['dtype'] = dtype
-                    self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                        model_name,
-                        **model_kwargs
-                    )
+                    try:
+                        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                            model_name,
+                            **model_kwargs
+                        )
+                    except Exception as load_err:
+                        self.logger.warning(
+                            "Safetensors loading failed for %s: %s",
+                            model_name,
+                            load_err
+                        )
+                        model_kwargs.pop('use_safetensors', None)
+                        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                            model_name,
+                            **model_kwargs
+                        )
                 else:
-                    cpu_kwargs = {}
+                    cpu_kwargs = {**safe_tensor_kwargs}
                     if dtype is not None and not is_cuda_device:
                         cpu_kwargs['dtype'] = dtype
-                    cpu_model = AutoModelForSeq2SeqLM.from_pretrained(
-                        model_name,
-                        **cpu_kwargs
-                    )
+                    try:
+                        cpu_model = AutoModelForSeq2SeqLM.from_pretrained(
+                            model_name,
+                            **cpu_kwargs
+                        )
+                    except Exception as load_err:
+                        self.logger.warning(
+                            "Safetensors loading failed for %s: %s",
+                            model_name,
+                            load_err
+                        )
+                        cpu_kwargs.pop('use_safetensors', None)
+                        cpu_model = AutoModelForSeq2SeqLM.from_pretrained(
+                            model_name,
+                            **cpu_kwargs
+                        )
                     self.model = cpu_model.to(device)
                 
                 self.logger.info(f"Model loaded successfully on {self.model.device}")
