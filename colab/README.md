@@ -10,6 +10,7 @@ This folder isolates Colab assets from the root project.
 Notebook additions:
 
 - `notebooks/colab_ragtruth_baseline.ipynb`: Reproduce RAGTruth baseline flow in Colab (prepare dataset, local model inference, and case-level precision/recall/F1).
+- `notebooks/colab_demo_rag_longt5.ipynb`: Run baseline RAG demo with fixed `google/long-t5-tglobal-base` using Drive-hosted indexes/artifacts, show qualitative outputs, and export `rag_demo_results_*.json`.
 
 ## Dependency model
 
