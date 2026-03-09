@@ -293,6 +293,100 @@ Minimum expected fields:
 - `method_metrics.lettucedetect`
 - `delta` (lettucedetect - ragtruth for available mean ratings)
 
+### Upstream Conversion: CiteBench metric_eval -> Model Input Formats
+
+If you want both pipelines to consume CiteBench metric_eval data directly, run
+the upstream converters first.
+
+#### A) Convert CiteBench metric_eval to RAGTruth baseline-style input
+
+This converter writes JSONL records with fixed `task_type=QA` and prefilled
+`response` from CiteBench `prediction`.
+
+```powershell
+python scripts/convert_citebench_metric_to_ragtruth.py \
+    --input benchmark/CiteEval/data/metric_eval/metric_test/citebench.metric_test \
+    --output outputs/citebench_converted/ragtruth_metric_test.jsonl \
+    --split test \
+    --strict \
+    --aligned-ids-output outputs/citebench_converted/aligned_ids.metric_test.json \
+    --report-json outputs/citebench_converted/ragtruth_metric_test.report.json
+```
+
+#### B) Convert CiteBench metric_eval to LettuceDetect input
+
+This converter preserves `id/query/response/passages` and can optionally add a
+flattened `context` string.
+
+```powershell
+python scripts/convert_citebench_metric_to_lettucedetect.py \
+    --input benchmark/CiteEval/data/metric_eval/metric_test/citebench.metric_test \
+    --output outputs/citebench_converted/lettucedetect_metric_test.json \
+    --output-format json \
+    --include-flat-context \
+    --strict \
+    --aligned-ids-output outputs/citebench_converted/aligned_ids.metric_test.json \
+    --report-json outputs/citebench_converted/lettucedetect_metric_test.report.json
+```
+
+#### C) Continue with downstream adaptation and comparison
+
+After method-specific inference is complete, convert each method output to
+CiteEval system format and run the comparator (Section 6, Step A/B/C).
+
+Recommended smoke run option:
+
+```powershell
+--max-samples 10
+```
+
+### One-Command LettuceDetect Pipeline (Converters Linked)
+
+Use the orchestrator script to run:
+
+1. CiteBench metric_eval -> LettuceDetect input conversion
+2. LettuceDetect pretrained inference (span output)
+3. LettuceDetect raw output -> CiteEval system JSON conversion
+4. (Optional) method comparison call
+
+Smoke run (no compare):
+
+```powershell
+python scripts/run_lettucedetect_pipeline.py \
+    --source-metric-file benchmark/CiteEval/data/metric_eval/metric_test/citebench.metric_test \
+    --metric-split test \
+    --model-path KRLabsOrg/lettucedect-base-modernbert-en-v1 \
+    --max-samples 10 \
+    --strict \
+    --include-flat-context
+```
+
+Run and compare immediately (requires RAGTruth system input):
+
+```powershell
+python scripts/run_lettucedetect_pipeline.py \
+    --source-metric-file benchmark/CiteEval/data/metric_eval/metric_test/citebench.metric_test \
+    --metric-split test \
+    --model-path KRLabsOrg/lettucedect-base-modernbert-en-v1 \
+    --max-samples 30 \
+    --strict \
+    --include-flat-context \
+    --run-compare \
+    --ragtruth-input benchmark/CiteEval/data/system_eval/ragtruth_baseline_system_eval.json \
+    --provider deepseek \
+    --eval-model-name deepseek-chat \
+    --context-source oracle
+```
+
+The run directory (`outputs/lettucedetect_pipeline/<timestamp>/`) includes:
+
+- `lettucedetect_input.json`
+- `lettucedetect_raw_predictions.json`
+- `lettucedetect_system_eval.json`
+- `upstream_conversion_report.json`
+- `downstream_conversion_report.json`
+- `run_manifest.json`
+
 ## 7. Integrating with Verifier Signals
 
 Our custom verifier signals (NLI, Entropy, Coverage) can be compared against CiteEval scores to validate their effectiveness as "trainless" hallucination detectors.
