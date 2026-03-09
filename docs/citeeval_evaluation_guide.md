@@ -221,6 +221,38 @@ Optional full variant arguments:
 python scripts/evaluate_mitigation_citebench.py --variants baseline full_pipeline mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only --strategy validation --system-source benchmark/CiteEval/data/system_eval/system_eval_examples.json
 ```
 
+### Controlled Method Comparison (Official RAGTruth Baseline vs LettuceDetect)
+
+For an independent Colab workflow dedicated to this controlled comparison, use:
+
+- `colab/notebooks/colab_citebench_controlled_comparison.ipynb`
+
+This notebook is designed as a starter implementation that runs conversion, validation, and side-by-side comparison with the same evaluator settings.
+
+If you start from official baseline output (`prediction.jsonl`), first convert it:
+
+```powershell
+python scripts/convert_ragtruth_baseline_to_citeeval.py --prediction-jsonl benchmark/RAGTruth/baseline/prediction.jsonl --system-source benchmark/CiteEval/data/system_eval/system_eval_examples.json --output benchmark/CiteEval/data/system_eval/ragtruth_official.json --match-by query --allow-missing --max-samples 30
+```
+
+Notes:
+- The converter uses baseline `response` as `pred` and keeps source `passages` from CiteBench.
+- `--citation-policy append_first` is default to guarantee CiteEval-compatible citation markers when missing.
+- Prefer `--match-by id` if your baseline output preserves the same sample IDs as the source file.
+
+When you already have two method outputs in CiteEval system-input JSON format and want a fair side-by-side comparison on the same sample IDs, use:
+
+```powershell
+python scripts/compare_citebench_methods.py --left-name ragtruth_official --left-input benchmark/CiteEval/data/system_eval/ragtruth_official.json --right-name lettucedetect --right-input benchmark/CiteEval/data/system_eval/lettucedetect.json --context-source oracle --provider deepseek --model-name deepseek-chat --max-samples 30
+```
+
+This script will:
+- Align both files by `id` and evaluate only overlapping samples.
+- Run `scripts/run_citebench_eval.py` for each method with identical settings.
+- Write run metadata, aligned IDs, and summaries to `outputs/citebench_controlled_compare/<timestamp>/`.
+
+If your files are already small and aligned, omit `--max-samples`.
+
 ## 5. Integrating with Verifier Signals
 
 Our custom verifier signals (NLI, Entropy, Coverage) can be compared against CiteEval scores to validate their effectiveness as "trainless" hallucination detectors.
