@@ -45,7 +45,8 @@ class GeneratorWrapper:
         model_name: str = 'google/flan-t5-base',
         device: str = 'cuda',
         load_in_8bit: bool = False,
-        dtype: Optional[torch.dtype] = torch.float16
+        dtype: Optional[torch.dtype] = torch.float16,
+        max_input_tokens: Optional[int] = None
     ):
         """
         Initialize the generator wrapper.
@@ -58,12 +59,14 @@ class GeneratorWrapper:
             device: Device to run on ('cuda' or 'cpu')
             load_in_8bit: Whether to use 8-bit quantization (for models >1GB)
             dtype: Data type for model weights (default: float16 for GPU)
+            max_input_tokens: Optional tokenizer truncation limit override
         
         Raises:
             ValueError: If model loading fails
         """
         self.model_name = model_name
         self.device = device
+        self.max_input_tokens = max_input_tokens
         self.logger = setup_logger(__name__)
         
         self.logger.info(f"Loading model: {model_name}")
@@ -118,6 +121,35 @@ class GeneratorWrapper:
         
         except Exception as e:
             raise ValueError(f"Failed to load model: {e}")
+
+    def _resolve_max_input_tokens(self) -> int:
+        """
+        Resolve tokenizer truncation length for encoder inputs.
+
+        Priority:
+        1) Explicit `max_input_tokens` from config
+        2) Model/tokenizer declared max lengths
+        3) Safe fallback (512)
+        """
+        if isinstance(self.max_input_tokens, int) and self.max_input_tokens > 0:
+            return int(self.max_input_tokens)
+
+        candidates = []
+
+        tokenizer_max = getattr(self.tokenizer, 'model_max_length', None)
+        if isinstance(tokenizer_max, int) and 0 < tokenizer_max < 1_000_000:
+            candidates.append(tokenizer_max)
+
+        model_config = getattr(self.model, 'config', None)
+        for attr_name in ('n_positions', 'max_position_embeddings', 'max_encoder_position_embeddings'):
+            value = getattr(model_config, attr_name, None)
+            if isinstance(value, int) and value > 0:
+                candidates.append(value)
+
+        if candidates:
+            return int(min(candidates))
+
+        return 512
     
     def _format_prompt(
         self,
@@ -230,11 +262,12 @@ class GeneratorWrapper:
         self.logger.debug(f"Formatted prompt length: {len(formatted_prompt)} chars")
         
         # Tokenize input
+        max_input_tokens = self._resolve_max_input_tokens()
         inputs = self.tokenizer(
             formatted_prompt,
             return_tensors='pt',
             truncation=True,
-            max_length=512
+            max_length=max_input_tokens
         ).to(self.model.device)
         
         # Generate with metadata capture
@@ -391,7 +424,7 @@ class GeneratorWrapper:
             text_target=target_text,
             return_tensors='pt',
             truncation=True,
-            max_length=512
+            max_length=self._resolve_max_input_tokens()
         ).to(self.model.device)
 
         labels = model_inputs.get('labels')

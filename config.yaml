@@ -8,12 +8,11 @@ models:
   # Sentence transformer for embeddings (384D, fast on 8GB GPU)
   sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
   
-  # Generator LLM (250M params, fits in 8GB GPU)
-  generator: "google/flan-t5-base"
-  
-  # Alternative models (uncomment to use):
-  # sentence_transformer: "sentence-transformers/all-mpnet-base-v2"  # 768D, better quality
-  # generator: "google/flan-t5-large"  # 780M params, requires more memory
+  # Generator LLM (LongT5-base, long-context seq2seq)
+  generator: "google/long-t5-tglobal-base"
+
+  # Old generator (commented out for memory constraints on 8GB GPU):
+  # generator: "google/flan-t5-base"  # 250M params, good quality, but LongT5-base is better for long contexts and has similar memory requirements
 
 # Data Paths
 data:
@@ -117,6 +116,9 @@ retrieval:
 
 # Generation Configuration
 generation:
+  # Maximum input tokens to pass into generator tokenizer
+  max_input_tokens: 4096
+
   # Maximum new tokens to generate
   max_new_tokens: 512
   

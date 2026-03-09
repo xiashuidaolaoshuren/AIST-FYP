@@ -742,7 +742,8 @@ class BaselineRAGPipeline:
         generator = GeneratorWrapper(
             model_name=config.models.generator,
             device=config.processing.device,
-            load_in_8bit=config.generation.load_in_8bit
+            load_in_8bit=config.generation.load_in_8bit,
+            max_input_tokens=config.generation.get('max_input_tokens', None)
         )
         
         logger.info("Pipeline initialization complete")
