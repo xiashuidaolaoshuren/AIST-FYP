@@ -16,7 +16,6 @@ dependencies = [
 
 [project.optional-dependencies]
 preprocessing = [
-  "transformers==4.56.2",
   "datasets==4.1.1",
   "sentence-transformers==5.1.1",
   "faiss-cpu==1.12.0",
@@ -40,7 +39,6 @@ evaluation = [
 ]
 
 mitigation = [
-  "transformers==4.56.2",
   "sentence-transformers==5.1.1",
   "numpy==1.26.4",
   "pandas==2.3.3",
