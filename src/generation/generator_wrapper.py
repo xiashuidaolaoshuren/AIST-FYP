@@ -87,12 +87,14 @@ class GeneratorWrapper:
             # Prefer safetensors to avoid torch.load CVE guard for .bin checkpoints
             # in environments pinned below torch 2.6.
             safe_tensor_kwargs = {'use_safetensors': True}
+            loading_info: Dict[str, Any] = {}
 
             if load_in_8bit:
                 # 8-bit quantization for memory efficiency
                 try:
-                    self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                    self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
                         model_name,
+                        output_loading_info=True,
                         load_in_8bit=True,
                         device_map='auto',
                         **safe_tensor_kwargs
@@ -103,8 +105,9 @@ class GeneratorWrapper:
                         model_name,
                         load_err
                     )
-                    self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                    self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
                         model_name,
+                        output_loading_info=True,
                         load_in_8bit=True,
                         device_map='auto'
                     )
@@ -116,8 +119,9 @@ class GeneratorWrapper:
                     if dtype is not None:
                         model_kwargs['dtype'] = dtype
                     try:
-                        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                        self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
                             model_name,
+                            output_loading_info=True,
                             **model_kwargs
                         )
                     except Exception as load_err:
@@ -127,8 +131,9 @@ class GeneratorWrapper:
                             load_err
                         )
                         model_kwargs.pop('use_safetensors', None)
-                        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                        self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
                             model_name,
+                            output_loading_info=True,
                             **model_kwargs
                         )
                 else:
@@ -136,8 +141,9 @@ class GeneratorWrapper:
                     if dtype is not None and not is_cuda_device:
                         cpu_kwargs['dtype'] = dtype
                     try:
-                        cpu_model = AutoModelForSeq2SeqLM.from_pretrained(
+                        cpu_model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
                             model_name,
+                            output_loading_info=True,
                             **cpu_kwargs
                         )
                     except Exception as load_err:
@@ -147,13 +153,26 @@ class GeneratorWrapper:
                             load_err
                         )
                         cpu_kwargs.pop('use_safetensors', None)
-                        cpu_model = AutoModelForSeq2SeqLM.from_pretrained(
+                        cpu_model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
                             model_name,
+                            output_loading_info=True,
                             **cpu_kwargs
                         )
                     self.model = cpu_model.to(device)
-                
+
                 self.logger.info(f"Model loaded successfully on {self.model.device}")
+
+            repair_applied = self._repair_missing_embeddings_if_needed(loading_info)
+            tie_applied = self._enforce_tied_embeddings()
+            
+            # Log embedding fix status at startup
+            if repair_applied or tie_applied:
+                repairs = []
+                if repair_applied:
+                    repairs.append("missing_keys_repaired")
+                if tie_applied:
+                    repairs.append("embeddings_tied")
+                self.logger.info(f"Embedding fixes applied: {', '.join(repairs)}")
             
             # Get model memory footprint
             if hasattr(self.model, 'get_memory_footprint'):
@@ -162,6 +181,80 @@ class GeneratorWrapper:
         
         except Exception as e:
             raise ValueError(f"Failed to load model: {e}")
+
+    def _repair_missing_embeddings_if_needed(self, loading_info: Dict[str, Any]) -> bool:
+        """Repair missing LongT5 encoder/decoder embeddings from shared weights.
+        
+        Returns:
+            True if repair was applied, False otherwise.
+        """
+        if not isinstance(loading_info, dict):
+            return False
+
+        missing_keys = set(loading_info.get('missing_keys') or [])
+        required_keys = {
+            'encoder.embed_tokens.weight',
+            'decoder.embed_tokens.weight',
+        }
+        if not required_keys.issubset(missing_keys):
+            return False
+
+        shared = getattr(self.model, 'shared', None)
+        encoder = getattr(self.model, 'encoder', None)
+        decoder = getattr(self.model, 'decoder', None)
+        if shared is None or encoder is None or decoder is None:
+            return False
+        if getattr(shared, 'weight', None) is None:
+            return False
+        if getattr(encoder, 'embed_tokens', None) is None or getattr(decoder, 'embed_tokens', None) is None:
+            return False
+
+        with torch.no_grad():
+            encoder.embed_tokens.weight.copy_(shared.weight)
+            decoder.embed_tokens.weight.copy_(shared.weight)
+
+        self.logger.debug(
+            "Detected missing encoder/decoder embeddings during load; initialized them from shared.weight"
+        )
+        return True
+
+    def _enforce_tied_embeddings(self) -> bool:
+        """
+        Ensure seq2seq embedding matrices are tied consistently after loading.
+
+        Some LongT5 checkpoints rely on shared embeddings and may report missing
+        encoder/decoder embedding keys at load time. This method forces a stable
+        post-load state to avoid random-initialized token embeddings.
+        
+        Returns:
+            True if embeddings were tied/synchronized, False otherwise.
+        """
+        shared = getattr(self.model, 'shared', None)
+        encoder = getattr(self.model, 'encoder', None)
+        decoder = getattr(self.model, 'decoder', None)
+        lm_head = getattr(self.model, 'lm_head', None)
+
+        if shared is None or getattr(shared, 'weight', None) is None:
+            return False
+
+        tied_any = False
+        with torch.no_grad():
+            if encoder is not None and getattr(encoder, 'embed_tokens', None) is not None:
+                encoder.embed_tokens.weight.copy_(shared.weight)
+                tied_any = True
+            if decoder is not None and getattr(decoder, 'embed_tokens', None) is not None:
+                decoder.embed_tokens.weight.copy_(shared.weight)
+                tied_any = True
+            if lm_head is not None and getattr(lm_head, 'weight', None) is not None and lm_head.weight.shape == shared.weight.shape:
+                lm_head.weight.copy_(shared.weight)
+                tied_any = True
+
+        # Re-run model-native tie logic to ensure parameter sharing references are consistent.
+        if hasattr(self.model, 'tie_weights'):
+            self.model.tie_weights()
+            tied_any = True
+        
+        return tied_any
 
     def _resolve_max_input_tokens(self) -> int:
         """
