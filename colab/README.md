@@ -10,7 +10,7 @@ This folder isolates Colab assets from the root project.
 Notebook additions:
 
 - `notebooks/colab_ragtruth_baseline.ipynb`: Reproduce RAGTruth baseline flow in Colab (prepare dataset, local model inference, and case-level precision/recall/F1).
-- `notebooks/colab_demo_rag_longt5.ipynb`: Run baseline RAG demo with fixed `google/long-t5-tglobal-base` using Drive-hosted indexes/artifacts, show qualitative outputs, and export `rag_demo_results_*.json`.
+- `notebooks/colab_demo_rag_longt5.ipynb`: Run baseline RAG demo with fixed `google/long-t5-tglobal-base` directly from the Drive-mounted repo (no artifact copy), show qualitative outputs, and export `rag_demo_results_*.json`.
 
 ## Dependency model
 
@@ -33,7 +33,8 @@ Extra groups used by notebooks:
 
 ## Notes
 
-- The notebooks still clone/use the main repo at `/content/AIST-FYP`.
+- `colab_demo_rag_longt5.ipynb` uses the Drive-mounted repo directly at `/content/drive/MyDrive/AIST-FYP` by default.
+- Other notebooks may still clone/use the main repo at `/content/AIST-FYP`.
 - Script execution remains plain `python ...`; after `uv sync` the notebook prepends `colab/env/.venv/bin` to `PATH`.
 - Keep root `requirements.txt` as compatibility fallback for unstable Colab images.
 
