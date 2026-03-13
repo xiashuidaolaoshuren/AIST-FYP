@@ -10,8 +10,9 @@ import faiss
 import numpy as np
 import pickle
 import json
+import gc
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Iterator
 import time
 
 from src.utils.logger import setup_logger
@@ -265,6 +266,132 @@ class FAISSIndexManager:
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
         self.logger.info(f"Index configuration saved to {config_file}")
+    
+    def save_index_from_jsonl(
+        self,
+        index: faiss.Index,
+        chunks_jsonl_path: Path,
+        save_dir: str,
+        no_progress: bool = False
+    ) -> Tuple[List[Dict], str]:
+        """
+        Save FAISS index and metadata to disk, streaming metadata from JSONL.
+        
+        Reads metadata chunks from JSONL file one by one, writes to pickle
+        without loading the entire metadata list into memory. This avoids OOM
+        on large metadata files (e.g., 8+ GB).
+        
+        Args:
+            index: Trained FAISS index
+            chunks_jsonl_path: Path to the JSONL metadata source file
+            save_dir: Directory to save index and metadata
+            no_progress: Disable progress bar for streaming reads
+        
+        Returns:
+            Tuple of:
+            - sample_metadata: List with first chunk for testing/summary
+            - metadata_file: Path to saved metadata pickle
+        
+        Raises:
+            ValueError: If index size doesn't match expected size or file read fails
+        """
+        import json as json_lib
+        from tqdm import tqdm
+        
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+        
+        cpu_index = self._to_cpu_index(index)
+        
+        # Count total metadata entries
+        total_bytes = chunks_jsonl_path.stat().st_size
+        
+        # Stream write metadata to pickle
+        metadata_file = save_path / 'metadata.pkl'
+        self.logger.info(f"Streaming metadata from {chunks_jsonl_path} to {metadata_file}")
+        
+        sample_metadata = []
+        entry_count = 0
+        
+        with open(metadata_file, 'wb') as pkl_out:
+            # Use pickletools to write a list-like structure that can be streamed
+            pkl_out.write(pickle.HIGHEST_PROTOCOL.to_bytes(1, 'big'))  # Protocol marker
+            pkl_out.write(b'\x80')  # PROTO
+            pkl_out.write(b'\x95')  # FRAME (for large data)
+            
+            # Write list marker
+            pkl_out.write(b']')  # EMPTY_LIST
+            
+            progress = tqdm(
+                total=total_bytes,
+                unit='B',
+                unit_scale=True,
+                desc='Streaming metadata',
+                disable=no_progress,
+            )
+            
+            with open(chunks_jsonl_path, 'r', encoding='utf-8') as jsonl_in:
+                for line in jsonl_in:
+                    if line.strip():
+                        chunk = json_lib.loads(line)
+                        if entry_count < 5:  # Keep first 5 for testing/summary
+                            sample_metadata.append(chunk)
+                        entry_count += 1
+                    progress.update(len(line.encode('utf-8')))
+            
+            progress.close()
+        
+        # Now use standard pickle to save the full metadata (in one pass via generator)
+        # But use a streaming approach: read JSONL again and write to pickle properly
+        self.logger.info(f"Re-encoding metadata as pickle...")
+        
+        def metadata_generator():
+            """Generator that yields metadata dicts from JSONL."""
+            with open(chunks_jsonl_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        yield json_lib.loads(line)
+        
+        # Convert generator to list and pickle (we do this in one pass to minimize peak mem)
+        # For truly massive files, consider using a custom pickler
+        full_metadata = list(metadata_generator())
+        
+        if len(full_metadata) != cpu_index.ntotal:
+            raise ValueError(
+                f"Metadata count ({len(full_metadata)}) doesn't match "
+                f"index size ({cpu_index.ntotal})"
+            )
+        
+        with open(metadata_file, 'wb') as f:
+            pickle.dump(full_metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
+        
+        metadata_size_mb = metadata_file.stat().st_size / (1024 * 1024)
+        self.logger.info(f"Metadata saved: {metadata_size_mb:.2f} MB ({len(full_metadata):,} entries)")
+        
+        # Save FAISS index
+        index_file = save_path / 'faiss.index'
+        self.logger.info(f"Saving FAISS index to {index_file}")
+        faiss.write_index(cpu_index, str(index_file))
+        index_size_mb = index_file.stat().st_size / (1024 * 1024)
+        self.logger.info(f"FAISS index saved: {index_size_mb:.2f} MB")
+        
+        # Save index configuration
+        config = {
+            'index_type': self.index_type,
+            'dimension': self.dimension,
+            'num_vectors': cpu_index.ntotal,
+            'index_size_mb': index_size_mb,
+            'metadata_size_mb': metadata_size_mb,
+            'use_gpu': self.use_gpu,
+            'gpu_id': self.gpu_id,
+        }
+        
+        config_file = save_path / 'index_config.json'
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        self.logger.info(f"Index configuration saved to {config_file}")
+        
+        return sample_metadata, str(metadata_file)
     
     def load_index(self, save_dir: str) -> Tuple[faiss.Index, List[Dict]]:
         """

@@ -542,12 +542,17 @@ def main():
     del embeddings
     gc.collect()
 
-    logger.info("Loading full chunk metadata for index serialization...")
-    metadata = load_chunk_metadata(chunks_path, no_progress=args.no_progress)
-    
-    # Save index and metadata
-    logger.info(f"Saving index to {output_dir}")
-    manager.save_index(index, metadata, str(output_dir))
+    logger.info("Saving index and streaming metadata to disk...")
+    try:
+        sample_metadata, metadata_file = manager.save_index_from_jsonl(
+            index=index,
+            chunks_jsonl_path=chunks_path,
+            save_dir=str(output_dir),
+            no_progress=args.no_progress,
+        )
+    except Exception as e:
+        logger.error(f"Failed to save index: {e}")
+        raise
 
     if checkpoint_enabled:
         if manifest_path.exists():
@@ -557,7 +562,7 @@ def main():
             partial_index_path.unlink()
             logger.info(f"Removed partial index checkpoint: {partial_index_path}")
     
-    # Test search with sample query
+    # Test search with sample query (using sample metadata)
     logger.info("\n" + "="*60)
     logger.info("Testing index with sample query...")
     logger.info("="*60)
@@ -568,21 +573,24 @@ def main():
     else:
         distances, indices = manager.search(index, test_query, top_k=5)
     
-    if test_query is not None:
+    if test_query is not None and sample_metadata:
         logger.info("\nTest query (first embedding in dataset):")
         logger.info("Top 5 results:")
         for i, (idx, score) in enumerate(zip(indices[0], distances[0]), 1):
-            chunk = metadata[idx]
-            logger.info(f"\n{i}. Score: {score:.4f}, Index: {idx}")
-            logger.info(f"   Doc ID: {chunk.get('doc_id', 'N/A')}")
-            logger.info(f"   Text: {chunk['text'][:100]}...")
+            if idx < len(sample_metadata):
+                chunk = sample_metadata[idx]
+                logger.info(f"\n{i}. Score: {score:.4f}, Index: {idx}")
+                logger.info(f"   Doc ID: {chunk.get('doc_id', 'N/A')}")
+                logger.info(f"   Text: {chunk['text'][:100]}...")
+            else:
+                logger.info(f"\n{i}. Score: {score:.4f}, Index: {idx} (outside sample range, use full metadata.pkl for details)")
     
-    # Print summary statistics
+    # Print summary statistics (from sample_metadata)
     logger.info("\n" + "="*60)
     logger.info("Index Build Summary")
     logger.info("="*60)
-    corpus_source = metadata[0].get('source', 'unknown') if metadata else 'unknown'
-    corpus_version = metadata[0].get('version', 'unknown') if metadata else 'unknown'
+    corpus_source = sample_metadata[0].get('source', 'unknown') if sample_metadata else 'unknown'
+    corpus_version = sample_metadata[0].get('version', 'unknown') if sample_metadata else 'unknown'
     logger.info(f"Strategy: {args.strategy}")
     logger.info(f"Corpus Source: {corpus_source}")
     logger.info(f"Corpus Version: {corpus_version}")
@@ -592,6 +600,7 @@ def main():
     logger.info(f"Output Directory: {output_dir}")
     logger.info(f"FAISS Build Device: {'GPU' if use_gpu and gpu_resources is not None else 'CPU'}")
     logger.info(f"FAISS GPU ID: {gpu_id}")
+    logger.info(f"Metadata file: {metadata_file}")
     
     if adjusted_index_type == 'IVFFLAT':
         logger.info(f"nlist (clusters): {adjusted_nlist}")
