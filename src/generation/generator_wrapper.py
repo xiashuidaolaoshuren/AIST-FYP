@@ -139,7 +139,7 @@ class GeneratorWrapper:
                 else:
                     cpu_kwargs = {**safe_tensor_kwargs}
                     if dtype is not None and not is_cuda_device:
-                        cpu_kwargs['dtype'] = dtype
+                        cpu_kwargs['dtype'] = torch.float32 if dtype == torch.float16 else dtype
                     try:
                         cpu_model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
                             model_name,
@@ -162,8 +162,14 @@ class GeneratorWrapper:
 
                 self.logger.info(f"Model loaded successfully on {self.model.device}")
 
-            self._repair_missing_embeddings_if_needed(loading_info)
-            self._enforce_tied_embeddings()
+            repair_applied = self._repair_missing_embeddings_if_needed(loading_info)
+            tie_applied = self._enforce_tied_embeddings(force_full_sync=repair_applied)
+            if repair_applied or tie_applied:
+                self.logger.info(
+                    "Embedding fixes applied: repair=%s, tie=%s",
+                    repair_applied,
+                    tie_applied
+                )
             
             # Get model memory footprint
             if hasattr(self.model, 'get_memory_footprint'):
@@ -173,10 +179,10 @@ class GeneratorWrapper:
         except Exception as e:
             raise ValueError(f"Failed to load model: {e}")
 
-    def _repair_missing_embeddings_if_needed(self, loading_info: Dict[str, Any]) -> None:
+    def _repair_missing_embeddings_if_needed(self, loading_info: Dict[str, Any]) -> bool:
         """Repair missing LongT5 encoder/decoder embeddings from shared weights."""
         if not isinstance(loading_info, dict):
-            return
+            return False
 
         missing_keys = set(loading_info.get('missing_keys') or [])
         required_keys = {
@@ -184,17 +190,17 @@ class GeneratorWrapper:
             'decoder.embed_tokens.weight',
         }
         if not required_keys.issubset(missing_keys):
-            return
+            return False
 
         shared = getattr(self.model, 'shared', None)
         encoder = getattr(self.model, 'encoder', None)
         decoder = getattr(self.model, 'decoder', None)
         if shared is None or encoder is None or decoder is None:
-            return
+            return False
         if getattr(shared, 'weight', None) is None:
-            return
+            return False
         if getattr(encoder, 'embed_tokens', None) is None or getattr(decoder, 'embed_tokens', None) is None:
-            return
+            return False
 
         with torch.no_grad():
             encoder.embed_tokens.weight.copy_(shared.weight)
@@ -203,14 +209,15 @@ class GeneratorWrapper:
         self.logger.warning(
             "Detected missing encoder/decoder embeddings during load; initialized them from shared.weight"
         )
+        return True
 
-    def _enforce_tied_embeddings(self) -> None:
+    def _enforce_tied_embeddings(self, force_full_sync: bool = False) -> bool:
         """
         Ensure seq2seq embedding matrices are tied consistently after loading.
 
-        Some LongT5 checkpoints rely on shared embeddings and may report missing
-        encoder/decoder embedding keys at load time. This method forces a stable
-        post-load state to avoid random-initialized token embeddings.
+        When `force_full_sync` is True (used only after missing-key repair),
+        encoder/decoder token embeddings are copied from `shared.weight`.
+        For normal checkpoints, only model-native `tie_weights()` is used.
         """
         shared = getattr(self.model, 'shared', None)
         encoder = getattr(self.model, 'encoder', None)
@@ -218,19 +225,19 @@ class GeneratorWrapper:
         lm_head = getattr(self.model, 'lm_head', None)
 
         if shared is None or getattr(shared, 'weight', None) is None:
-            return
+            return False
 
-        with torch.no_grad():
-            if encoder is not None and getattr(encoder, 'embed_tokens', None) is not None:
-                encoder.embed_tokens.weight.copy_(shared.weight)
-            if decoder is not None and getattr(decoder, 'embed_tokens', None) is not None:
-                decoder.embed_tokens.weight.copy_(shared.weight)
-            if lm_head is not None and getattr(lm_head, 'weight', None) is not None and lm_head.weight.shape == shared.weight.shape:
-                lm_head.weight.copy_(shared.weight)
+        if force_full_sync:
+            with torch.no_grad():
+                if encoder is not None and getattr(encoder, 'embed_tokens', None) is not None:
+                    encoder.embed_tokens.weight.copy_(shared.weight)
+                if decoder is not None and getattr(decoder, 'embed_tokens', None) is not None:
+                    decoder.embed_tokens.weight.copy_(shared.weight)
 
         # Re-run model-native tie logic to ensure parameter sharing references are consistent.
         if hasattr(self.model, 'tie_weights'):
             self.model.tie_weights()
+        return force_full_sync or (lm_head is not None)
 
     def _resolve_max_input_tokens(self) -> int:
         """
@@ -397,6 +404,20 @@ class GeneratorWrapper:
                 output_scores=True,
                 return_dict_in_generate=True
             )
+
+        # Detect severe decoding collapse early (e.g., same token repeated).
+        if outputs.sequences is not None and outputs.sequences.shape[1] > 8:
+            gen_ids = outputs.sequences[0].tolist()
+            tail = gen_ids[1:] if len(gen_ids) > 1 else gen_ids
+            if tail:
+                dominant_ratio = max(tail.count(tid) for tid in set(tail)) / len(tail)
+                if dominant_ratio >= 0.8:
+                    self.logger.warning(
+                        "Detected degenerate decoding (dominant_token_ratio=%.2f). "
+                        "Model '%s' may be unsuitable for instruction QA prompts.",
+                        dominant_ratio,
+                        self.model_name
+                    )
         
         # Extract generated sequence
         generated_ids = outputs.sequences[0]  # Remove batch dimension

@@ -12,6 +12,7 @@ dependencies = [
   "torchvision==0.20.1+cu121",
   "torchaudio==2.5.1+cu121",
   "transformers==4.56.2",
+  "spacy==3.7.2",
 ]
 
 [project.optional-dependencies]
@@ -23,7 +24,6 @@ preprocessing = [
   "numpy==1.26.4",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
-  "spacy==3.7.2",
   "wikiextractor==3.0.6",
   "accelerate==1.10.1",
   "pyarrow==21.0.0",
@@ -46,7 +46,6 @@ mitigation = [
   "openai==1.16.2",
   "configobj==5.0.9",
   "nltk==3.9.1",
-  "spacy==3.7.2",
 ]
 
 [tool.uv]
