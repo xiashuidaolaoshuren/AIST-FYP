@@ -6,7 +6,7 @@ evidence, generates responses, and creates claim-evidence pairs for
 downstream verification in Month 3-5.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 
 from src.retrieval.dense_retriever import DenseRetriever
@@ -161,6 +161,136 @@ class BaselineRAGPipeline:
         
         self.logger.debug(f"Split query into {len(sub_queries)} sub-questions")
         return sub_queries
+
+    def _get_retrieval_mode(self) -> str:
+        """Return configured retrieval mode or dense fallback."""
+        if self.config and hasattr(self.config, 'retrieval'):
+            return str(self.config.retrieval.get('mode', 'dense'))
+        return 'dense'
+
+    @staticmethod
+    def _score_metric_for_mode(retrieval_mode: str) -> str:
+        """Map retrieval mode to its primary score field name."""
+        mode = (retrieval_mode or 'dense').lower()
+        if mode == 'hybrid':
+            return 'score_hybrid'
+        if mode == 'bm25':
+            return 'score_bm25'
+        return 'score_dense'
+
+    def _chunk_primary_score(self, chunk: EvidenceChunk, retrieval_mode: str) -> float:
+        """Extract the primary retrieval score for a chunk based on retrieval mode."""
+        metric = self._score_metric_for_mode(retrieval_mode)
+        score = getattr(chunk, metric, None)
+        if score is not None:
+            return float(score)
+        # Fallback in case a retriever does not populate the preferred field.
+        if chunk.score_hybrid is not None:
+            return float(chunk.score_hybrid)
+        if chunk.score_bm25 is not None:
+            return float(chunk.score_bm25)
+        return float(chunk.score_dense)
+
+    def _retrieve_with_guardrail(
+        self,
+        sub_query_text: str,
+        top_k: int,
+        retrieval_mode: str
+    ) -> Tuple[List[EvidenceChunk], Dict[str, Any]]:
+        """Retrieve evidence with optional low-score fallback expansion."""
+        evidence_chunks = self.retriever.retrieve(sub_query_text, top_k=top_k)
+        metric = self._score_metric_for_mode(retrieval_mode)
+        initial_top_score = (
+            self._chunk_primary_score(evidence_chunks[0], retrieval_mode)
+            if evidence_chunks else None
+        )
+
+        diagnostics: Dict[str, Any] = {
+            'score_metric': metric,
+            'initial_count': len(evidence_chunks),
+            'initial_top_score': initial_top_score,
+            'fallback_triggered': False,
+            'fallback_reason': None,
+            'fallback_top_k': None,
+            'fallback_count': None,
+            'fallback_top_score': None,
+        }
+
+        guardrails_cfg = None
+        if self.config and hasattr(self.config, 'retrieval'):
+            guardrails_cfg = self.config.retrieval.get('guardrails', None)
+
+        if not isinstance(guardrails_cfg, dict):
+            return evidence_chunks, diagnostics
+
+        if not bool(guardrails_cfg.get('enabled', False)):
+            return evidence_chunks, diagnostics
+
+        thresholds = guardrails_cfg.get('low_score_thresholds', {})
+        if isinstance(thresholds, dict):
+            low_score_threshold = thresholds.get(retrieval_mode, thresholds.get('default', None))
+        else:
+            low_score_threshold = None
+
+        fallback_multiplier = int(guardrails_cfg.get('fallback_top_k_multiplier', 2) or 2)
+        fallback_multiplier = max(1, fallback_multiplier)
+        fallback_top_k = max(top_k, int(top_k * fallback_multiplier))
+        fallback_top_k = min(fallback_top_k, int(guardrails_cfg.get('max_fallback_top_k', 20) or 20))
+
+        low_score_hit = (
+            low_score_threshold is not None
+            and initial_top_score is not None
+            and float(initial_top_score) < float(low_score_threshold)
+        )
+        low_count_hit = len(evidence_chunks) < top_k
+
+        if not (low_score_hit or low_count_hit) or fallback_top_k <= top_k:
+            return evidence_chunks, diagnostics
+
+        diagnostics['fallback_triggered'] = True
+        diagnostics['fallback_reason'] = 'low_score' if low_score_hit else 'insufficient_results'
+        diagnostics['fallback_top_k'] = fallback_top_k
+
+        self.logger.info(
+            f"Retrieval guardrail triggered ({diagnostics['fallback_reason']}): "
+            f"metric={metric}, initial_top={initial_top_score}, threshold={low_score_threshold}, "
+            f"expanding top_k {top_k}->{fallback_top_k}"
+        )
+        self.logger.info(
+            "rag_retrieval_guardrail_triggered",
+            extra={
+                "event": "rag_retrieval_guardrail_triggered",
+                "data": {
+                    "reason": diagnostics['fallback_reason'],
+                    "score_metric": metric,
+                    "initial_top_score": initial_top_score,
+                    "threshold": low_score_threshold,
+                    "top_k": top_k,
+                    "fallback_top_k": fallback_top_k
+                }
+            }
+        )
+
+        expanded_chunks = self.retriever.retrieve(sub_query_text, top_k=fallback_top_k)
+        if expanded_chunks:
+            expanded_chunks = sorted(
+                expanded_chunks,
+                key=lambda c: self._chunk_primary_score(c, retrieval_mode),
+                reverse=True
+            )
+            for rank, chunk in enumerate(expanded_chunks, start=1):
+                chunk.rank = rank
+
+        fallback_selection = expanded_chunks[:top_k] if expanded_chunks else evidence_chunks
+        fallback_top_score = (
+            self._chunk_primary_score(fallback_selection[0], retrieval_mode)
+            if fallback_selection else None
+        )
+
+        diagnostics['fallback_count'] = len(expanded_chunks)
+        diagnostics['fallback_top_score'] = fallback_top_score
+
+        return fallback_selection, diagnostics
     
     def run(
         self,
@@ -169,7 +299,10 @@ class BaselineRAGPipeline:
         max_new_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
-        do_sample: Optional[bool] = None
+        do_sample: Optional[bool] = None,
+        repetition_penalty: Optional[float] = None,
+        no_repeat_ngram_size: Optional[int] = None,
+        sanitize_meta_text: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete RAG pipeline on a query.
@@ -253,14 +386,29 @@ class BaselineRAGPipeline:
                 'max_new_tokens': max_new_tokens or self.config.generation.max_new_tokens,
                 'temperature': temperature if temperature is not None else self.config.generation.temperature,
                 'top_p': top_p if top_p is not None else self.config.generation.top_p,
-                'do_sample': do_sample if do_sample is not None else self.config.generation.do_sample
+                'do_sample': do_sample if do_sample is not None else self.config.generation.do_sample,
+                'repetition_penalty': (
+                    repetition_penalty if repetition_penalty is not None
+                    else self.config.generation.get('repetition_penalty', None)
+                ),
+                'no_repeat_ngram_size': (
+                    no_repeat_ngram_size if no_repeat_ngram_size is not None
+                    else self.config.generation.get('no_repeat_ngram_size', None)
+                ),
+                'sanitize_meta_text': (
+                    sanitize_meta_text if sanitize_meta_text is not None
+                    else bool(self.config.generation.get('sanitize_meta_text', False))
+                ),
             }
         else:
             gen_params = {
                 'max_new_tokens': max_new_tokens or 256,
                 'temperature': temperature if temperature is not None else 0.7,
                 'top_p': top_p if top_p is not None else 0.9,
-                'do_sample': do_sample if do_sample is not None else True
+                'do_sample': do_sample if do_sample is not None else True,
+                'repetition_penalty': repetition_penalty,
+                'no_repeat_ngram_size': no_repeat_ngram_size,
+                'sanitize_meta_text': bool(sanitize_meta_text) if sanitize_meta_text is not None else False,
             }
         
         # Process each sub-question separately
@@ -270,6 +418,8 @@ class BaselineRAGPipeline:
         combined_response_parts = []
         all_evidence_chunks = []  # Track all evidence for final metadata
         all_generation_metadata = []  # Track per-sub-answer generation metadata
+        retrieval_diagnostics = []  # Track per-sub-question retrieval guardrail info
+        retrieval_mode = self._get_retrieval_mode()
         
         for sub_query_data in sub_queries:
             sub_query_text = sub_query_data['text']
@@ -279,14 +429,20 @@ class BaselineRAGPipeline:
             
             # Step 1: Retrieve evidence for this sub-question
             self.logger.debug(f"Retrieving top-{top_k} evidence chunks")
-            evidence_chunks = self.retriever.retrieve(sub_query_text, top_k=top_k)
+            evidence_chunks, retrieval_diag = self._retrieve_with_guardrail(
+                sub_query_text=sub_query_text,
+                top_k=top_k,
+                retrieval_mode=retrieval_mode
+            )
+            retrieval_diag['sub_query_id'] = sub_query_id
+            retrieval_diagnostics.append(retrieval_diag)
             
             if not evidence_chunks:
                 self.logger.warning(f"No evidence retrieved for sub-question {sub_query_id}")
             else:
                 self.logger.info(
                     f"Retrieved {len(evidence_chunks)} evidence chunks, "
-                    f"top score: {evidence_chunks[0].score_dense:.4f}"
+                    f"top score: {self._chunk_primary_score(evidence_chunks[0], retrieval_mode):.4f}"
                 )
 
             self.logger.info(
@@ -296,7 +452,12 @@ class BaselineRAGPipeline:
                     "data": {
                         "sub_query_id": sub_query_id,
                         "retrieved_count": len(evidence_chunks),
-                        "top_score": evidence_chunks[0].score_dense if evidence_chunks else None
+                        "top_score": (
+                            self._chunk_primary_score(evidence_chunks[0], retrieval_mode)
+                            if evidence_chunks else None
+                        ),
+                        "score_metric": self._score_metric_for_mode(retrieval_mode),
+                        "guardrail": retrieval_diag,
                     }
                 }
             )
@@ -575,7 +736,14 @@ class BaselineRAGPipeline:
             'retrieval_metadata': {
                 'top_k': top_k,
                 'num_retrieved': len(all_evidence_chunks[:top_k * len(sub_queries)]),
-                'top_score': all_evidence_chunks[0].score_dense if all_evidence_chunks else 0.0,
+                'top_score': (
+                    max(
+                        [self._chunk_primary_score(chunk, retrieval_mode) for chunk in all_evidence_chunks],
+                        default=0.0
+                    )
+                ),
+                'score_metric': self._score_metric_for_mode(retrieval_mode),
+                'guardrail_diagnostics': retrieval_diagnostics,
                 'evidence_doc_ids': unique_evidence_doc_ids[:10]  # Limit to top 10 for display
             }
         }

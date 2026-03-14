@@ -7,6 +7,7 @@ capturing token-level logits and scores for downstream verifier modules.
 """
 
 import torch
+import re
 from transformers import (
     AutoConfig,
     AutoTokenizer,
@@ -333,6 +334,30 @@ class GeneratorWrapper:
             "Passage N:" format to prevent FLAN-T5 from generating citation
             references like "[1]" instead of actual answers.
         """
+        if self.model_family == 'causal':
+            # Causal instruction models benefit from explicit anti-meta instructions.
+            if not evidence_chunks:
+                return (
+                    "You are a factual assistant. Answer directly and concisely. "
+                    "Do not include meta commentary, self-evaluation, or notes.\n\n"
+                    f"Question: {prompt}\n\nAnswer:"
+                )
+
+            evidence_texts = []
+            for i, chunk in enumerate(evidence_chunks, 1):
+                evidence_texts.append(f"Passage {i}: {chunk.text}")
+            evidence_context = "\n\n".join(evidence_texts)
+
+            return (
+                "You are a factual assistant. Use the provided passages to answer the question. "
+                "Answer directly and concisely in plain prose. "
+                "Do not include meta commentary, self-evaluation, note sections, "
+                "or statements about passage selection.\n\n"
+                f"Context:\n{evidence_context}\n\n"
+                f"Question: {prompt}\n\n"
+                "Answer:"
+            )
+
         if not evidence_chunks:
             # No evidence provided, just use the question
             return f"Question: {prompt}\n\nAnswer:"
@@ -355,6 +380,37 @@ class GeneratorWrapper:
         )
         
         return formatted_prompt
+
+    def _sanitize_generated_text(self, text: str) -> str:
+        """Remove common meta-commentary tails from generated responses."""
+        if not text:
+            return text
+
+        cleaned = text.strip()
+        # Remove trailing explicit note sections.
+        cleaned = re.sub(r"\n\s*Note:\s.*$", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+        lines = cleaned.splitlines()
+        if not lines:
+            return cleaned
+
+        meta_starts = (
+            "you are correct",
+            "to answer your question more directly",
+            "i've included elements",
+            "however, the passage numbers",
+        )
+
+        kept = []
+        for line in lines:
+            stripped = line.strip()
+            lowered = stripped.lower()
+            if stripped and lowered.startswith(meta_starts):
+                break
+            kept.append(line)
+
+        cleaned = "\n".join(kept).strip()
+        return cleaned if cleaned else text.strip()
     
     def generate_with_metadata(
         self,
@@ -364,7 +420,10 @@ class GeneratorWrapper:
         temperature: float = 1.0,
         top_p: float = 1.0,
         num_beams: int = 1,
-        do_sample: bool = False
+        do_sample: bool = False,
+        repetition_penalty: Optional[float] = None,
+        no_repeat_ngram_size: Optional[int] = None,
+        sanitize_meta_text: bool = False,
     ) -> Dict:
         """
         Generate text response with comprehensive metadata capture.
@@ -425,17 +484,26 @@ class GeneratorWrapper:
             f"temp={temperature}, top_p={top_p}"
         )
         
+        generate_kwargs = {
+            'max_new_tokens': max_new_tokens,
+            'temperature': temperature,
+            'top_p': top_p,
+            'num_beams': num_beams,
+            'do_sample': do_sample,
+            'output_scores': True,
+            'return_dict_in_generate': True,
+            'pad_token_id': self.tokenizer.pad_token_id,
+        }
+
+        if repetition_penalty is not None and repetition_penalty > 0:
+            generate_kwargs['repetition_penalty'] = repetition_penalty
+        if no_repeat_ngram_size is not None and no_repeat_ngram_size > 0:
+            generate_kwargs['no_repeat_ngram_size'] = int(no_repeat_ngram_size)
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                num_beams=num_beams,
-                do_sample=do_sample,
-                output_scores=True,
-                return_dict_in_generate=True,
-                pad_token_id=self.tokenizer.pad_token_id,
+                **generate_kwargs,
             )
 
         # Detect severe decoding collapse early (e.g., same token repeated).
@@ -463,6 +531,8 @@ class GeneratorWrapper:
             generated_ids,
             skip_special_tokens=True
         )
+        if sanitize_meta_text:
+            generated_text = self._sanitize_generated_text(generated_text)
         
         # Extract token-level information
         # For seq2seq models, we need to decode each token individually
@@ -513,6 +583,9 @@ class GeneratorWrapper:
                 'top_p': top_p,
                 'num_beams': num_beams,
                 'do_sample': do_sample,
+                'repetition_penalty': repetition_penalty,
+                'no_repeat_ngram_size': no_repeat_ngram_size,
+                'sanitize_meta_text': sanitize_meta_text,
                 'model_name': self.model_name,
                 'model_family': self.model_family
             }

@@ -71,6 +71,42 @@ def main():
         help='Override verification.intrinsic.strict_logits at runtime'
     )
     parser.add_argument(
+        '--temperature',
+        type=float,
+        default=None,
+        help='Override generation.temperature at runtime'
+    )
+    parser.add_argument(
+        '--top-p',
+        type=float,
+        default=None,
+        help='Override generation.top_p at runtime'
+    )
+    parser.add_argument(
+        '--do-sample',
+        choices=['true', 'false'],
+        default=None,
+        help='Override generation.do_sample at runtime'
+    )
+    parser.add_argument(
+        '--repetition-penalty',
+        type=float,
+        default=None,
+        help='Override generation.repetition_penalty at runtime'
+    )
+    parser.add_argument(
+        '--no-repeat-ngram-size',
+        type=int,
+        default=None,
+        help='Override generation.no_repeat_ngram_size at runtime'
+    )
+    parser.add_argument(
+        '--sanitize-meta-text',
+        choices=['true', 'false'],
+        default=None,
+        help='Override generation.sanitize_meta_text at runtime'
+    )
+    parser.add_argument(
         '--split',
         type=str,
         default='test',
@@ -137,6 +173,30 @@ def main():
     if args.max_new_tokens is not None:
         runtime_config.setdefault('generation', {})
         runtime_config['generation']['max_new_tokens'] = int(args.max_new_tokens)
+
+    if args.temperature is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['temperature'] = float(args.temperature)
+
+    if args.top_p is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['top_p'] = float(args.top_p)
+
+    if args.do_sample is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['do_sample'] = (args.do_sample == 'true')
+
+    if args.repetition_penalty is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['repetition_penalty'] = float(args.repetition_penalty)
+
+    if args.no_repeat_ngram_size is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['no_repeat_ngram_size'] = int(args.no_repeat_ngram_size)
+
+    if args.sanitize_meta_text is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['sanitize_meta_text'] = (args.sanitize_meta_text == 'true')
 
     if args.strict_logits is not None:
         runtime_config.setdefault('verification', {})

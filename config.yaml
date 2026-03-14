@@ -114,6 +114,18 @@ retrieval:
     fusion_method: "rrf"  # Fusion method: "linear" or "rrf" (reciprocal rank fusion)
     rrf_k: 60  # RRF constant (only used if fusion_method="rrf")
 
+  # Retrieval guardrails for low-confidence retrieval cases.
+  # If top score is too low (or fewer than top_k chunks are returned),
+  # retry retrieval with a larger candidate pool and keep best top_k.
+  guardrails:
+    enabled: true
+    low_score_thresholds:
+      dense: 0.20
+      bm25: 2.0
+      hybrid: 0.03
+    fallback_top_k_multiplier: 2
+    max_fallback_top_k: 20
+
 # Generation Configuration
 generation:
   # Maximum input tokens to pass into generator tokenizer
@@ -126,6 +138,14 @@ generation:
   temperature: 0.7
   top_p: 0.9
   do_sample: true
+
+  # Optional decoding controls for causal models (e.g., Qwen)
+  # Helps reduce repetitive/meta-text outputs during evaluation.
+  repetition_penalty: 1.05
+  no_repeat_ngram_size: 3
+
+  # Remove common self-referential trailing text ("Note:", "You are correct", etc.)
+  sanitize_meta_text: true
   
   # Load model in 8-bit (for larger models)
   load_in_8bit: false
