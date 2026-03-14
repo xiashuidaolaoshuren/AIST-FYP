@@ -309,78 +309,51 @@ class GeneratorWrapper:
         """
         Format the prompt with evidence context.
         
-        Creates a structured prompt that includes relevant evidence chunks
-        followed by the user's question. Uses "Passage N:" format to avoid
-        confusion with citation-style markers.
-        
-        Args:
-            prompt: User's query/question
-            evidence_chunks: List of relevant evidence chunks
-        
-        Returns:
-            Formatted prompt string with context and question
-        
-        Example:
-            Context: Passage 1: Deep learning is a type of machine learning...
-            
-            Passage 2: Neural networks use multiple layers...
-            
-            Question: What is machine learning?
-            
-            Answer:
-        
-        Note:
-            Previously used [1] [2] [3] citation markers, but changed to
-            "Passage N:" format to prevent FLAN-T5 from generating citation
-            references like "[1]" instead of actual answers.
+        Creates a structured prompt that optionally incorporates the tokenizer's
+        chat formatting via `apply_chat_template` if supported by the model,
+        or gracefully degrades to raw concatenation for non-chat models.
         """
-        if self.model_family == 'causal':
-            # Causal instruction models benefit from explicit anti-meta instructions.
-            if not evidence_chunks:
-                return (
-                    "You are a factual assistant. Answer directly and concisely. "
-                    "Do not include meta commentary, self-evaluation, or notes. "
-                    "Respond in English only.\n\n"
-                    f"Question: {prompt}\n\nAnswer:"
-                )
-
-            evidence_texts = []
-            for i, chunk in enumerate(evidence_chunks, 1):
-                evidence_texts.append(f"Passage {i}: {chunk.text}")
-            evidence_context = "\n\n".join(evidence_texts)
-
-            return (
-                "You are a factual assistant. Use the provided passages to answer the question. "
-                "Answer directly and concisely in plain prose. "
-                "Do not include meta commentary, self-evaluation, note sections, "
-                "or statements about passage selection. Respond in English only.\n\n"
-                f"Context:\n{evidence_context}\n\n"
-                f"Question: {prompt}\n\n"
-                "Answer:"
-            )
-
-        if not evidence_chunks:
-            # No evidence provided, just use the question
-            return f"Question: {prompt}\n\nAnswer:"
-        
-        # Format evidence context without citation numbers to avoid confusion
-        # FLAN-T5 sometimes interprets [1] [2] [3] as citation references
-        # Instead, use "Passage N:" format which is less ambiguous
-        evidence_texts = []
-        for i, chunk in enumerate(evidence_chunks, 1):
-            evidence_texts.append(f"Passage {i}: {chunk.text}")
-        
-        # Join with double newlines for clear separation
-        evidence_context = "\n\n".join(evidence_texts)
-        
-        # Create structured prompt
-        formatted_prompt = (
-            f"Context: {evidence_context}\n\n"
-            f"Question: {prompt}\n\n"
-            f"Answer:"
+        system_instruction = (
+            "You are a factual assistant. If context is provided, use the provided passages to "
+            "answer the question. Answer directly and concisely in plain prose. "
+            "Do not include meta commentary, self-evaluation, note sections, or statements "
+            "about passage selection. Respond in English only."
         )
+
+        user_content = ""
+        if not evidence_chunks:
+            user_content = f"Question: {prompt}"
+        else:
+            evidence_texts = [f"Passage {i}: {chunk.text}" for i, chunk in enumerate(evidence_chunks, 1)]
+            evidence_context = "\n\n".join(evidence_texts)
+            user_content = f"Context:\n{evidence_context}\n\nQuestion: {prompt}"
+
+        # 1. Structure the message
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_content}
+        ]
+
+        # 2. Try the built-in tokenizer apply_chat_template natively
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            # Ensure the tokenizer has a template initialized
+            if getattr(self.tokenizer, "chat_template", None) is not None or getattr(self.tokenizer, "default_chat_template", None) is not None:
+                try:
+                    formatted_prompt = self.tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=True
+                    )
+                    return formatted_prompt
+                except Exception as e:
+                    self.logger.warning(f"apply_chat_template failed: {e}. Falling back to manual formatting.")
+
+        # 3. Fallbacks 
+        if self.model_family == 'causal':
+            return f"{system_instruction}\n\n{user_content}\n\nAnswer:"
         
-        return formatted_prompt
+        # Seq2Seq fallback (e.g. FLAN-T5 ignores system roles traditionally)
+        return f"{user_content}\n\nAnswer:"
 
     def _sanitize_generated_text(self, text: str) -> str:
         """Remove common meta-commentary tails from generated responses."""

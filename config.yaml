@@ -109,9 +109,9 @@ retrieval:
   
   # Hybrid Retrieval Configuration
   hybrid:
-    alpha: 0.5  # Weight for dense scores in linear fusion (0-1)
+    alpha: 0.7  # Weight for dense scores in linear fusion (0-1)
                 # alpha=1.0: dense only, alpha=0.0: BM25 only
-    fusion_method: "rrf"  # Fusion method: "linear" or "rrf" (reciprocal rank fusion)
+    fusion_method: "linear"  # Fusion method: "linear" or "rrf" (reciprocal rank fusion)
     rrf_k: 60  # RRF constant (only used if fusion_method="rrf")
 
   # Retrieval guardrails for low-confidence retrieval cases.
@@ -122,7 +122,7 @@ retrieval:
     low_score_thresholds:
       dense: 0.20
       bm25: 2.0
-      hybrid: 0.03
+      hybrid: 0.040
     fallback_top_k_multiplier: 2
     max_fallback_top_k: 20
 
