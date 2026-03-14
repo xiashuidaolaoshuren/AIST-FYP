@@ -12,6 +12,7 @@ import argparse
 import uuid
 from pathlib import Path
 from datetime import datetime
+from typing import Any, Dict
 
 import yaml
 
@@ -248,6 +249,32 @@ def run_demo(config_path: str = "config.yaml"):
     
     # Store all results for JSON output
     all_results = []
+
+    def _sanitize_generation_metadata_for_demo(meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Drop heavy token payloads from demo artifacts while preserving key schema."""
+        if not isinstance(meta, dict):
+            return meta
+
+        sanitized = dict(meta)
+        sanitized.pop('token_ids', None)
+        sanitized['logits'] = []
+        sanitized['scores'] = []
+
+        if isinstance(sanitized.get('sub_answer_metadata'), list):
+            updated_entries = []
+            for entry in sanitized['sub_answer_metadata']:
+                if not isinstance(entry, dict):
+                    updated_entries.append(entry)
+                    continue
+
+                entry_copy = dict(entry)
+                nested_meta = entry_copy.get('metadata')
+                if isinstance(nested_meta, dict):
+                    entry_copy['metadata'] = _sanitize_generation_metadata_for_demo(nested_meta)
+                updated_entries.append(entry_copy)
+            sanitized['sub_answer_metadata'] = updated_entries
+
+        return sanitized
     
     # Run each query
     for query_idx, query in enumerate(sample_queries, 1):
@@ -297,8 +324,8 @@ def run_demo(config_path: str = "config.yaml"):
             gen_meta = result['generator_metadata']
             print(f"   Tokens Generated: {len(gen_meta.get('tokens', []))}")
             print(f"   Sub-Answers Generated: {len(gen_meta.get('sub_answers', []))}")
-            print(f"   Logits Captured: {len(gen_meta.get('logits', []))} positions")
-            print(f"   Scores Captured: {len(gen_meta.get('scores', []))} probabilities")
+            print("   Logits Saved: 0 (excluded from demo JSON)")
+            print("   Scores Saved: 0 (excluded from demo JSON)")
             print(f"   Evidence Used: {len(gen_meta.get('evidence_used', []))} chunks")
             print()
             
@@ -331,17 +358,11 @@ def run_demo(config_path: str = "config.yaml"):
         for result_obj in all_results:
             result = result_obj['result'].copy()
             
-            # Remove logits (numpy arrays) for JSON serialization
+            # Remove heavy token payloads for compact demo artifacts.
             if 'generator_metadata' in result:
-                gen_meta = result['generator_metadata'].copy()
-                if 'logits' in gen_meta:
-                    # Replace logits with shape info
-                    logits_info = [
-                        {'shape': list(logit.shape), 'dtype': str(logit.dtype)}
-                        for logit in gen_meta['logits']
-                    ]
-                    gen_meta['logits'] = logits_info
-                result['generator_metadata'] = gen_meta
+                result['generator_metadata'] = _sanitize_generation_metadata_for_demo(
+                    result['generator_metadata']
+                )
             
             # Convert Claim objects to dictionaries for JSON serialization
             if 'claims_by_sub_answer' in result:

@@ -339,7 +339,8 @@ class GeneratorWrapper:
             if not evidence_chunks:
                 return (
                     "You are a factual assistant. Answer directly and concisely. "
-                    "Do not include meta commentary, self-evaluation, or notes.\n\n"
+                    "Do not include meta commentary, self-evaluation, or notes. "
+                    "Respond in English only.\n\n"
                     f"Question: {prompt}\n\nAnswer:"
                 )
 
@@ -352,7 +353,7 @@ class GeneratorWrapper:
                 "You are a factual assistant. Use the provided passages to answer the question. "
                 "Answer directly and concisely in plain prose. "
                 "Do not include meta commentary, self-evaluation, note sections, "
-                "or statements about passage selection.\n\n"
+                "or statements about passage selection. Respond in English only.\n\n"
                 f"Context:\n{evidence_context}\n\n"
                 f"Question: {prompt}\n\n"
                 "Answer:"
