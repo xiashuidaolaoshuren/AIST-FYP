@@ -8,8 +8,12 @@ Supports multiple data strategies (development, validation, production).
 
 import sys
 import json
+import argparse
+import uuid
 from pathlib import Path
 from datetime import datetime
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -148,7 +152,38 @@ def display_sub_answers(sub_answers: list, claims_by_sub_answer: list):
         print()
 
 
-def run_demo():
+def _build_runtime_config(
+    base_config_path: str,
+    model_name: str = None,
+    max_input_tokens: int = None,
+    max_new_tokens: int = None,
+) -> str:
+    """Create a runtime config file by overriding selected fields."""
+    with open(base_config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+
+    if model_name:
+        config.setdefault('models', {})
+        config['models']['generator'] = model_name
+
+    if max_input_tokens is not None:
+        config.setdefault('generation', {})
+        config['generation']['max_input_tokens'] = int(max_input_tokens)
+
+    if max_new_tokens is not None:
+        config.setdefault('generation', {})
+        config['generation']['max_new_tokens'] = int(max_new_tokens)
+
+    output_dir = Path("outputs")
+    output_dir.mkdir(exist_ok=True)
+    runtime_path = output_dir / f"runtime_config_{uuid.uuid4().hex[:8]}.yaml"
+    with open(runtime_path, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(config, f, sort_keys=False, allow_unicode=False)
+
+    return str(runtime_path)
+
+
+def run_demo(config_path: str = "config.yaml"):
     """Run the baseline RAG pipeline demo."""
     print_section("BASELINE RAG PIPELINE DEMO", "=")
     
@@ -175,13 +210,17 @@ def run_demo():
     
     # Step 2: Initialize pipeline
     print("\n🔧 Initializing Pipeline...")
-    print(f"   Loading from config.yaml ({chosen_strategy} strategy)")
+    print(f"   Loading from {config_path} ({chosen_strategy} strategy)")
     
     try:
         pipeline = BaselineRAGPipeline.from_config(
-            config_path="config.yaml",
+            config_path=config_path,
             strategy=chosen_strategy
         )
+        if pipeline.config:
+            print(f"   Generator model: {pipeline.config.models.generator}")
+            print(f"   max_input_tokens: {pipeline.config.generation.get('max_input_tokens', 'N/A')}")
+            print(f"   max_new_tokens: {pipeline.config.generation.max_new_tokens}")
         print("✓ Pipeline initialized successfully\n")
     except FileNotFoundError as e:
         print(f"\n❌ ERROR: {e}")
@@ -360,8 +399,42 @@ def run_demo():
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Run Baseline RAG demo")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.yaml",
+        help="Path to configuration file (default: config.yaml)",
+    )
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default=None,
+        help="Override models.generator at runtime",
+    )
+    parser.add_argument(
+        "--max-input-tokens",
+        type=int,
+        default=None,
+        help="Override generation.max_input_tokens at runtime",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=None,
+        help="Override generation.max_new_tokens at runtime",
+    )
+    args = parser.parse_args()
+
+    runtime_config_path = _build_runtime_config(
+        base_config_path=args.config,
+        model_name=args.model_name,
+        max_input_tokens=args.max_input_tokens,
+        max_new_tokens=args.max_new_tokens,
+    )
+
     try:
-        run_demo()
+        run_demo(config_path=runtime_config_path)
     except KeyboardInterrupt:
         print("\n\n⚠️  Demo interrupted by user")
         sys.exit(0)
@@ -370,6 +443,11 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        try:
+            Path(runtime_config_path).unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

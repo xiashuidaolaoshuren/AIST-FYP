@@ -7,7 +7,12 @@ capturing token-level logits and scores for downstream verifier modules.
 """
 
 import torch
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+)
 from typing import List, Dict, Optional, Tuple, Any
 import numpy as np
 
@@ -17,11 +22,11 @@ from src.utils.logger import setup_logger
 
 class GeneratorWrapper:
     """
-    Wrapper for seq2seq LLM generation with metadata capture.
+    Wrapper for seq2seq/causal LLM generation with metadata capture.
     
-    Loads a transformer-based seq2seq model (e.g., FLAN-T5, T5, mT5) and
-    generates text responses while capturing token-level metadata including
-    logits, scores, and evidence usage for hallucination detection.
+    Loads a transformer-based model and generates text responses while
+    capturing token-level metadata including logits, scores, and evidence
+    usage for hallucination detection.
     
     Attributes:
         model_name: Name of the pretrained model
@@ -67,6 +72,7 @@ class GeneratorWrapper:
         self.model_name = model_name
         self.device = device
         self.max_input_tokens = max_input_tokens
+        self.model_family = 'seq2seq'
         self.logger = setup_logger(__name__)
         
         self.logger.info(f"Loading model: {model_name}")
@@ -78,9 +84,20 @@ class GeneratorWrapper:
         # Load tokenizer
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            if self.tokenizer.pad_token_id is None and self.tokenizer.eos_token_id is not None:
+                # Causal chat models often don't define pad_token; set a safe fallback.
+                self.tokenizer.pad_token = self.tokenizer.eos_token
             self.logger.info("Tokenizer loaded successfully")
         except Exception as e:
             raise ValueError(f"Failed to load tokenizer: {e}")
+
+        # Detect architecture family first so loading and generation logic can branch safely.
+        try:
+            model_config = AutoConfig.from_pretrained(model_name)
+            self.model_family = 'seq2seq' if bool(getattr(model_config, 'is_encoder_decoder', False)) else 'causal'
+            self.logger.info("Detected generator family: %s", self.model_family)
+        except Exception as e:
+            raise ValueError(f"Failed to inspect model architecture: {e}")
         
         # Load model with appropriate settings
         try:
@@ -88,11 +105,12 @@ class GeneratorWrapper:
             # in environments pinned below torch 2.6.
             safe_tensor_kwargs = {'use_safetensors': True}
             loading_info: Dict[str, Any] = {}
+            model_cls = AutoModelForSeq2SeqLM if self.model_family == 'seq2seq' else AutoModelForCausalLM
 
             if load_in_8bit:
                 # 8-bit quantization for memory efficiency
                 try:
-                    self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
+                    self.model, loading_info = model_cls.from_pretrained(
                         model_name,
                         output_loading_info=True,
                         load_in_8bit=True,
@@ -105,7 +123,7 @@ class GeneratorWrapper:
                         model_name,
                         load_err
                     )
-                    self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
+                    self.model, loading_info = model_cls.from_pretrained(
                         model_name,
                         output_loading_info=True,
                         load_in_8bit=True,
@@ -119,7 +137,7 @@ class GeneratorWrapper:
                     if dtype is not None:
                         model_kwargs['dtype'] = dtype
                     try:
-                        self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
+                        self.model, loading_info = model_cls.from_pretrained(
                             model_name,
                             output_loading_info=True,
                             **model_kwargs
@@ -131,7 +149,7 @@ class GeneratorWrapper:
                             load_err
                         )
                         model_kwargs.pop('use_safetensors', None)
-                        self.model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
+                        self.model, loading_info = model_cls.from_pretrained(
                             model_name,
                             output_loading_info=True,
                             **model_kwargs
@@ -141,7 +159,7 @@ class GeneratorWrapper:
                     if dtype is not None and not is_cuda_device:
                         cpu_kwargs['dtype'] = torch.float32 if dtype == torch.float16 else dtype
                     try:
-                        cpu_model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
+                        cpu_model, loading_info = model_cls.from_pretrained(
                             model_name,
                             output_loading_info=True,
                             **cpu_kwargs
@@ -153,7 +171,7 @@ class GeneratorWrapper:
                             load_err
                         )
                         cpu_kwargs.pop('use_safetensors', None)
-                        cpu_model, loading_info = AutoModelForSeq2SeqLM.from_pretrained(
+                        cpu_model, loading_info = model_cls.from_pretrained(
                             model_name,
                             output_loading_info=True,
                             **cpu_kwargs
@@ -162,8 +180,11 @@ class GeneratorWrapper:
 
                 self.logger.info(f"Model loaded successfully on {self.model.device}")
 
-            repair_applied = self._repair_missing_embeddings_if_needed(loading_info)
-            tie_applied = self._enforce_tied_embeddings(force_full_sync=repair_applied)
+            repair_applied = False
+            tie_applied = False
+            if self.model_family == 'seq2seq':
+                repair_applied = self._repair_missing_embeddings_if_needed(loading_info)
+                tie_applied = self._enforce_tied_embeddings(force_full_sync=repair_applied)
             if repair_applied or tie_applied:
                 self.logger.info(
                     "Embedding fixes applied: repair=%s, tie=%s",
@@ -402,12 +423,19 @@ class GeneratorWrapper:
                 num_beams=num_beams,
                 do_sample=do_sample,
                 output_scores=True,
-                return_dict_in_generate=True
+                return_dict_in_generate=True,
+                pad_token_id=self.tokenizer.pad_token_id,
             )
 
         # Detect severe decoding collapse early (e.g., same token repeated).
-        if outputs.sequences is not None and outputs.sequences.shape[1] > 8:
-            gen_ids = outputs.sequences[0].tolist()
+        if self.model_family == 'seq2seq':
+            generated_ids = outputs.sequences[0]
+        else:
+            prompt_len = int(inputs['input_ids'].shape[1])
+            generated_ids = outputs.sequences[0][prompt_len:]
+
+        if generated_ids is not None and len(generated_ids) > 8:
+            gen_ids = generated_ids.tolist()
             tail = gen_ids[1:] if len(gen_ids) > 1 else gen_ids
             if tail:
                 dominant_ratio = max(tail.count(tid) for tid in set(tail)) / len(tail)
@@ -419,10 +447,7 @@ class GeneratorWrapper:
                         self.model_name
                     )
         
-        # Extract generated sequence
-        generated_ids = outputs.sequences[0]  # Remove batch dimension
-        
-        # Decode generated text (skip input tokens for seq2seq)
+        # Decode generated text
         generated_text = self.tokenizer.decode(
             generated_ids,
             skip_special_tokens=True
@@ -477,7 +502,8 @@ class GeneratorWrapper:
                 'top_p': top_p,
                 'num_beams': num_beams,
                 'do_sample': do_sample,
-                'model_name': self.model_name
+                'model_name': self.model_name,
+                'model_family': self.model_family
             }
         }
         
@@ -550,27 +576,79 @@ class GeneratorWrapper:
 
         formatted_prompt = self._format_prompt(prompt, evidence_chunks)
 
-        model_inputs = self.tokenizer(
-            formatted_prompt,
-            text_target=target_text,
-            return_tensors='pt',
-            truncation=True,
-            max_length=self._resolve_max_input_tokens()
-        ).to(self.model.device)
+        if self.model_family == 'seq2seq':
+            model_inputs = self.tokenizer(
+                formatted_prompt,
+                text_target=target_text,
+                return_tensors='pt',
+                truncation=True,
+                max_length=self._resolve_max_input_tokens()
+            ).to(self.model.device)
 
-        labels = model_inputs.get('labels')
-        if labels is None:
-            raise ValueError("Tokenizer did not return labels for teacher-forcing scoring")
+            labels = model_inputs.get('labels')
+            if labels is None:
+                raise ValueError("Tokenizer did not return labels for teacher-forcing scoring")
 
-        with torch.no_grad():
-            outputs = self.model(
-                input_ids=model_inputs['input_ids'],
-                attention_mask=model_inputs.get('attention_mask'),
-                labels=labels
-            )
+            with torch.no_grad():
+                outputs = self.model(
+                    input_ids=model_inputs['input_ids'],
+                    attention_mask=model_inputs.get('attention_mask'),
+                    labels=labels
+                )
 
-        logits = outputs.logits[0]  # (target_len, vocab_size)
-        label_ids = labels[0]
+            logits = outputs.logits[0]  # (target_len, vocab_size)
+            label_ids = labels[0]
+            target_position_map = list(range(label_ids.shape[0]))
+        else:
+            max_input_tokens = self._resolve_max_input_tokens()
+            prompt_ids = self.tokenizer(
+                formatted_prompt,
+                add_special_tokens=True,
+                truncation=True,
+                max_length=max_input_tokens,
+            )['input_ids']
+            target_ids = self.tokenizer(
+                target_text,
+                add_special_tokens=False,
+            )['input_ids']
+
+            if not target_ids:
+                return {
+                    'text': target_text,
+                    'prompt_text': formatted_prompt,
+                    'tokens': [],
+                    'token_ids': [],
+                    'token_entropies': [],
+                    'scores': [],
+                    'token_logprobs': [],
+                    'evidence_used': [chunk.doc_id for chunk in evidence_chunks],
+                    'generation_config': {
+                        'mode': 'teacher_forcing',
+                        'model_name': self.model_name,
+                        'model_family': self.model_family,
+                    }
+                }
+
+            total_len = len(prompt_ids) + len(target_ids)
+            if total_len > max_input_tokens:
+                keep_prompt_len = max(1, max_input_tokens - len(target_ids))
+                prompt_ids = prompt_ids[-keep_prompt_len:]
+
+            input_ids = prompt_ids + target_ids
+            input_tensor = torch.tensor([input_ids], dtype=torch.long, device=self.model.device)
+            attention_mask = torch.ones_like(input_tensor, device=self.model.device)
+
+            with torch.no_grad():
+                outputs = self.model(
+                    input_ids=input_tensor,
+                    attention_mask=attention_mask,
+                )
+
+            logits = outputs.logits[0]
+            label_ids = torch.tensor(target_ids, dtype=torch.long, device=self.model.device)
+            # Causal LM predicts token at position t from logits[t-1].
+            target_start = len(prompt_ids)
+            target_position_map = [target_start + i - 1 for i in range(len(target_ids))]
 
         token_ids = []
         tokens = []
@@ -583,7 +661,11 @@ class GeneratorWrapper:
             if token_id < 0:
                 continue
 
-            step_logits = logits[idx]
+            logits_idx = target_position_map[idx]
+            if logits_idx < 0 or logits_idx >= logits.shape[0]:
+                continue
+
+            step_logits = logits[logits_idx]
             step_probs = torch.softmax(step_logits, dim=-1)
             step_log_probs = torch.log(step_probs + 1e-12)
             entropy = -torch.sum(step_probs * step_log_probs)
@@ -610,6 +692,7 @@ class GeneratorWrapper:
             'evidence_used': evidence_used,
             'generation_config': {
                 'mode': 'teacher_forcing',
-                'model_name': self.model_name
+                'model_name': self.model_name,
+                'model_family': self.model_family
             }
         }

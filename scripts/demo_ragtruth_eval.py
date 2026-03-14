@@ -17,6 +17,7 @@ Usage:
 
 import sys
 from pathlib import Path
+import uuid
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -24,6 +25,7 @@ sys.path.insert(0, str(project_root))
 
 import argparse
 from tqdm import tqdm
+import yaml
 from src.utils.config import Config
 from src.utils.logger import setup_logger
 from src.pipelines.baseline_rag import BaselineRAGPipeline
@@ -43,6 +45,30 @@ def main():
         type=str,
         default='config.yaml',
         help='Path to configuration file (default: config.yaml)'
+    )
+    parser.add_argument(
+        '--model-name',
+        type=str,
+        default=None,
+        help='Override models.generator at runtime'
+    )
+    parser.add_argument(
+        '--max-input-tokens',
+        type=int,
+        default=None,
+        help='Override generation.max_input_tokens at runtime'
+    )
+    parser.add_argument(
+        '--max-new-tokens',
+        type=int,
+        default=None,
+        help='Override generation.max_new_tokens at runtime'
+    )
+    parser.add_argument(
+        '--strict-logits',
+        choices=['true', 'false'],
+        default=None,
+        help='Override verification.intrinsic.strict_logits at runtime'
     )
     parser.add_argument(
         '--split',
@@ -94,6 +120,36 @@ def main():
     )
     
     args = parser.parse_args()
+
+    # Build a runtime config so users can keep one canonical config file
+    # and switch model/token settings via CLI overrides.
+    with open(args.config, 'r', encoding='utf-8') as f:
+        runtime_config = yaml.safe_load(f)
+
+    if args.model_name:
+        runtime_config.setdefault('models', {})
+        runtime_config['models']['generator'] = args.model_name
+
+    if args.max_input_tokens is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['max_input_tokens'] = int(args.max_input_tokens)
+
+    if args.max_new_tokens is not None:
+        runtime_config.setdefault('generation', {})
+        runtime_config['generation']['max_new_tokens'] = int(args.max_new_tokens)
+
+    if args.strict_logits is not None:
+        runtime_config.setdefault('verification', {})
+        runtime_config['verification'].setdefault('intrinsic', {})
+        runtime_config['verification']['intrinsic']['strict_logits'] = (args.strict_logits == 'true')
+
+    runtime_config_dir = Path('outputs')
+    runtime_config_dir.mkdir(exist_ok=True)
+    runtime_config_path = runtime_config_dir / f"runtime_config_eval_{uuid.uuid4().hex[:8]}.yaml"
+    with open(runtime_config_path, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(runtime_config, f, sort_keys=False, allow_unicode=False)
+
+    args.config = str(runtime_config_path)
     
     # Setup logger
     logger = setup_logger(__name__)
@@ -121,6 +177,17 @@ def main():
 
     logger.info("\n📋 Loading configuration...")
     config = Config(args.config)
+    selected_model = str(config.models.generator)
+    configured_input_tokens = int(config.generation.get('max_input_tokens', 0) or 0)
+    configured_new_tokens = int(config.generation.get('max_new_tokens', 0) or 0)
+    logger.info(f"Generator model: {selected_model}")
+    logger.info(f"Generation max_input_tokens: {configured_input_tokens}")
+    logger.info(f"Generation max_new_tokens: {configured_new_tokens}")
+    if 'Qwen/Qwen2.5-7B-Instruct' in selected_model and configured_input_tokens < 4096:
+        raise ValueError(
+            "Evaluation constraint violation: Qwen2.5-7B-Instruct requires "
+            "generation.max_input_tokens >= 4096 for this project setup."
+        )
     config._config.setdefault('evaluation', {})
     config._config['evaluation'].setdefault('benchmarks', {})
     config._config['evaluation']['benchmarks'].setdefault('ragtruth', {})
@@ -196,6 +263,11 @@ def main():
         import traceback
         logger.error(traceback.format_exc())
         return 1
+    finally:
+        try:
+            runtime_config_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
