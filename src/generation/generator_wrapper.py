@@ -107,30 +107,41 @@ class GeneratorWrapper:
             loading_info: Dict[str, Any] = {}
             model_cls = AutoModelForSeq2SeqLM if self.model_family == 'seq2seq' else AutoModelForCausalLM
 
+            quantization_kwargs: Dict[str, Any] = {}
+            if load_in_8bit:
+                try:
+                    from transformers import BitsAndBytesConfig
+                    quantization_kwargs['quantization_config'] = BitsAndBytesConfig(load_in_8bit=True)
+                except Exception as quant_err:
+                    self.logger.warning(
+                        "8-bit requested but quantization setup is unavailable; "
+                        "falling back to standard precision: %s",
+                        quant_err
+                    )
+                    load_in_8bit = False
+
             if load_in_8bit:
                 # 8-bit quantization for memory efficiency
                 try:
                     self.model, loading_info = model_cls.from_pretrained(
                         model_name,
                         output_loading_info=True,
-                        load_in_8bit=True,
                         device_map='auto',
+                        **quantization_kwargs,
                         **safe_tensor_kwargs
                     )
                 except Exception as load_err:
                     self.logger.warning(
-                        "Safetensors loading failed for %s: %s",
+                        "8-bit loading failed for %s; falling back to standard precision: %s",
                         model_name,
                         load_err
                     )
-                    self.model, loading_info = model_cls.from_pretrained(
-                        model_name,
-                        output_loading_info=True,
-                        load_in_8bit=True,
-                        device_map='auto'
-                    )
-                self.logger.info("Model loaded with 8-bit quantization")
-            else:
+                    load_in_8bit = False
+
+                if load_in_8bit:
+                    self.logger.info("Model loaded with 8-bit quantization")
+
+            if not load_in_8bit:
                 # Standard loading
                 if is_cuda_device and torch.cuda.is_available():
                     model_kwargs = {'device_map': 'auto', **safe_tensor_kwargs}
