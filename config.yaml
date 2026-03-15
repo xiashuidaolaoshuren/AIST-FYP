@@ -9,10 +9,10 @@ models:
   sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
   
   # Generator LLM (instruction-tuned; stable for QA-style prompts)
-  generator: "Qwen/Qwen2.5-0.5B-Instruct"
+  #generator: "Qwen/Qwen2.5-0.5B-Instruct"
 
   # Fallback baseline (seq2seq)
-  # generator: "google/flan-t5-base"
+  generator: "google/flan-t5-base"
 
   # Optional long-context candidate (not instruction-tuned for QA, may degenerate):
   # generator: "google/long-t5-tglobal-base"
