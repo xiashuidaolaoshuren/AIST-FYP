@@ -46,7 +46,7 @@ data_strategy:
     max_articles: 10000
     name: "development"
   
-  # Validation: Medium testing (100k articles)
+  # Validation: Medium testing (200k articles)
   validation:
     max_articles: 200000
     name: "validation"
