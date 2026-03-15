@@ -7,6 +7,7 @@ downstream verification in Month 3-5.
 """
 
 from typing import Dict, List, Optional, Any, Tuple
+import re
 from pathlib import Path
 
 from src.retrieval.dense_retriever import DenseRetriever
@@ -291,6 +292,96 @@ class BaselineRAGPipeline:
         diagnostics['fallback_top_score'] = fallback_top_score
 
         return fallback_selection, diagnostics
+
+    @staticmethod
+    def _contains_cjk(text: str) -> bool:
+        """Detect whether text contains CJK characters."""
+        if not text:
+            return False
+        return bool(re.search(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", text))
+
+    def _filter_noisy_evidence_chunks(
+        self,
+        evidence_chunks: List[EvidenceChunk],
+        top_k: int,
+        retrieval_mode: str
+    ) -> Tuple[List[EvidenceChunk], Dict[str, Any]]:
+        """Drop low-information lexical-noise chunks before generation."""
+        if not evidence_chunks:
+            return evidence_chunks, {
+                'applied': False,
+                'before_count': 0,
+                'after_count': 0,
+                'removed_count': 0,
+                'removed_examples': [],
+            }
+
+        noisy_exact = {
+            'how can you learn to see?',
+            'how do you do?',
+            'how do they work?',
+            'what is intelligence, and who has it?',
+            'what the hell is it?',
+        }
+
+        kept: List[EvidenceChunk] = []
+        removed: List[EvidenceChunk] = []
+
+        for chunk in evidence_chunks:
+            text = (chunk.text or '').strip()
+            normalized = re.sub(r"\s+", " ", text).strip().lower().strip('"\'`')
+            dense_score = float(chunk.score_dense or 0.0)
+            bm25_score = float(chunk.score_bm25 or 0.0)
+
+            looks_noisy = False
+            if normalized in noisy_exact:
+                looks_noisy = True
+            elif normalized.startswith('programmed learning arrives'):
+                looks_noisy = True
+            elif normalized.startswith('is this what the people in this province expect of you'):
+                looks_noisy = True
+
+            # Conservative: only remove if semantic support is near zero and lexical signal drove it in.
+            if looks_noisy and dense_score <= 0.05 and bm25_score > 0.0:
+                removed.append(chunk)
+                continue
+
+            kept.append(chunk)
+
+        if not removed:
+            return evidence_chunks, {
+                'applied': False,
+                'before_count': len(evidence_chunks),
+                'after_count': len(evidence_chunks),
+                'removed_count': 0,
+                'removed_examples': [],
+            }
+
+        kept = sorted(
+            kept,
+            key=lambda c: self._chunk_primary_score(c, retrieval_mode),
+            reverse=True
+        )[:top_k]
+        for rank, chunk in enumerate(kept, start=1):
+            chunk.rank = rank
+
+        return kept, {
+            'applied': True,
+            'before_count': len(evidence_chunks),
+            'after_count': len(kept),
+            'removed_count': len(removed),
+            'removed_examples': [
+                {
+                    'doc_id': c.doc_id,
+                    'sent_id': c.sent_id,
+                    'text': (c.text or '')[:90],
+                    'score_dense': float(c.score_dense or 0.0),
+                    'score_bm25': float(c.score_bm25 or 0.0),
+                    'score_hybrid': float(c.score_hybrid or 0.0),
+                }
+                for c in removed[:3]
+            ],
+        }
     
     def run(
         self,
@@ -418,7 +509,7 @@ class BaselineRAGPipeline:
         combined_response_parts = []
         all_evidence_chunks = []  # Track all evidence for final metadata
         all_generation_metadata = []  # Track per-sub-answer generation metadata
-        retrieval_diagnostics = []  # Track per-sub-question retrieval guardrail info
+        retrieval_diagnostics = []  # Track per-sub-question retrieval diagnostics
         retrieval_mode = self._get_retrieval_mode()
         
         for sub_query_data in sub_queries:
@@ -434,6 +525,12 @@ class BaselineRAGPipeline:
                 top_k=top_k,
                 retrieval_mode=retrieval_mode
             )
+            evidence_chunks, noise_filter_diag = self._filter_noisy_evidence_chunks(
+                evidence_chunks=evidence_chunks,
+                top_k=top_k,
+                retrieval_mode=retrieval_mode
+            )
+            retrieval_diag['noise_filter'] = noise_filter_diag
             retrieval_diag['sub_query_id'] = sub_query_id
             retrieval_diagnostics.append(retrieval_diag)
             
@@ -472,6 +569,39 @@ class BaselineRAGPipeline:
                 evidence_chunks=evidence_chunks,
                 **gen_params
             )
+
+            # Language-safety fallback: if CJK leaks into output, regenerate once with strict decoding.
+            generation_output['language_retry_applied'] = False
+            generation_output['language_post_filter_applied'] = False
+            if self._contains_cjk(generation_output.get('text', '')):
+                strict_gen_params = dict(gen_params)
+                strict_gen_params.update({
+                    'do_sample': False,
+                    'temperature': 0.0,
+                    'top_p': 1.0,
+                    'sanitize_meta_text': True,
+                })
+
+                retry_output = self.generator.generate_with_metadata(
+                    prompt=sub_query_text,
+                    evidence_chunks=evidence_chunks,
+                    **strict_gen_params
+                )
+                retry_output['language_retry_applied'] = True
+                retry_output['language_post_filter_applied'] = False
+
+                # Last resort: strip residual CJK chars to enforce English-only answer surface.
+                if self._contains_cjk(retry_output.get('text', '')):
+                    stripped = re.sub(
+                        r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]",
+                        "",
+                        retry_output.get('text', '')
+                    )
+                    stripped = re.sub(r"\s+", " ", stripped).strip()
+                    retry_output['text'] = stripped
+                    retry_output['language_post_filter_applied'] = True
+
+                generation_output = retry_output
             
             # Add original sub-query to metadata
             generation_output['original_query'] = sub_query_text

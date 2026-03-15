@@ -239,12 +239,15 @@ def run_demo(config_path: str = "config.yaml"):
     # Define sample queries
     sample_queries = [
         "What is artificial intelligence?",
-        "How do machines learn from data?",
+        "What are the main types of machine learning?",
         "What is deep learning?",
         "What is natural language processing?",
         # Multi-question queries to test the new sub-answer handling
         "What is machine learning? How does it differ from traditional programming?",
-        "Explain neural networks? What are the main types? How do they work?"
+        "Explain neural networks? What are the main types? How do they work?",
+        # Cross-domain queries to test non-ML coverage
+        "What is the capital of Canada and what province is it in?",
+        "What caused the fall of the Western Roman Empire?"
     ]
     
     # Store all results for JSON output

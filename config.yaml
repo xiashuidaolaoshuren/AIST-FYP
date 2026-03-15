@@ -9,7 +9,10 @@ models:
   sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
   
   # Generator LLM (instruction-tuned; stable for QA-style prompts)
-  generator: "google/flan-t5-base"
+  generator: "Qwen/Qwen2.5-0.5B-Instruct"
+
+  # Fallback baseline (seq2seq)
+  # generator: "google/flan-t5-base"
 
   # Optional long-context candidate (not instruction-tuned for QA, may degenerate):
   # generator: "google/long-t5-tglobal-base"
@@ -45,12 +48,12 @@ data_strategy:
   
   # Validation: Medium testing (100k articles)
   validation:
-    max_articles: 100000
+    max_articles: 200000
     name: "validation"
   
   # Production: Capped Wikipedia corpus
   production:
-    max_articles: 500000
+    max_articles: null  # Set to null to process entire dump
     name: "production"
     dump_date: null  # Optional YYYYMMDD to pin snapshot (overrides data.wikipedia_dump_date)
 
@@ -135,9 +138,9 @@ generation:
   max_new_tokens: 512
   
   # Sampling parameters
-  temperature: 0.7
+  temperature: 0.2
   top_p: 0.9
-  do_sample: true
+  do_sample: false
 
   # Optional decoding controls for causal models (e.g., Qwen)
   # Helps reduce repetitive/meta-text outputs during evaluation.
