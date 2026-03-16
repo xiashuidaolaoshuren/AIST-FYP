@@ -648,19 +648,26 @@ class RAGTruthEvaluator:
         # Step 2: Verify claims if verifier is enabled
         claim_decisions = []
         claim_signals = []
+        verified_pairs = []
         if self.verifier_hub and self.verifier_hub.enabled and resolved_pairs:
+            batch_records = []
             for pair in resolved_pairs:
-                claim = pair['claim']
-                evidence = pair['evidence']
-                metadata = pair.get('metadata') or default_generation_metadata
-                
-                # Verify claim
-                signal = self.verifier_hub.verify_claim(claim, evidence, metadata)
+                batch_records.append({
+                    'claim': pair['claim'],
+                    'evidence': pair['evidence'],
+                    'metadata': pair.get('metadata') or default_generation_metadata,
+                })
+
+            batch_signals = self.verifier_hub.verify_claims_batch(batch_records)
+            for pair, signal in zip(resolved_pairs, batch_signals):
+                if signal is None:
+                    continue
+                verified_pairs.append(pair)
                 claim_signals.append(signal)
-                
-                # Aggregate into decision
                 decision = self.aggregator.aggregate(signal)
                 claim_decisions.append(decision)
+        else:
+            verified_pairs = resolved_pairs
 
         mitigation_actions = []
         filtered_response = generated_response
@@ -678,6 +685,7 @@ class RAGTruthEvaluator:
             resolved_pairs = mitigation_result.get('claim_records', resolved_pairs)
             claim_decisions = mitigation_result.get('decisions', claim_decisions)
             claim_signals = mitigation_result.get('signals', claim_signals)
+            verified_pairs = resolved_pairs
         
         # Step 3: Compare with gold annotations
         gold_has_hallucination = len(hallucination_gold_labels) > 0
@@ -714,8 +722,10 @@ class RAGTruthEvaluator:
         # Detailed per-claim analysis
         claim_results = []
         for idx, decision in enumerate(claim_decisions):
-            claim_text = resolved_pairs[idx]['claim'].text
-            evidence_items = resolved_pairs[idx].get('evidence', [])
+            if idx >= len(verified_pairs):
+                break
+            claim_text = verified_pairs[idx]['claim'].text
+            evidence_items = verified_pairs[idx].get('evidence', [])
             
             # Check if this claim overlaps with any gold hallucination span
             overlaps_gold = self._check_overlap_with_gold(

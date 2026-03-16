@@ -12,8 +12,9 @@ Month 4 Architecture:
 - Supports gradual feature rollout (Month 3: Intrinsic + Grounded, Month 4: + NLI + Self-Agreement)
 """
 
-from typing import Dict, Optional, Union, List, Tuple
+from typing import Dict, Optional, Union, List, Tuple, Any
 import traceback
+import time
 
 from src.utils.data_structures import Claim, EvidenceChunk, VerifierSignal
 from src.utils.config import Config
@@ -278,6 +279,214 @@ class VerifierHub:
             single_evidence = evidence
         
         return self._verify_single_chunk(claim, single_evidence, metadata)
+
+    def verify_claims_batch(self, claim_records: List[Dict[str, Any]]) -> List[Optional[VerifierSignal]]:
+        """
+        Verify multiple claim records in one batch.
+
+        Each record should include:
+            - claim: Claim
+            - evidence: EvidenceChunk or List[EvidenceChunk]
+            - metadata: dict (optional)
+
+        The method batches NLI calls for single-evidence records when possible,
+        while preserving existing fallback behavior and output ordering.
+        """
+        if not self.enabled:
+            return [None] * len(claim_records)
+
+        if not claim_records:
+            return []
+
+        start_ts = time.perf_counter()
+        results: List[Optional[VerifierSignal]] = [None] * len(claim_records)
+
+        single_items: List[Dict[str, Any]] = []
+        multi_items: List[Dict[str, Any]] = []
+
+        for idx, record in enumerate(claim_records):
+            claim = record.get('claim')
+            evidence = record.get('evidence')
+            metadata = record.get('metadata') or {}
+
+            if claim is None or evidence is None:
+                continue
+
+            is_multi_evidence = isinstance(evidence, list)
+            if is_multi_evidence and self.verify_all_evidence and len(evidence) > 1:
+                multi_items.append({
+                    'index': idx,
+                    'claim': claim,
+                    'evidence': evidence,
+                    'metadata': metadata,
+                })
+                continue
+
+            if is_multi_evidence:
+                if len(evidence) == 0:
+                    continue
+                evidence_chunk = evidence[0]
+            else:
+                evidence_chunk = evidence
+
+            if evidence_chunk is None:
+                continue
+
+            single_items.append({
+                'index': idx,
+                'claim': claim,
+                'evidence': evidence_chunk,
+                'metadata': metadata,
+            })
+
+        # Handle multi-evidence records using existing aggregation path.
+        for item in multi_items:
+            try:
+                results[item['index']] = self._verify_claim_multi(
+                    item['claim'],
+                    item['evidence'],
+                    item['metadata'],
+                )
+            except Exception as e:
+                self.logger.error(
+                    "Batch verify multi-evidence failed for claim %s: %s",
+                    getattr(item['claim'], 'claim_id', 'unknown'),
+                    str(e),
+                )
+                self.logger.debug(traceback.format_exc())
+
+        if not single_items:
+            elapsed_ms = (time.perf_counter() - start_ts) * 1000
+            self.logger.debug(
+                "verify_claims_batch complete: total=%d, single=0, multi=%d, elapsed_ms=%.2f",
+                len(claim_records),
+                len(multi_items),
+                elapsed_ms,
+            )
+            return results
+
+        # Precompute non-NLI signals so NLI can be resolved in one batched call.
+        prepared_items: List[Dict[str, Any]] = []
+        nli_claim_texts: List[str] = []
+        nli_evidence_texts: List[str] = []
+
+        for item in single_items:
+            claim = item['claim']
+            evidence = item['evidence']
+            metadata = item['metadata']
+
+            try:
+                # Intrinsic uncertainty.
+                disable_intrinsic = bool(metadata.get('disable_intrinsic_uncertainty'))
+                if self.uncertainty_detector is None or disable_intrinsic:
+                    uncertainty_signal = {'mean_entropy': 0.0}
+                else:
+                    try:
+                        uncertainty_signal = self.uncertainty_detector.compute_signal(
+                            claim, evidence, metadata
+                        )
+                    except Exception:
+                        if self.strict_logits:
+                            raise
+                        uncertainty_signal = {'mean_entropy': 0.0}
+
+                # Grounded signal.
+                if self.grounded_detector is None:
+                    grounded_signal = {
+                        'entities': 0.0,
+                        'numbers': 0.0,
+                        'tokens_overlap': 0.0,
+                    }
+                else:
+                    try:
+                        grounded_signal = self.grounded_detector.compute_signal(
+                            claim, evidence, metadata
+                        )
+                    except Exception:
+                        grounded_signal = {
+                            'entities': 0.0,
+                            'numbers': 0.0,
+                            'tokens_overlap': 0.0,
+                        }
+
+                # Self-agreement signal.
+                consistency_signal = {'variance': None}
+                if self.self_agreement_detector is not None:
+                    try:
+                        query = metadata.get('original_query', None)
+                        if query:
+                            consistency_signal = self.self_agreement_detector.detect(
+                                claim_text=claim.text,
+                                query=query,
+                                evidence_chunks=[evidence],
+                            )
+                    except Exception:
+                        consistency_signal = {'variance': None}
+
+                prepared_items.append({
+                    'index': item['index'],
+                    'claim': claim,
+                    'evidence': evidence,
+                    'uncertainty': uncertainty_signal,
+                    'grounded': grounded_signal,
+                    'consistency': consistency_signal,
+                })
+
+                if self.nli_detector is not None:
+                    nli_claim_texts.append(claim.text)
+                    nli_evidence_texts.append(evidence.text)
+
+            except Exception as e:
+                self.logger.error(
+                    "Batch verify prepare failed for claim %s: %s",
+                    getattr(claim, 'claim_id', 'unknown'),
+                    str(e),
+                )
+                self.logger.debug(traceback.format_exc())
+
+        # Batched NLI for prepared single-evidence items.
+        nli_scores: List[Dict[str, float]] = []
+        if self.nli_detector is not None and prepared_items:
+            try:
+                nli_scores = self.nli_detector.detect_batch(nli_claim_texts, nli_evidence_texts)
+            except Exception as e:
+                self.logger.warning("Batch NLI failed in verify_claims_batch: %s", str(e))
+                nli_scores = []
+
+        nli_idx = 0
+        for item in prepared_items:
+            if self.nli_detector is not None:
+                if nli_idx < len(nli_scores):
+                    nli_signal = nli_scores[nli_idx]
+                else:
+                    nli_signal = {'entailment': 0.33, 'neutral': 0.34, 'contradiction': 0.33}
+                nli_idx += 1
+            else:
+                nli_signal = None
+
+            signal = VerifierSignal(
+                claim_id=item['claim'].claim_id,
+                doc_id=item['evidence'].doc_id,
+                sent_id=item['evidence'].sent_id,
+                nli=nli_signal,
+                coverage=item['grounded'],
+                uncertainty=item['uncertainty'],
+                consistency=item['consistency'],
+                citation_span_match=item['grounded'].get('tokens_overlap', 0.0),
+                numeric_check=item['grounded'].get('numbers', 0.0) >= 0.999,
+            )
+            results[item['index']] = signal
+
+        elapsed_ms = (time.perf_counter() - start_ts) * 1000
+        self.logger.debug(
+            "verify_claims_batch complete: total=%d, single=%d, multi=%d, nli_batched=%d, elapsed_ms=%.2f",
+            len(claim_records),
+            len(prepared_items),
+            len(multi_items),
+            len(nli_claim_texts),
+            elapsed_ms,
+        )
+        return results
     
     def _verify_single_chunk(
         self,

@@ -737,7 +737,8 @@ class BaselineRAGPipeline:
             
             # Use evidence from first sub-question for now (can be refined)
             evidence_for_verification = all_evidence_chunks[:top_k]
-            
+
+            batch_records = []
             for claim, pair in zip(all_claims, claim_evidence_pairs):
                 # Choose evidence: all chunks or top-1 based on config
                 if verify_all:
@@ -774,18 +775,23 @@ class BaselineRAGPipeline:
                             'tokens': [],
                             'scores': []
                         }
-                    
-                    # Call VerifierHub to compute all signals
-                    signal = self.verifier_hub.verify_claim(
-                        claim, evidence_input, verification_metadata
+
+                    batch_records.append({
+                        'claim': claim,
+                        'evidence': evidence_input,
+                        'metadata': verification_metadata,
+                    })
+
+            batch_signals = self.verifier_hub.verify_claims_batch(batch_records)
+            for claim_record, signal in zip(batch_records, batch_signals):
+                if signal:
+                    verifier_signals.append(signal.to_dict())
+                else:
+                    claim = claim_record.get('claim')
+                    claim_id = getattr(claim, 'claim_id', 'unknown')
+                    self.logger.warning(
+                        f"VerifierHub returned None for claim {claim_id}, skipping signal"
                     )
-                    
-                    if signal:
-                        verifier_signals.append(signal.to_dict())
-                    else:
-                        self.logger.warning(
-                            f"VerifierHub returned None for claim {claim.claim_id}, skipping signal"
-                        )
             
             self.logger.info(f"Computed {len(verifier_signals)} verifier signals via VerifierHub")
             self.logger.info(

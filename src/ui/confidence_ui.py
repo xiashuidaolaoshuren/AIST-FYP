@@ -168,6 +168,7 @@ class ConfidenceUI:
                 
                 # Step 3: Verify and aggregate each claim
                 decisions = []
+                batch_records = []
                 for i, (claim, pair) in enumerate(zip(all_claims, claim_evidence_pairs)):
                     verification_metadata = metadata
                     for entry in sub_answer_metadata:
@@ -181,18 +182,17 @@ class ConfidenceUI:
                             verification_metadata.setdefault('original_query', entry.get('sub_query'))
                             break
 
-                    # Verify claim using VerifierHub
-                    signal = self.verifier_hub.verify_claim(
-                        claim,
-                        evidence_chunks,
-                        verification_metadata
-                    )
-                    
+                    batch_records.append({
+                        'claim': claim,
+                        'evidence': evidence_chunks,
+                        'metadata': verification_metadata,
+                    })
+
+                batch_signals = self.verifier_hub.verify_claims_batch(batch_records)
+                for claim, signal in zip(all_claims, batch_signals):
                     if signal:
-                        # Aggregate signals into final decision
                         decision = self.aggregator.aggregate(signal)
                         decisions.append(decision)
-                        
                         self.logger.debug(
                             f"Claim {claim.claim_id}: {decision.status} "
                             f"(confidence: {decision.confidence.get('overall_confidence', 0):.1f}%)"
@@ -240,13 +240,16 @@ class ConfidenceUI:
                         
                         # Re-verify corrected claims
                         corrected_decisions = []
-                        for claim in corrected_claims:
-                            signal = self.verifier_hub.verify_claim(
-                                claim,
-                                evidence_chunks,
-                                metadata
-                            )
-                            
+                        corrected_batch_records = [
+                            {
+                                'claim': claim,
+                                'evidence': evidence_chunks,
+                                'metadata': metadata,
+                            }
+                            for claim in corrected_claims
+                        ]
+                        corrected_signals = self.verifier_hub.verify_claims_batch(corrected_batch_records)
+                        for signal in corrected_signals:
                             if signal:
                                 decision = self.aggregator.aggregate(signal)
                                 corrected_decisions.append(decision)

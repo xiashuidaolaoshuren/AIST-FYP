@@ -170,13 +170,21 @@ class MitigationOrchestrator:
         if not self.verifier_hub or not getattr(self.verifier_hub, "enabled", False):
             return signals, decisions
 
+        batch_records = []
         for record in claim_records:
             claim = record.get("claim")
             evidence = record.get("evidence") or []
             metadata = record.get("metadata") or {}
             if claim is None or not evidence:
                 continue
-            signal = self.verifier_hub.verify_claim(claim, evidence, metadata)
+            batch_records.append({
+                "claim": claim,
+                "evidence": evidence,
+                "metadata": metadata,
+            })
+
+        batch_signals = self.verifier_hub.verify_claims_batch(batch_records)
+        for signal in batch_signals:
             if signal is None:
                 continue
             signals.append(signal)
