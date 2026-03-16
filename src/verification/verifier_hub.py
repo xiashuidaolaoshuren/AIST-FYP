@@ -507,9 +507,20 @@ class VerifierHub:
         """
         try:
             per_chunk_signals = []
+            nli_batch_scores = None
+
+            # Precompute NLI scores in batch for all evidence chunks when available.
+            if self.nli_detector is not None:
+                try:
+                    claim_texts = [claim.text] * len(evidence_list)
+                    evidence_texts = [chunk.text for chunk in evidence_list]
+                    nli_batch_scores = self.nli_detector.detect_batch(claim_texts, evidence_texts)
+                except Exception as e:
+                    self.logger.warning(f"Batch NLI precompute failed, falling back to per-chunk NLI: {str(e)}")
+                    nli_batch_scores = None
             
             # Collect signals from all chunks
-            for chunk in evidence_list:
+            for idx, chunk in enumerate(evidence_list):
                 try:
                     # Compute uncertainty and grounded signals for this chunk
                     if self.uncertainty_detector is None or metadata.get('disable_intrinsic_uncertainty'):
@@ -529,10 +540,13 @@ class VerifierHub:
                     nli_signal = None
                     if self.nli_detector is not None:
                         try:
-                            nli_signal = self.nli_detector.detect(
-                                claim_text=claim.text,
-                                evidence_text=chunk.text
-                            )
+                            if nli_batch_scores is not None and idx < len(nli_batch_scores):
+                                nli_signal = nli_batch_scores[idx]
+                            else:
+                                nli_signal = self.nli_detector.detect(
+                                    claim_text=claim.text,
+                                    evidence_text=chunk.text
+                                )
                         except Exception as e:
                             self.logger.warning(f"NLI detection failed for chunk: {str(e)}")
                             nli_signal = {'entailment': 0.33, 'neutral': 0.34, 'contradiction': 0.33}

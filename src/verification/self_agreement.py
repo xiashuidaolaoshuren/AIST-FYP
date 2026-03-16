@@ -145,32 +145,55 @@ class SelfAgreementDetector:
             self.logger.debug(f"Deterministic mode: seed set to {self.random_seed}")
         
         self.logger.debug(f"Generating {k} samples for query: {query[:50]}...")
-        
+
         samples = []
-        for i in range(k):
-            try:
-                result = self.generator.generate_with_metadata(
+        try:
+            if hasattr(self.generator, 'generate_n_samples'):
+                batch_samples = self.generator.generate_n_samples(
                     prompt=query,
                     evidence_chunks=evidence_chunks,
+                    num_samples=k,
                     max_new_tokens=256,
                     temperature=self.temperature,
                     top_p=0.95,
-                    do_sample=True  # Enable stochastic sampling
+                    do_sample=True,
+                    sanitize_meta_text=True,
                 )
-                
-                generated_text = result['text']
-                
-                # Skip empty samples (can happen with high temperature)
-                if generated_text and generated_text.strip():
-                    samples.append(generated_text)
-                    self.logger.debug(f"Sample {i+1}/{k}: {generated_text[:50]}...")
-                else:
-                    self.logger.warning(f"Sample {i+1}/{k} is empty, skipping")
-                
-            except Exception as e:
-                self.logger.error(f"Failed to generate sample {i+1}/{k}: {e}")
-                # Don't raise, just skip this sample
-                continue
+                for i, generated_text in enumerate(batch_samples):
+                    if generated_text and generated_text.strip():
+                        samples.append(generated_text)
+                        self.logger.debug(f"Sample {i+1}/{k}: {generated_text[:50]}...")
+                    else:
+                        self.logger.warning(f"Sample {i+1}/{k} is empty, skipping")
+            else:
+                raise AttributeError("Generator does not implement generate_n_samples")
+        except Exception as e:
+            self.logger.warning(
+                "Batched sample generation unavailable, falling back to sequential mode: %s",
+                e
+            )
+            for i in range(k):
+                try:
+                    result = self.generator.generate_with_metadata(
+                        prompt=query,
+                        evidence_chunks=evidence_chunks,
+                        max_new_tokens=256,
+                        temperature=self.temperature,
+                        top_p=0.95,
+                        do_sample=True
+                    )
+
+                    generated_text = result['text']
+
+                    if generated_text and generated_text.strip():
+                        samples.append(generated_text)
+                        self.logger.debug(f"Sample {i+1}/{k}: {generated_text[:50]}...")
+                    else:
+                        self.logger.warning(f"Sample {i+1}/{k} is empty, skipping")
+
+                except Exception as inner_e:
+                    self.logger.error(f"Failed to generate sample {i+1}/{k}: {inner_e}")
+                    continue
         
         # Validate we have at least some samples
         if len(samples) == 0:

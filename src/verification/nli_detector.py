@@ -309,13 +309,43 @@ class NLIDetector:
         if len(claim_texts) == 0:
             raise ValueError("Empty input lists")
         
-        # TODO: Implement true batch inference for efficiency
-        # For now, loop through pairs (maintains compatibility)
-        self.logger.debug(f"Processing {len(claim_texts)} claim-evidence pairs (sequential)")
-        
-        results = []
-        for claim, evidence in zip(claim_texts, evidence_texts):
-            scores = self.detect(claim, evidence)
-            results.append(scores)
-        
-        return results
+        try:
+            self.logger.debug(
+                "Processing %d claim-evidence pairs (batched)",
+                len(claim_texts)
+            )
+
+            inputs = self.tokenizer(
+                evidence_texts,
+                claim_texts,
+                return_tensors="pt",
+                truncation=True,
+                max_length=512,
+                padding=True
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                logits = outputs.logits
+
+            probabilities = F.softmax(logits, dim=-1).cpu().numpy()
+
+            results: list[Dict[str, float]] = []
+            for probs in probabilities:
+                results.append({
+                    'entailment': float(probs[self.label_mapping['entailment']]),
+                    'neutral': float(probs[self.label_mapping['neutral']]),
+                    'contradiction': float(probs[self.label_mapping['contradiction']])
+                })
+
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Batch NLI detection failed: {str(e)}")
+            self.logger.warning("Falling back to sequential detect() calls")
+            results = []
+            for claim, evidence in zip(claim_texts, evidence_texts):
+                scores = self.detect(claim, evidence)
+                results.append(scores)
+            return results

@@ -606,6 +606,86 @@ class GeneratorWrapper:
         
         return results
 
+    def generate_n_samples(
+        self,
+        prompt: str,
+        evidence_chunks: Optional[List[EvidenceChunk]] = None,
+        num_samples: int = 1,
+        max_new_tokens: int = 256,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        do_sample: bool = True,
+        repetition_penalty: Optional[float] = None,
+        no_repeat_ngram_size: Optional[int] = None,
+        sanitize_meta_text: bool = False,
+    ) -> List[str]:
+        """
+        Generate multiple samples for a single prompt in one model call.
+
+        This is optimized for self-agreement style sampling, where the same
+        prompt/evidence pair is decoded multiple times stochastically.
+        """
+        if num_samples <= 0:
+            raise ValueError("num_samples must be > 0")
+
+        if evidence_chunks is None:
+            evidence_chunks = []
+
+        formatted_prompt = self._format_prompt(prompt, evidence_chunks)
+        max_input_tokens = self._resolve_max_input_tokens()
+
+        inputs = self.tokenizer(
+            formatted_prompt,
+            return_tensors='pt',
+            truncation=True,
+            max_length=max_input_tokens
+        ).to(self.model.device)
+
+        generate_kwargs = {
+            'max_new_tokens': max_new_tokens,
+            'temperature': temperature,
+            'top_p': top_p,
+            'do_sample': do_sample,
+            'num_return_sequences': int(num_samples),
+            'pad_token_id': self.tokenizer.pad_token_id,
+        }
+
+        if repetition_penalty is not None and repetition_penalty > 0:
+            generate_kwargs['repetition_penalty'] = repetition_penalty
+        if no_repeat_ngram_size is not None and no_repeat_ngram_size > 0:
+            generate_kwargs['no_repeat_ngram_size'] = int(no_repeat_ngram_size)
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                **generate_kwargs,
+            )
+
+        if isinstance(outputs, torch.Tensor):
+            sequences = outputs
+        else:
+            sequences = outputs.sequences
+
+        if self.model_family == 'seq2seq':
+            generated_sequences = sequences
+        else:
+            prompt_len = int(inputs['input_ids'].shape[1])
+            generated_sequences = sequences[:, prompt_len:]
+
+        samples = []
+        for seq in generated_sequences:
+            text = self.tokenizer.decode(seq, skip_special_tokens=True)
+            if sanitize_meta_text:
+                text = self._sanitize_generated_text(text)
+            samples.append(text)
+
+        self.logger.debug(
+            "Generated %d samples in one call (model=%s)",
+            len(samples),
+            self.model_name
+        )
+        return samples
+
     def score_target_with_metadata(
         self,
         prompt: str,
