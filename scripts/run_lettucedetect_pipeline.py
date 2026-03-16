@@ -4,7 +4,6 @@ Pipeline stages:
 1) Optional upstream conversion: CiteBench metric_eval -> LettuceDetect input JSON
 2) LettuceDetect pretrained inference (span output)
 3) Downstream conversion: LettuceDetect raw output -> CiteEval system input
-4) Optional comparison call with RAGTruth method input
 """
 
 from __future__ import annotations
@@ -233,14 +232,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-flat-context", action="store_true")
     parser.add_argument("--output-dir", default=None)
 
-    parser.add_argument("--run-compare", action="store_true")
-    parser.add_argument("--ragtruth-input", default=None)
-    parser.add_argument("--provider", choices=["openai", "deepseek"], default="deepseek")
-    parser.add_argument("--eval-model-name", default="deepseek-chat")
-    parser.add_argument("--modules", default="ca,ce,cr_itercoe,cr_editdist")
-    parser.add_argument("--version", default="citeeval-auto-12272024")
-    parser.add_argument("--context-source", choices=["retrieval", "oracle"], default="oracle")
-
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -260,7 +251,6 @@ def _build_artifact_paths(output_dir: Path) -> dict[str, Path]:
         "raw_predictions": output_dir / "lettucedetect_raw_predictions.json",
         "system_eval_output": output_dir / "lettucedetect_system_eval.json",
         "downstream_report": output_dir / "downstream_conversion_report.json",
-        "compare_output_dir": output_dir / "comparison",
     }
 
 
@@ -318,51 +308,6 @@ def _run_downstream_conversion(args: argparse.Namespace, raw_predictions: Path, 
     _run_command(convert_downstream_cmd, cwd=PROJECT_ROOT, step="downstream.convert_to_citeeval", dry_run=args.dry_run)
 
 
-def _build_compare_command(args: argparse.Namespace, artifact_paths: dict[str, Path]) -> list[str]:
-    command = [
-        sys.executable,
-        "scripts/compare_citebench_methods.py",
-        "--lettuce-input",
-        str(artifact_paths["system_eval_output"]),
-        "--provider",
-        args.provider,
-        "--model-name",
-        args.eval_model_name,
-        "--modules",
-        args.modules,
-        "--version",
-        args.version,
-        "--context-source",
-        args.context_source,
-        "--output-dir",
-        str(artifact_paths["compare_output_dir"]),
-    ]
-    if args.max_samples is not None:
-        command.extend(["--max-samples", str(args.max_samples)])
-    return command
-
-
-def _handle_compare_stage(args: argparse.Namespace, artifact_paths: dict[str, Path]) -> None:
-    compare_command = _build_compare_command(args, artifact_paths)
-    if args.run_compare:
-        if not args.ragtruth_input:
-            raise ValueError("--ragtruth-input is required when --run-compare is set")
-        command = compare_command.copy()
-        command[2:2] = ["--ragtruth-input", str(Path(args.ragtruth_input).resolve())]
-        if args.dry_run:
-            command.append("--dry-run")
-        _run_command(command, cwd=PROJECT_ROOT, step="compare.methods", dry_run=args.dry_run)
-        return
-
-    print("[next] Run comparison with command:")
-    suggested = compare_command.copy()
-    suggested[2:2] = [
-        "--ragtruth-input",
-        str(Path(args.ragtruth_input).resolve()) if args.ragtruth_input else "<RAGTRUTH_INPUT_REQUIRED>",
-    ]
-    print(" ".join(suggested))
-
-
 def _write_manifest(
     output_dir: Path,
     args: argparse.Namespace,
@@ -409,7 +354,6 @@ def main() -> int:
     )
 
     _run_downstream_conversion(args=args, raw_predictions=artifact_paths["raw_predictions"], artifact_paths=artifact_paths)
-    _handle_compare_stage(args=args, artifact_paths=artifact_paths)
 
     _write_manifest(
         output_dir=output_dir,
