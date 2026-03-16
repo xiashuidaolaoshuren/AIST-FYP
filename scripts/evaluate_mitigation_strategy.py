@@ -205,6 +205,7 @@ def _run_variant(
     strategy: str,
     ragtruth_eval_mode: str,
     output_path: Path,
+    resume: bool,
 ) -> None:
     command = [
         sys.executable,
@@ -226,6 +227,8 @@ def _run_variant(
 
     if max_samples is not None:
         command.extend(["--max-samples", str(max_samples)])
+    if resume:
+        command.append("--resume")
 
     print(f"\n[run:{variant}] {' '.join(command)}")
 
@@ -271,6 +274,17 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "total_claims": int(statistics.get("total_claims", 0)),
         "avg_claim_hallucinations_per_sample": float(statistics.get("avg_claim_hallucinations_per_sample", 0.0)),
     }
+
+
+def _load_existing_num_samples(output_json: Path) -> int | None:
+    if not output_json.exists():
+        return None
+    with output_json.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    sample_results = payload.get("sample_results")
+    if isinstance(sample_results, list):
+        return len(sample_results)
+    return None
 
 
 def _delta(base: float, current: float) -> float:
@@ -410,6 +424,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory (default: outputs/mitigation_eval/<timestamp>)"
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume incomplete variant outputs in-place"
+    )
     return parser
 
 
@@ -439,6 +458,22 @@ def main() -> int:
         _write_yaml(variant_config_path, config_payload)
 
         result_path = run_dir / f"ragtruth_{variant}.json"
+        if args.resume and result_path.exists():
+            existing_count = _load_existing_num_samples(result_path)
+            if existing_count is not None and args.max_samples is not None:
+                if existing_count > args.max_samples:
+                    raise ValueError(
+                        f"Resume mismatch for variant '{variant}': existing samples {existing_count} exceed max-samples {args.max_samples}."
+                    )
+                if existing_count == args.max_samples:
+                    print(f"[resume:{variant}] already complete ({existing_count}/{args.max_samples}), skipping")
+                    variant_metrics[variant] = _load_metrics(result_path)
+                    continue
+            elif existing_count is not None and args.max_samples is None:
+                print(f"[resume:{variant}] existing output detected ({existing_count} samples), skipping")
+                variant_metrics[variant] = _load_metrics(result_path)
+                continue
+
         _run_variant(
             project_root=project_root,
             variant=variant,
@@ -449,6 +484,7 @@ def main() -> int:
             strategy=args.strategy,
             ragtruth_eval_mode=args.ragtruth_eval_mode,
             output_path=result_path,
+            resume=args.resume,
         )
 
         variant_metrics[variant] = _load_metrics(result_path)

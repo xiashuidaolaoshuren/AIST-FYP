@@ -144,6 +144,11 @@ def main():
         help='Custom output path for results (default: auto-generated)'
     )
     parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume from existing output JSON when available'
+    )
+    parser.add_argument(
         '--ragtruth-eval-mode',
         type=str,
         default='ragtruth_eval',
@@ -224,6 +229,16 @@ def main():
     logger.info(f"Data strategy: {args.strategy}")
     logger.info(f"Save results: {args.save_results}")
     logger.info(f"RAGTruth eval mode: {args.ragtruth_eval_mode}")
+
+    effective_output_path = args.output_path
+    if args.save_results and effective_output_path is None:
+        default_output_dir = Path('outputs/ragtruth_eval')
+        default_output_dir.mkdir(parents=True, exist_ok=True)
+        effective_output_path = str(default_output_dir / f'ragtruth_eval_{args.split}.json')
+
+    resume_source = effective_output_path if args.resume else None
+    if args.resume:
+        logger.info(f"Resume enabled: source={resume_source}")
     
     # Load configuration
     setup_steps = [
@@ -302,7 +317,8 @@ def main():
             max_samples=args.max_samples,
             batch_size=args.batch_size,
             save_results=args.save_results,
-            output_path=args.output_path
+            output_path=effective_output_path,
+            resume_from_output=resume_source,
         )
         
         logger.info("\n✅ Evaluation completed successfully!")

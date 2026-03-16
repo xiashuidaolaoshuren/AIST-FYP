@@ -464,13 +464,31 @@ def _generate_system_input(
     source_queries: list[dict[str, Any]],
     context_source: str,
     output_path: Path,
+    resume: bool,
 ) -> dict[str, int]:
     records: list[dict[str, Any]] = []
+    processed_ids: set[str] = set()
     skipped_missing_query = 0
     skipped_missing_passages = 0
 
-    for row in source_queries:
-        sample_id = str(row.get("id", f"sample_{len(records) + 1}"))
+    if resume and output_path.exists():
+        existing_payload = json.loads(output_path.read_text(encoding="utf-8"))
+        if not isinstance(existing_payload, list):
+            raise ValueError(f"Resume mismatch: expected list JSON at {output_path}")
+        for item in existing_payload:
+            if not isinstance(item, dict):
+                raise ValueError(f"Resume mismatch: invalid sample entry in {output_path}")
+            sample_id = str(item.get("id", "")).strip()
+            if not sample_id:
+                raise ValueError(f"Resume mismatch: sample without id in {output_path}")
+            processed_ids.add(sample_id)
+        records.extend(existing_payload)
+        print(f"[resume] loaded {len(records)} existing samples from {output_path}")
+
+    for row_index, row in enumerate(source_queries):
+        sample_id = str(row.get("id", f"sample_{row_index + 1}"))
+        if sample_id in processed_ids:
+            continue
         query = str(row.get("query", "")).strip()
         if not query:
             skipped_missing_query += 1
@@ -520,6 +538,9 @@ def _generate_system_input(
             answer_id=sample_id,
         )
         records.append(citeeval_sample)
+        processed_ids.add(sample_id)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -737,6 +758,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-threads", type=int, default=8)
     parser.add_argument("--cited-only", action="store_true")
     parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--resume", action="store_true", help="Resume incomplete variant outputs in-place")
     return parser
 
 
@@ -786,11 +808,21 @@ def main() -> int:
         runtime = _build_runtime(variant_config_path, args.strategy)
 
         system_input_json = system_input_dir / f"system_eval_{variant}.json"
+        if args.resume and system_input_json.exists() and args.max_samples is not None:
+            existing_payload = json.loads(system_input_json.read_text(encoding="utf-8"))
+            if not isinstance(existing_payload, list):
+                raise ValueError(f"Resume mismatch: expected list JSON at {system_input_json}")
+            if len(existing_payload) > len(source_rows):
+                raise ValueError(
+                    f"Resume mismatch for variant '{variant}': existing samples {len(existing_payload)} exceed target {len(source_rows)}."
+                )
+
         generation_stats[variant] = _generate_system_input(
             runtime=runtime,
             source_queries=source_rows,
             context_source=args.context_source,
             output_path=system_input_json,
+            resume=args.resume,
         )
 
         _run_system_eval(

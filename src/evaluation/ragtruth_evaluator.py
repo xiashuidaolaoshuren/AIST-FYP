@@ -229,7 +229,8 @@ class RAGTruthEvaluator:
         max_samples: Optional[int] = None,
         batch_size: int = 10,
         save_results: bool = True,
-        output_path: Optional[str] = None
+        output_path: Optional[str] = None,
+        resume_from_output: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Run complete evaluation on RAGTruth benchmark.
@@ -252,6 +253,7 @@ class RAGTruthEvaluator:
             batch_size: Process samples in batches for memory efficiency
             save_results: Whether to save detailed results to file
             output_path: Path to save results JSON (auto-generated if None)
+            resume_from_output: Existing output JSON path to resume from
             
         Returns:
             Dictionary containing:
@@ -281,6 +283,8 @@ class RAGTruthEvaluator:
         self.logger.info(f"Batch size: {batch_size}")
         self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
         self.logger.info(f"Teacher-forced intrinsic: {self.teacher_forced_intrinsic}")
+        if resume_from_output:
+            self.logger.info(f"Resume source: {resume_from_output}")
         
         # Step 1: Load dataset
         self.logger.info("\nStep 1: Loading RAGTruth dataset...")
@@ -289,14 +293,64 @@ class RAGTruthEvaluator:
         
         # Step 2: Run evaluation in batches
         self.logger.info("\nStep 2: Running evaluation pipeline...")
-        all_results = []
+        all_results: List[Dict[str, Any]] = []
+        sample_id_universe = {str(sample['id']) for sample in samples}
+        resume_count = 0
+
+        if resume_from_output:
+            resume_path = Path(resume_from_output)
+            if resume_path.exists():
+                with open(resume_path, 'r', encoding='utf-8') as f:
+                    resume_payload = json.load(f)
+
+                existing_results = resume_payload.get('sample_results', [])
+                if not isinstance(existing_results, list):
+                    raise ValueError(f"Invalid resume file format (sample_results must be a list): {resume_path}")
+
+                seen_resume_ids: set[str] = set()
+                for result in existing_results:
+                    sample_id = str(result.get('sample_id', ''))
+                    if not sample_id:
+                        raise ValueError(f"Resume file contains sample without sample_id: {resume_path}")
+                    if sample_id not in sample_id_universe:
+                        raise ValueError(
+                            f"Resume mismatch: sample_id '{sample_id}' not found in current dataset selection"
+                        )
+                    if sample_id in seen_resume_ids:
+                        raise ValueError(f"Resume file contains duplicate sample_id '{sample_id}': {resume_path}")
+                    seen_resume_ids.add(sample_id)
+
+                if max_samples is not None and len(existing_results) > len(samples):
+                    raise ValueError(
+                        f"Resume mismatch: existing results ({len(existing_results)}) exceed current sample limit ({len(samples)})"
+                    )
+
+                all_results.extend(existing_results)
+                resume_count = len(existing_results)
+                self.logger.info(
+                    "Loaded %d existing sample results for resume from %s",
+                    resume_count,
+                    resume_path,
+                )
+            else:
+                self.logger.info("Resume file not found at %s, starting fresh", resume_path)
+
+        processed_ids = {str(result['sample_id']) for result in all_results}
+        samples_to_process = [sample for sample in samples if str(sample['id']) not in processed_ids]
+
+        if resume_count:
+            self.logger.info(
+                "Resume progress: %d already processed, %d remaining",
+                resume_count,
+                len(samples_to_process),
+            )
         
         # Process in batches to manage memory, with one persistent progress bar
-        total_batches = (len(samples) - 1) // batch_size + 1 if samples else 0
-        with tqdm(total=len(samples), desc="Evaluating samples", unit="sample") as sample_progress:
-            for batch_start in range(0, len(samples), batch_size):
-                batch_end = min(batch_start + batch_size, len(samples))
-                batch = samples[batch_start:batch_end]
+        total_batches = (len(samples_to_process) - 1) // batch_size + 1 if samples_to_process else 0
+        with tqdm(total=len(samples_to_process), desc="Evaluating samples", unit="sample") as sample_progress:
+            for batch_start in range(0, len(samples_to_process), batch_size):
+                batch_end = min(batch_start + batch_size, len(samples_to_process))
+                batch = samples_to_process[batch_start:batch_end]
 
                 self.logger.info(
                     f"\nProcessing batch {batch_start//batch_size + 1}/{total_batches} "
@@ -308,6 +362,9 @@ class RAGTruthEvaluator:
                     try:
                         result = self._evaluate_sample(sample)
                         all_results.append(result)
+                        if save_results and output_path is not None:
+                            interim_metrics = self._compute_metrics(all_results)
+                            self._save_results(interim_metrics, all_results, output_path)
                     except Exception as e:
                         self.logger.error(f"Error evaluating sample {sample['id']}: {str(e)}")
                         # Continue with next sample
