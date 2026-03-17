@@ -9,7 +9,7 @@ models:
   sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
   
   # Generator LLM (instruction-tuned; stable for QA-style prompts)
-  #generator: "Qwen/Qwen3-4B-Instruct"
+  #generator: "Qwen/Qwen3-4B-Instruct-2507"
 
   # Fallback baseline (seq2seq)
   generator: "google/flan-t5-base"
