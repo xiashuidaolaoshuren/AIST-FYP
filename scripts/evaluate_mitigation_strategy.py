@@ -201,6 +201,7 @@ def _run_variant(
     config_path: Path,
     split: str,
     max_samples: int | None,
+    samples_per_task: int | None,
     batch_size: int,
     strategy: str,
     ragtruth_eval_mode: str,
@@ -227,6 +228,8 @@ def _run_variant(
 
     if max_samples is not None:
         command.extend(["--max-samples", str(max_samples)])
+    if samples_per_task is not None:
+        command.extend(["--samples-per-task", str(samples_per_task)])
     if resume:
         command.append("--resume")
 
@@ -374,6 +377,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=str, default="config.yaml", help="Base config file path")
     parser.add_argument("--split", type=str, default="test", choices=["train", "test"])
     parser.add_argument("--max-samples", type=int, default=None, help="Limit sample count for quick checks")
+    parser.add_argument(
+        "--samples-per-task",
+        type=int,
+        default=None,
+        help="Limit samples per task type (overrides --max-samples when set)",
+    )
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--strategy", type=str, default="validation", choices=["development", "validation", "production"])
     parser.add_argument(
@@ -460,7 +469,7 @@ def main() -> int:
         result_path = run_dir / f"ragtruth_{variant}.json"
         if args.resume and result_path.exists():
             existing_count = _load_existing_num_samples(result_path)
-            if existing_count is not None and args.max_samples is not None:
+            if existing_count is not None and args.samples_per_task is None and args.max_samples is not None:
                 if existing_count > args.max_samples:
                     raise ValueError(
                         f"Resume mismatch for variant '{variant}': existing samples {existing_count} exceed max-samples {args.max_samples}."
@@ -469,7 +478,7 @@ def main() -> int:
                     print(f"[resume:{variant}] already complete ({existing_count}/{args.max_samples}), skipping")
                     variant_metrics[variant] = _load_metrics(result_path)
                     continue
-            elif existing_count is not None and args.max_samples is None:
+            elif existing_count is not None and args.samples_per_task is None and args.max_samples is None:
                 print(f"[resume:{variant}] existing output detected ({existing_count} samples), skipping")
                 variant_metrics[variant] = _load_metrics(result_path)
                 continue
@@ -480,6 +489,7 @@ def main() -> int:
             config_path=variant_config_path,
             split=args.split,
             max_samples=args.max_samples,
+            samples_per_task=args.samples_per_task,
             batch_size=args.batch_size,
             strategy=args.strategy,
             ragtruth_eval_mode=args.ragtruth_eval_mode,
@@ -497,6 +507,7 @@ def main() -> int:
             "timestamp": timestamp,
             "split": args.split,
             "max_samples": args.max_samples,
+            "samples_per_task": args.samples_per_task,
             "batch_size": args.batch_size,
             "strategy": args.strategy,
             "ragtruth_eval_mode": args.ragtruth_eval_mode,

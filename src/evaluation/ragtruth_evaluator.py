@@ -241,6 +241,7 @@ class RAGTruthEvaluator:
         self,
         split: str = 'test',
         max_samples: Optional[int] = None,
+        samples_per_task: Optional[int] = None,
         batch_size: int = 10,
         save_results: bool = True,
         output_path: Optional[str] = None,
@@ -264,6 +265,7 @@ class RAGTruthEvaluator:
         Args:
             split: Dataset split to evaluate ('train' or 'test')
             max_samples: Maximum samples to evaluate (None = all)
+            samples_per_task: Maximum samples per task type; when set, takes precedence over max_samples
             batch_size: Process samples in batches for memory efficiency
             save_results: Whether to save detailed results to file
             output_path: Path to save results JSON (auto-generated if None)
@@ -294,15 +296,22 @@ class RAGTruthEvaluator:
         self.logger.info("=" * 70)
         self.logger.info(f"Split: {split}")
         self.logger.info(f"Max samples: {max_samples or 'all'}")
+        self.logger.info(f"Samples per task: {samples_per_task or 'off'}")
         self.logger.info(f"Batch size: {batch_size}")
         self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
         self.logger.info(f"Teacher-forced intrinsic: {self.teacher_forced_intrinsic}")
+        if samples_per_task is not None and max_samples is not None:
+            self.logger.info("Sampling precedence: using samples_per_task and ignoring max_samples")
         if resume_from_output:
             self.logger.info(f"Resume source: {resume_from_output}")
         
         # Step 1: Load dataset
         self.logger.info("\nStep 1: Loading RAGTruth dataset...")
-        samples = self._load_dataset(split=split, max_samples=max_samples)
+        samples = self._load_dataset(
+            split=split,
+            max_samples=max_samples,
+            samples_per_task=samples_per_task,
+        )
         self.logger.info(f"Loaded {len(samples)} samples from RAGTruth {split} split")
         
         # Step 2: Run evaluation in batches
@@ -407,7 +416,8 @@ class RAGTruthEvaluator:
     def _load_dataset(
         self,
         split: str = 'test',
-        max_samples: Optional[int] = None
+        max_samples: Optional[int] = None,
+        samples_per_task: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Load RAGTruth dataset samples with source info and gold labels.
@@ -418,6 +428,7 @@ class RAGTruthEvaluator:
         Args:
             split: Dataset split ('train' or 'test')
             max_samples: Maximum number of samples to load (None = all)
+            samples_per_task: Maximum samples per task type; when set, takes precedence over max_samples
             
         Returns:
             List of sample dictionaries containing:
@@ -434,6 +445,8 @@ class RAGTruthEvaluator:
             ValueError: If dataset format is invalid
         """
         self.logger.debug(f"Loading RAGTruth {split} split...")
+        if samples_per_task is not None and samples_per_task <= 0:
+            raise ValueError("samples_per_task must be a positive integer")
         
         # Load source info (questions + contexts)
         source_info_path = self.benchmark_dir / 'source_info.jsonl'
@@ -454,6 +467,7 @@ class RAGTruthEvaluator:
             raise FileNotFoundError(f"response.jsonl not found: {response_path}")
         
         samples = []
+        task_counts: Dict[str, int] = defaultdict(int)
         with open(response_path, 'r', encoding='utf-8') as f:
             for line in f:
                 response = json.loads(line)
@@ -477,6 +491,9 @@ class RAGTruthEvaluator:
                 # Extract question and contexts based on task type
                 task_type = source['task_type']
                 question, contexts = self._extract_question_and_contexts(source)
+
+                if samples_per_task is not None and task_counts[task_type] >= samples_per_task:
+                    continue
                 
                 # Create sample
                 sample = {
@@ -492,9 +509,10 @@ class RAGTruthEvaluator:
                 }
                 
                 samples.append(sample)
+                task_counts[task_type] += 1
                 
                 # Check if we've reached max_samples
-                if max_samples and len(samples) >= max_samples:
+                if samples_per_task is None and max_samples and len(samples) >= max_samples:
                     break
         
         self.logger.debug(f"Loaded {len(samples)} samples from {split} split")

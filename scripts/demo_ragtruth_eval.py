@@ -121,6 +121,12 @@ def main():
         help='Maximum number of samples to evaluate (default: all)'
     )
     parser.add_argument(
+        '--samples-per-task',
+        type=int,
+        default=None,
+        help='Maximum number of samples per task type (overrides --max-samples when set)'
+    )
+    parser.add_argument(
         '--batch-size',
         type=int,
         default=10,
@@ -226,6 +232,7 @@ def main():
     logger.info(f"Configuration: {args.config}")
     logger.info(f"Split: {args.split}")
     logger.info(f"Max samples: {args.max_samples or 'all'}")
+    logger.info(f"Samples per task: {args.samples_per_task or 'off'}")
     logger.info(f"Batch size: {args.batch_size}")
     logger.info(f"Data strategy: {args.strategy}")
     logger.info(f"Save results: {args.save_results}")
@@ -333,6 +340,7 @@ def main():
         metrics = evaluator.run_evaluation(
             split=args.split,
             max_samples=args.max_samples,
+            samples_per_task=args.samples_per_task,
             batch_size=args.batch_size,
             save_results=args.save_results,
             output_path=effective_output_path,
