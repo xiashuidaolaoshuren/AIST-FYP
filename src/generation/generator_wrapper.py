@@ -52,7 +52,8 @@ class GeneratorWrapper:
         device: str = 'cuda',
         load_in_8bit: bool = False,
         dtype: Optional[torch.dtype] = torch.float16,
-        max_input_tokens: Optional[int] = None
+        max_input_tokens: Optional[int] = None,
+        enable_thinking: bool = True,
     ):
         """
         Initialize the generator wrapper.
@@ -66,6 +67,7 @@ class GeneratorWrapper:
             load_in_8bit: Whether to use 8-bit quantization (for models >1GB)
             dtype: Data type for model weights (default: float16 for GPU)
             max_input_tokens: Optional tokenizer truncation limit override
+            enable_thinking: Whether to enable reasoning mode in supported chat templates
         
         Raises:
             ValueError: If model loading fails
@@ -73,6 +75,7 @@ class GeneratorWrapper:
         self.model_name = model_name
         self.device = device
         self.max_input_tokens = max_input_tokens
+        self.enable_thinking = bool(enable_thinking)
         self.model_family = 'seq2seq'
         self.logger = setup_logger(__name__)
         
@@ -342,7 +345,8 @@ class GeneratorWrapper:
                     formatted_prompt = self.tokenizer.apply_chat_template(
                         messages,
                         tokenize=False,
-                        add_generation_prompt=True
+                        add_generation_prompt=True,
+                        enable_thinking=self.enable_thinking,
                     )
                     return formatted_prompt
                 except Exception as e:

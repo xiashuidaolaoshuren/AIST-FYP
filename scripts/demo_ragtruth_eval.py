@@ -259,9 +259,9 @@ def main():
     logger.info(f"Generator model: {selected_model}")
     logger.info(f"Generation max_input_tokens: {configured_input_tokens}")
     logger.info(f"Generation max_new_tokens: {configured_new_tokens}")
-    if 'Qwen/Qwen2.5-7B-Instruct' in selected_model and configured_input_tokens < 4096:
+    if 'Qwen/' in selected_model and configured_input_tokens < 4096:
         raise ValueError(
-            "Evaluation constraint violation: Qwen2.5-7B-Instruct requires "
+            "Evaluation constraint violation: Qwen models require "
             "generation.max_input_tokens >= 4096 for this project setup."
         )
     config._config.setdefault('evaluation', {})

@@ -9,7 +9,7 @@ models:
   sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
   
   # Generator LLM (instruction-tuned; stable for QA-style prompts)
-  #generator: "Qwen/Qwen2.5-0.5B-Instruct"
+  #generator: "Qwen/Qwen3-4B-Instruct"
 
   # Fallback baseline (seq2seq)
   generator: "google/flan-t5-base"
@@ -149,6 +149,9 @@ generation:
 
   # Remove common self-referential trailing text ("Note:", "You are correct", etc.)
   sanitize_meta_text: true
+
+  # Disable reasoning/thinking template mode (e.g., Qwen3 <think> blocks)
+  enable_thinking: false
   
   # Load model in 8-bit (for larger models)
   load_in_8bit: false
