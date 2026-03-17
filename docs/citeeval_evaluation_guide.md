@@ -261,37 +261,47 @@ python scripts/convert_lettucedetect_to_citeeval.py \
 
 If your raw fields differ, change the dotted key paths (for example `result.answer_text`).
 
-### Step C: Run controlled comparison and save metrics JSON
+### Step C: Evaluate each method independently and save metrics JSON
 
 ```powershell
-python scripts/compare_citebench_methods.py \
-    --ragtruth-input benchmark/CiteEval/data/system_eval/ragtruth_baseline_system_eval.json \
-    --lettuce-input benchmark/CiteEval/data/system_eval/lettucedetect_system_eval.json \
+python scripts/evaluate_citebench_method.py \
+    --method-name ragtruth_baseline \
+    --system-input benchmark/CiteEval/data/system_eval/ragtruth_baseline_system_eval.json \
     --provider deepseek \
     --model-name deepseek-chat \
+    --modules ca,ce,cr_itercoe,cr_editdist \
+    --version citeeval-auto-12272024 \
     --context-source oracle \
+    --output-dir outputs/method_comparison/ragtruth_eval \
+    --max-samples 30
+
+python scripts/evaluate_citebench_method.py \
+    --method-name lettucedetect \
+    --system-input benchmark/CiteEval/data/system_eval/lettucedetect_system_eval.json \
+    --provider deepseek \
+    --model-name deepseek-chat \
+    --modules ca,ce,cr_itercoe,cr_editdist \
+    --version citeeval-auto-12272024 \
+    --context-source oracle \
+    --output-dir outputs/method_comparison/lettucedetect_eval \
     --max-samples 30
 ```
 
-The script writes a timestamped run directory under `outputs/method_comparison/` with:
+Each run writes artifacts under its own output directory with:
 
-- `ragtruth_aligned.json`
-- `lettucedetect_aligned.json`
-- `aligned_ids.json`
-- `summary.json` (method metrics and deltas)
-- `run_logs.json` (stdout/stderr for both evaluation runs)
+- `summary.json` (per-method module metrics)
+- `run_logs.json` (stdout/stderr for the evaluation run)
 
-### Output Contract for Verifier Comparison
+### Output Contract for Verifier Evaluation
 
-Use `summary.json` as the canonical machine-readable artifact for downstream comparison
-against your verifier outputs.
+Use each method's `summary.json` as the canonical machine-readable artifact for
+downstream verifier evaluation.
 
 Minimum expected fields:
 
-- `run.aligned_count`
-- `method_metrics.ragtruth`
-- `method_metrics.lettucedetect`
-- `delta` (lettucedetect - ragtruth for available mean ratings)
+- `run.evaluated_rows`
+- `method`
+- `module_metrics`
 
 ### Upstream Conversion: CiteBench metric_eval -> Model Input Formats
 
