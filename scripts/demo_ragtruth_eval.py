@@ -32,6 +32,7 @@ from src.pipelines.baseline_rag import BaselineRAGPipeline
 from src.verification.verifier_hub import VerifierHub
 from src.verification.rule_based_aggregator import RuleBasedAggregator
 from src.evaluation.ragtruth_evaluator import RAGTruthEvaluator
+from src.retrieval.sentence_retriever import EvidenceSentenceRetriever
 
 
 def main():
@@ -294,13 +295,30 @@ def main():
     setup_bar.set_postfix_str(setup_steps[3])
     setup_bar.update(1)
     
+    # Initialize EvidenceSentenceRetriever (optional, controlled by config)
+    sr_cfg = config.get('verification', {}).get('sentence_retrieval', {})
+    if not isinstance(sr_cfg, dict):
+        sr_cfg = {}
+    sentence_retriever = None
+    if sr_cfg.get('enabled', False):
+        index_dir_tpl = sr_cfg.get('index_dir', 'data/indexes/{dataset}_sentences/{split}')
+        index_dir = index_dir_tpl.format(dataset='ragtruth', split=args.split)
+        logger.info(f"🔧 Loading sentence index from {index_dir}...")
+        sentence_retriever = EvidenceSentenceRetriever.from_index(
+            index_dir=index_dir,
+            encoder_model=str(config.models.sentence_transformer),
+            device=str(getattr(config.processing, 'device', 'cpu')),
+        )
+        logger.info("✓ EvidenceSentenceRetriever loaded")
+
     # Initialize RAGTruthEvaluator
     logger.info("🔧 Initializing RAGTruthEvaluator...")
     evaluator = RAGTruthEvaluator(
         config=config,
         rag_pipeline=rag_pipeline,
         verifier_hub=verifier_hub,
-        aggregator=aggregator
+        aggregator=aggregator,
+        sentence_retriever=sentence_retriever,
     )
     logger.info("✓ RAGTruthEvaluator initialized")
     setup_bar.set_postfix_str(setup_steps[4])

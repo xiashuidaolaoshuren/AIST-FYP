@@ -281,6 +281,19 @@ verification:
     # Set to any integer for reproducible results
     random_seed: 42
   
+  # Sentence-level evidence retrieval for gold-context evaluation modes.
+  # When enabled, each claim is verified against the top-k most semantically
+  # similar sentences from the gold context rather than full passages.
+  # This reduces NLI truncation and improves hallucination recall.
+  # Requires a pre-built sentence index. Build with:
+  #   python scripts/build_sentence_index.py --dataset ragtruth --split test
+  sentence_retrieval:
+    enabled: false
+    top_k: 5
+    # Path template for the pre-built sentence index.
+    # {dataset} => "ragtruth" or "citeeval"; {split} => evaluation split (e.g., "test")
+    index_dir: "data/indexes/{dataset}_sentences/{split}"
+
   # Citation Formatter Configuration (Month 5)
   citation:
     # Maximum number of citations to add per claim

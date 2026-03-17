@@ -37,6 +37,7 @@ sys.path.insert(0, str(project_root))
 from src.citation.citation_formatter import CitationFormatter
 from src.generation.claim_extractor import extract_claims
 from src.pipelines.baseline_rag import BaselineRAGPipeline
+from src.retrieval.sentence_retriever import EvidenceSentenceRetriever
 from src.utils.config import Config
 from src.utils.data_structures import Claim, EvidenceChunk
 
@@ -54,6 +55,8 @@ class VariantRuntime:
     pipeline: BaselineRAGPipeline
     citation_formatter: CitationFormatter
     mitigation_enabled: bool
+    sentence_retriever: "EvidenceSentenceRetriever | None" = None
+    sentence_retrieval_top_k: int = 5
 
 
 def _deep_update(target: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -243,11 +246,30 @@ def _build_runtime(config_path: Path, strategy: str) -> VariantRuntime:
     mitigation_cfg = config.get("mitigation", {})
     mitigation_enabled = bool(mitigation_cfg.get("enabled", False))
 
+    # Optionally initialise sentence-level evidence retriever (on-the-fly mode).
+    # For CiteEval oracle context the encoder is loaded once and shared across
+    # all rows; per-row sentence indexing is done on the fly (cheap: ~50 sents).
+    sentence_retriever = None
+    sentence_retrieval_top_k = 5
+    sr_cfg = config.get("verification", {}).get("sentence_retrieval", {})
+    if not isinstance(sr_cfg, dict):
+        sr_cfg = {}
+    if sr_cfg.get("enabled", False):
+        encoder_model = str(config.models.sentence_transformer)
+        device = str(getattr(config.processing, "device", "cpu"))
+        sentence_retrieval_top_k = int(sr_cfg.get("top_k", 5))
+        sentence_retriever = EvidenceSentenceRetriever.from_encoder(
+            encoder_model=encoder_model,
+            device=device,
+        )
+
     return VariantRuntime(
         config=config,
         pipeline=pipeline,
         citation_formatter=citation_formatter,
         mitigation_enabled=mitigation_enabled,
+        sentence_retriever=sentence_retriever,
+        sentence_retrieval_top_k=sentence_retrieval_top_k,
     )
 
 
@@ -322,6 +344,14 @@ def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str,
     evidence_chunks = _build_oracle_evidence_chunks(row)
     if not evidence_chunks:
         raise ValueError("Oracle row has no usable passages")
+
+    # Build an in-memory sentence index for this row once; reused across all
+    # claims in the row.  Only constructed when sentence retrieval is enabled.
+    oracle_ctx_index = None
+    if runtime.sentence_retriever is not None:
+        oracle_ctx_index = runtime.sentence_retriever.build_context_index_from_chunks(
+            evidence_chunks
+        )
 
     split_enabled = bool(getattr(getattr(runtime.config.processing, "query_split", None), "enabled", True))
     if split_enabled and hasattr(runtime.pipeline, "_split_query_by_questions"):
@@ -409,7 +439,15 @@ def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str,
             claim_records.append(
                 {
                     "claim": claim,
-                    "evidence": evidence_chunks,
+                    "evidence": (
+                        runtime.sentence_retriever.retrieve_from_index(
+                            claim.text,
+                            oracle_ctx_index,
+                            runtime.sentence_retrieval_top_k,
+                        )
+                        if oracle_ctx_index is not None
+                        else evidence_chunks
+                    ) or evidence_chunks,
                     "metadata": verification_metadata,
                 }
             )

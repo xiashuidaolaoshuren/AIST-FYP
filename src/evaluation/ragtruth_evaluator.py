@@ -108,7 +108,8 @@ class RAGTruthEvaluator:
         config: Config,
         rag_pipeline,
         verifier_hub,
-        aggregator
+        aggregator,
+        sentence_retriever=None,
     ):
         """
         Initialize RAGTruthEvaluator with pipeline components.
@@ -118,6 +119,9 @@ class RAGTruthEvaluator:
             rag_pipeline: BaselineRAGPipeline instance for end-to-end generation
             verifier_hub: VerifierHub instance for claim verification
             aggregator: RuleBasedAggregator instance for signal aggregation
+            sentence_retriever: Optional EvidenceSentenceRetriever.  When set,
+                each claim is verified against the top-k most similar sentences
+                from the gold context instead of full passage chunks.
             
         Raises:
             ValueError: If config is missing required fields
@@ -127,7 +131,17 @@ class RAGTruthEvaluator:
         self.rag_pipeline = rag_pipeline
         self.verifier_hub = verifier_hub
         self.aggregator = aggregator
+        self.sentence_retriever = sentence_retriever
         self.logger = setup_logger(__name__)
+
+        # Read sentence retrieval top-k from config
+        sr_cfg = self.config.get('verification', {}) if hasattr(self.config, 'get') else {}
+        if not isinstance(sr_cfg, dict):
+            sr_cfg = {}
+        sr_sub = sr_cfg.get('sentence_retrieval', {})
+        if not isinstance(sr_sub, dict):
+            sr_sub = {}
+        self.sentence_retrieval_top_k = int(sr_sub.get('top_k', 5))
 
         mitigation_config = self.config.get('mitigation', {})
         if not isinstance(mitigation_config, dict):
@@ -619,14 +633,26 @@ class RAGTruthEvaluator:
                         str(e)
                     )
 
-            for claim in claims:
-                if not evidence_chunks:
-                    continue
-                resolved_pairs.append({
-                    'claim': claim,
-                    'evidence': evidence_chunks,
-                    'metadata': metadata
-                })
+            if self.sentence_retriever is not None and evidence_chunks:
+                for claim in claims:
+                    per_claim_ev = self.sentence_retriever.retrieve(
+                        claim.text, str(sample_id), self.sentence_retrieval_top_k
+                    )
+                    # Fallback to full passage chunks if retrieval returns empty
+                    resolved_pairs.append({
+                        'claim': claim,
+                        'evidence': per_claim_ev if per_claim_ev else evidence_chunks,
+                        'metadata': metadata,
+                    })
+            else:
+                for claim in claims:
+                    if not evidence_chunks:
+                        continue
+                    resolved_pairs.append({
+                        'claim': claim,
+                        'evidence': evidence_chunks,
+                        'metadata': metadata,
+                    })
         else:
             if self.ragtruth_eval_mode == 'normal':
                 context_source = 'rag_db'
@@ -918,14 +944,28 @@ class RAGTruthEvaluator:
             all_claims.extend(sub_claims)
 
         combined_response = ' '.join(combined_response_parts)
-        claim_evidence_pairs = [
-            {
-                'claim': claim,
-                'evidence': evidence_chunks,
-            }
-            for claim in all_claims
-            if evidence_chunks
-        ]
+        if self.sentence_retriever is not None and evidence_chunks:
+            ctx_index = self.sentence_retriever.build_context_index_from_chunks(
+                evidence_chunks
+            )
+            claim_evidence_pairs = []
+            for claim in all_claims:
+                per_claim_ev = self.sentence_retriever.retrieve_from_index(
+                    claim.text, ctx_index, self.sentence_retrieval_top_k
+                )
+                claim_evidence_pairs.append({
+                    'claim': claim,
+                    'evidence': per_claim_ev if per_claim_ev else evidence_chunks,
+                })
+        else:
+            claim_evidence_pairs = [
+                {
+                    'claim': claim,
+                    'evidence': evidence_chunks,
+                }
+                for claim in all_claims
+                if evidence_chunks
+            ]
 
         return {
             'query': question,

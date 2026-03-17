@@ -8,5 +8,6 @@ relevant evidence chunks based on queries.
 
 from .faiss_index_manager import FAISSIndexManager
 from .dense_retriever import DenseRetriever
+from .sentence_retriever import EvidenceSentenceRetriever, ContextSentenceIndex
 
-__all__ = ['FAISSIndexManager', 'DenseRetriever']
+__all__ = ['FAISSIndexManager', 'DenseRetriever', 'EvidenceSentenceRetriever', 'ContextSentenceIndex']
