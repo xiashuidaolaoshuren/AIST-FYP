@@ -153,8 +153,8 @@ generation:
   # Disable reasoning/thinking template mode (e.g., Qwen3 <think> blocks)
   enable_thinking: false
   
-  # Load model in 8-bit (for larger models)
-  load_in_8bit: false
+  # Generator precision mode: bf16 | fp16 | fp32 | 8bit
+  torch_dtype: "bf16"
 
 # Verification Configuration (Month 3)
 verification:
@@ -254,8 +254,8 @@ verification:
     # Options: "cuda" (GPU), "cpu"
     device: "cuda"
     
-    # Batch size for inference (currently single-claim, prepared for future batching)
-    batch_size: 1
+    # Micro-batch size for batched NLI inference (auto-tuned down on OOM)
+    batch_size: 32
   
   # Self-Agreement Detector Configuration (Month 4, Task 4)
   self_agreement:

@@ -15,6 +15,7 @@ Month 4 Architecture:
 from typing import Dict, Optional, Union, List, Tuple, Any
 import traceback
 import time
+from dataclasses import dataclass
 
 from src.utils.data_structures import Claim, EvidenceChunk, VerifierSignal
 from src.utils.config import Config
@@ -23,6 +24,14 @@ from src.verification.intrinsic_uncertainty import IntrinsicUncertaintyDetector
 from src.verification.retrieval_grounded import RetrievalGroundedDetector
 from src.verification.nli_detector import NLIDetector
 from src.verification.self_agreement import SelfAgreementDetector
+
+
+@dataclass
+class _BatchPreparedState:
+    """Prepared verifier batch state before NLI inference."""
+    results: List[Optional[VerifierSignal]]
+    prepared_items: List[Dict[str, Any]]
+    nli_pending: List[Tuple[int, str, str]]
 
 
 class VerifierHub:
@@ -299,6 +308,32 @@ class VerifierHub:
             return []
 
         start_ts = time.perf_counter()
+        prepared_state = self.prepare_verification_collect_nli(claim_records)
+
+        nli_scores: List[Dict[str, float]] = []
+        if self.nli_detector is not None and prepared_state.nli_pending:
+            try:
+                nli_scores = self.nli_detector.detect_batch(
+                    [item[1] for item in prepared_state.nli_pending],
+                    [item[2] for item in prepared_state.nli_pending],
+                )
+            except Exception as e:
+                self.logger.warning("Batch NLI failed in verify_claims_batch: %s", str(e))
+                nli_scores = []
+
+        results = self.finalize_from_nli_scores(prepared_state, nli_scores)
+        elapsed_ms = (time.perf_counter() - start_ts) * 1000
+        self.logger.debug(
+            "verify_claims_batch complete: total=%d, single=%d, nli_batched=%d, elapsed_ms=%.2f",
+            len(claim_records),
+            len(prepared_state.prepared_items),
+            len(prepared_state.nli_pending),
+            elapsed_ms,
+        )
+        return results
+
+    def prepare_verification_collect_nli(self, claim_records: List[Dict[str, Any]]) -> _BatchPreparedState:
+        """Prepare non-NLI verifier signals and collect pending NLI pairs."""
         results: List[Optional[VerifierSignal]] = [None] * len(claim_records)
 
         single_items: List[Dict[str, Any]] = []
@@ -339,7 +374,6 @@ class VerifierHub:
                 'metadata': metadata,
             })
 
-        # Handle multi-evidence records using existing aggregation path.
         for item in multi_items:
             try:
                 results[item['index']] = self._verify_claim_multi(
@@ -355,20 +389,8 @@ class VerifierHub:
                 )
                 self.logger.debug(traceback.format_exc())
 
-        if not single_items:
-            elapsed_ms = (time.perf_counter() - start_ts) * 1000
-            self.logger.debug(
-                "verify_claims_batch complete: total=%d, single=0, multi=%d, elapsed_ms=%.2f",
-                len(claim_records),
-                len(multi_items),
-                elapsed_ms,
-            )
-            return results
-
-        # Precompute non-NLI signals so NLI can be resolved in one batched call.
         prepared_items: List[Dict[str, Any]] = []
-        nli_claim_texts: List[str] = []
-        nli_evidence_texts: List[str] = []
+        nli_pending: List[Tuple[int, str, str]] = []
 
         for item in single_items:
             claim = item['claim']
@@ -376,7 +398,6 @@ class VerifierHub:
             metadata = item['metadata']
 
             try:
-                # Intrinsic uncertainty.
                 disable_intrinsic = bool(metadata.get('disable_intrinsic_uncertainty'))
                 if self.uncertainty_detector is None or disable_intrinsic:
                     uncertainty_signal = {'mean_entropy': 0.0}
@@ -390,7 +411,6 @@ class VerifierHub:
                             raise
                         uncertainty_signal = {'mean_entropy': 0.0}
 
-                # Grounded signal.
                 if self.grounded_detector is None:
                     grounded_signal = {
                         'entities': 0.0,
@@ -409,7 +429,6 @@ class VerifierHub:
                             'tokens_overlap': 0.0,
                         }
 
-                # Self-agreement signal.
                 consistency_signal = {'variance': None}
                 if self.self_agreement_detector is not None:
                     try:
@@ -423,19 +442,19 @@ class VerifierHub:
                     except Exception:
                         consistency_signal = {'variance': None}
 
-                prepared_items.append({
+                prepared_item = {
                     'index': item['index'],
                     'claim': claim,
                     'evidence': evidence,
                     'uncertainty': uncertainty_signal,
                     'grounded': grounded_signal,
                     'consistency': consistency_signal,
-                })
+                    'needs_nli': self.nli_detector is not None,
+                }
+                prepared_items.append(prepared_item)
 
-                if self.nli_detector is not None:
-                    nli_claim_texts.append(claim.text)
-                    nli_evidence_texts.append(evidence.text)
-
+                if prepared_item['needs_nli']:
+                    nli_pending.append((item['index'], claim.text, evidence.text))
             except Exception as e:
                 self.logger.error(
                     "Batch verify prepare failed for claim %s: %s",
@@ -444,18 +463,21 @@ class VerifierHub:
                 )
                 self.logger.debug(traceback.format_exc())
 
-        # Batched NLI for prepared single-evidence items.
-        nli_scores: List[Dict[str, float]] = []
-        if self.nli_detector is not None and prepared_items:
-            try:
-                nli_scores = self.nli_detector.detect_batch(nli_claim_texts, nli_evidence_texts)
-            except Exception as e:
-                self.logger.warning("Batch NLI failed in verify_claims_batch: %s", str(e))
-                nli_scores = []
+        return _BatchPreparedState(
+            results=results,
+            prepared_items=prepared_items,
+            nli_pending=nli_pending,
+        )
 
+    def finalize_from_nli_scores(
+        self,
+        prepared_state: _BatchPreparedState,
+        nli_scores: List[Dict[str, float]],
+    ) -> List[Optional[VerifierSignal]]:
+        """Finalize prepared verifier items with provided NLI scores."""
         nli_idx = 0
-        for item in prepared_items:
-            if self.nli_detector is not None:
+        for item in prepared_state.prepared_items:
+            if item.get('needs_nli', False):
                 if nli_idx < len(nli_scores):
                     nli_signal = nli_scores[nli_idx]
                 else:
@@ -475,18 +497,9 @@ class VerifierHub:
                 citation_span_match=item['grounded'].get('tokens_overlap', 0.0),
                 numeric_check=item['grounded'].get('numbers', 0.0) >= 0.999,
             )
-            results[item['index']] = signal
+            prepared_state.results[item['index']] = signal
 
-        elapsed_ms = (time.perf_counter() - start_ts) * 1000
-        self.logger.debug(
-            "verify_claims_batch complete: total=%d, single=%d, multi=%d, nli_batched=%d, elapsed_ms=%.2f",
-            len(claim_records),
-            len(prepared_items),
-            len(multi_items),
-            len(nli_claim_texts),
-            elapsed_ms,
-        )
-        return results
+        return prepared_state.results
     
     def _verify_single_chunk(
         self,

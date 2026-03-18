@@ -380,19 +380,13 @@ class RAGTruthEvaluator:
                     f"(samples {batch_start+1}-{batch_end})"
                 )
 
-                # Evaluate each sample in batch
-                for sample in batch:
-                    try:
-                        result = self._evaluate_sample(sample)
-                        all_results.append(result)
-                        if save_results and output_path is not None:
-                            interim_metrics = self._compute_metrics(all_results)
-                            self._save_results(interim_metrics, all_results, output_path)
-                    except Exception as e:
-                        self.logger.error(f"Error evaluating sample {sample['id']}: {str(e)}")
-                        # Continue with next sample
-                    finally:
-                        sample_progress.update(1)
+                batch_results = self._evaluate_batch(batch)
+                for result in batch_results:
+                    all_results.append(result)
+                    if save_results and output_path is not None:
+                        interim_metrics = self._compute_metrics(all_results)
+                        self._save_results(interim_metrics, all_results, output_path)
+                sample_progress.update(len(batch))
         
         # Step 3: Compute metrics
         self.logger.info("\nStep 3: Computing evaluation metrics...")
@@ -597,6 +591,123 @@ class RAGTruthEvaluator:
                 - detected_hallucination: Whether we detected any hallucinations
                 - claim_results: Detailed per-claim results
         """
+        prepared = self._prepare_sample_for_verification(sample)
+        resolved_pairs = prepared['resolved_pairs']
+        default_generation_metadata = {}
+
+        claim_decisions = []
+        claim_signals = []
+        verified_pairs = []
+        if self.verifier_hub and self.verifier_hub.enabled and resolved_pairs:
+            batch_records = []
+            for pair in resolved_pairs:
+                batch_records.append({
+                    'claim': pair['claim'],
+                    'evidence': pair['evidence'],
+                    'metadata': pair.get('metadata') or default_generation_metadata,
+                })
+
+            batch_signals = self.verifier_hub.verify_claims_batch(batch_records)
+            try:
+                iter(batch_signals)
+            except TypeError:
+                batch_signals = [
+                    self.verifier_hub.verify_claim(
+                        pair['claim'],
+                        pair['evidence'],
+                        pair.get('metadata') or default_generation_metadata,
+                    )
+                    for pair in resolved_pairs
+                ]
+
+            for pair, signal in zip(resolved_pairs, batch_signals):
+                if signal is None:
+                    continue
+                verified_pairs.append(pair)
+                claim_signals.append(signal)
+                decision = self.aggregator.aggregate(signal)
+                claim_decisions.append(decision)
+        else:
+            verified_pairs = resolved_pairs
+
+        return self._finalize_sample_result(
+            prepared,
+            claim_decisions,
+            claim_signals,
+            verified_pairs,
+        )
+
+    def _evaluate_batch(self, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Evaluate one sample batch with cross-sample NLI batching."""
+        prepared_samples: List[Dict[str, Any]] = []
+        for sample in batch:
+            try:
+                prepared_samples.append(self._prepare_sample_for_verification(sample))
+            except Exception as e:
+                self.logger.error(f"Error preparing sample {sample.get('id')}: {str(e)}")
+
+        all_pending_nli: List[Tuple[int, str, str]] = []
+        for prepared in prepared_samples:
+            resolved_pairs = prepared['resolved_pairs']
+            if self.verifier_hub and self.verifier_hub.enabled and resolved_pairs:
+                state = self.verifier_hub.prepare_verification_collect_nli([
+                    {
+                        'claim': pair['claim'],
+                        'evidence': pair['evidence'],
+                        'metadata': pair.get('metadata') or {},
+                    }
+                    for pair in resolved_pairs
+                ])
+                prepared['_verifier_state'] = state
+                prepared['_verifier_pending_count'] = len(state.nli_pending)
+                all_pending_nli.extend(state.nli_pending)
+            else:
+                prepared['_verifier_state'] = None
+                prepared['_verifier_pending_count'] = 0
+
+        nli_scores: List[Dict[str, float]] = []
+        if self.verifier_hub and self.verifier_hub.nli_detector is not None and all_pending_nli:
+            nli_scores = self.verifier_hub.nli_detector.detect_batch(
+                [item[1] for item in all_pending_nli],
+                [item[2] for item in all_pending_nli],
+            )
+
+        results: List[Dict[str, Any]] = []
+        score_offset = 0
+        for prepared in prepared_samples:
+            resolved_pairs = prepared['resolved_pairs']
+            state = prepared.get('_verifier_state')
+            pending_count = int(prepared.get('_verifier_pending_count', 0))
+            claim_decisions: List[ClaimDecision] = []
+            claim_signals: List[Any] = []
+            verified_pairs: List[Dict[str, Any]] = []
+
+            if state is not None:
+                sample_scores = nli_scores[score_offset:score_offset + pending_count]
+                score_offset += pending_count
+                batch_signals = self.verifier_hub.finalize_from_nli_scores(state, sample_scores)
+                for pair, signal in zip(resolved_pairs, batch_signals):
+                    if signal is None:
+                        continue
+                    verified_pairs.append(pair)
+                    claim_signals.append(signal)
+                    claim_decisions.append(self.aggregator.aggregate(signal))
+            else:
+                verified_pairs = resolved_pairs
+
+            results.append(
+                self._finalize_sample_result(
+                    prepared,
+                    claim_decisions,
+                    claim_signals,
+                    verified_pairs,
+                )
+            )
+
+        return results
+
+    def _prepare_sample_for_verification(self, sample: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare model outputs and claim-evidence pairs before verification."""
         sample_id = sample['id']
         question = sample['question']
         dataset_prompt = sample.get('dataset_prompt', '')
@@ -604,9 +715,8 @@ class RAGTruthEvaluator:
         hallucination_gold_labels = [
             label for label in gold_labels if self._is_hallucination_label(label)
         ]
-        default_generation_metadata = {}
-        
-        resolved_pairs = []
+
+        resolved_pairs: List[Dict[str, Any]] = []
         generated_response = None
         context_source = 'rag_db'
         evaluation_track = 'mitigation'
@@ -656,7 +766,6 @@ class RAGTruthEvaluator:
                     per_claim_ev = self.sentence_retriever.retrieve(
                         claim.text, str(sample_id), self.sentence_retrieval_top_k
                     )
-                    # Fallback to full passage chunks if retrieval returns empty
                     resolved_pairs.append({
                         'claim': claim,
                         'evidence': per_claim_ev if per_claim_ev else evidence_chunks,
@@ -674,20 +783,16 @@ class RAGTruthEvaluator:
         else:
             if self.ragtruth_eval_mode == 'normal':
                 context_source = 'rag_db'
-                rag_result = self.rag_pipeline.run(
-                    query=question,
-                    top_k=5  # Retrieve top 5 passages
-                )
+                rag_result = self.rag_pipeline.run(query=question, top_k=5)
             elif self.ragtruth_eval_mode == 'gold_context_generation':
                 context_source = 'gold_context'
                 rag_result = self._run_gold_context_generation(sample)
             else:
                 raise ValueError(f"Unsupported ragtruth_eval_mode: {self.ragtruth_eval_mode}")
-            
+
             generated_response = rag_result['draft_response']
             claim_evidence_pairs = rag_result.get('claim_evidence_pairs', [])
 
-            # Build claim lookup from pipeline output for claim_id -> Claim
             claim_map = {}
             for entry in rag_result.get('claims_by_sub_answer', []):
                 for claim in entry.get('claims', []):
@@ -695,16 +800,13 @@ class RAGTruthEvaluator:
                     if claim_obj is not None:
                         claim_map[claim_obj.claim_id] = claim_obj
 
-            # Normalize claim/evidence pairs for verification
             sub_answer_metadata = []
             if isinstance(rag_result.get('generator_metadata'), dict):
                 sub_answer_metadata = rag_result['generator_metadata'].get('sub_answer_metadata', [])
             for pair in claim_evidence_pairs:
                 claim = pair.get('claim') if isinstance(pair, dict) else None
                 if claim is None and isinstance(pair, dict):
-                    claim_id = pair.get('claim_id')
-                    claim = claim_map.get(claim_id)
-
+                    claim = claim_map.get(pair.get('claim_id'))
                 if isinstance(claim, dict):
                     claim = Claim(**claim)
 
@@ -735,40 +837,37 @@ class RAGTruthEvaluator:
                             break
 
                 if claim is None or not evidence:
-                    self.logger.warning(
-                        "Skipping claim-evidence pair due to missing claim or evidence"
-                    )
+                    self.logger.warning("Skipping claim-evidence pair due to missing claim or evidence")
                     continue
 
-                resolved_pairs.append({
-                    'claim': claim,
-                    'evidence': evidence,
-                    'metadata': metadata
-                })
-        
-        # Step 2: Verify claims if verifier is enabled
-        claim_decisions = []
-        claim_signals = []
-        verified_pairs = []
-        if self.verifier_hub and self.verifier_hub.enabled and resolved_pairs:
-            batch_records = []
-            for pair in resolved_pairs:
-                batch_records.append({
-                    'claim': pair['claim'],
-                    'evidence': pair['evidence'],
-                    'metadata': pair.get('metadata') or default_generation_metadata,
-                })
+                resolved_pairs.append({'claim': claim, 'evidence': evidence, 'metadata': metadata})
 
-            batch_signals = self.verifier_hub.verify_claims_batch(batch_records)
-            for pair, signal in zip(resolved_pairs, batch_signals):
-                if signal is None:
-                    continue
-                verified_pairs.append(pair)
-                claim_signals.append(signal)
-                decision = self.aggregator.aggregate(signal)
-                claim_decisions.append(decision)
-        else:
-            verified_pairs = resolved_pairs
+        return {
+            'sample': sample,
+            'sample_id': sample_id,
+            'question': question,
+            'generated_response': generated_response,
+            'hallucination_gold_labels': hallucination_gold_labels,
+            'context_source': context_source,
+            'evaluation_track': evaluation_track,
+            'resolved_pairs': resolved_pairs,
+        }
+
+    def _finalize_sample_result(
+        self,
+        prepared: Dict[str, Any],
+        claim_decisions: List[ClaimDecision],
+        claim_signals: List[Any],
+        verified_pairs: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Finalize sample outputs and metric labels after verification."""
+        sample_id = prepared['sample_id']
+        question = prepared['question']
+        generated_response = prepared['generated_response']
+        resolved_pairs = prepared['resolved_pairs']
+        hallucination_gold_labels = prepared['hallucination_gold_labels']
+        context_source = prepared['context_source']
+        evaluation_track = prepared['evaluation_track']
 
         mitigation_actions = []
         filtered_response = generated_response
@@ -779,6 +878,7 @@ class RAGTruthEvaluator:
                 answer_text=generated_response,
                 claim_records=resolved_pairs,
                 objective_override='ragtruth',
+                precomputed_verification=(claim_signals, claim_decisions),
             )
             mitigation_actions = mitigation_result.get('actions', [])
             filtered_response = mitigation_result.get('final_answer', generated_response)

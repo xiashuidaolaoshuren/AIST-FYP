@@ -4,7 +4,7 @@ Core mitigation orchestrator for rerank/reprompt/filter workflows.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.generation.claim_extractor import extract_claims
 from src.mitigation.claim_filter import ClaimFilter
@@ -57,6 +57,7 @@ class MitigationOrchestrator:
         answer_text: str,
         claim_records: List[Dict[str, Any]],
         objective_override: str | None = None,
+        precomputed_verification: Optional[Tuple[List[Any], List[ClaimDecision]]] = None,
     ) -> Dict[str, Any]:
         if not self.enabled or not claim_records:
             return {
@@ -68,7 +69,10 @@ class MitigationOrchestrator:
                 "filtered_claim_count": 0,
             }
 
-        signals, decisions = self._verify_and_decide(claim_records)
+        if precomputed_verification is not None:
+            signals, decisions = precomputed_verification
+        else:
+            signals, decisions = self._verify_and_decide(claim_records)
         actions: List[str] = []
 
         planned_actions = self.router.resolve_actions(decisions, objective_override)
@@ -164,11 +168,28 @@ class MitigationOrchestrator:
         }
 
     def _verify_and_decide(self, claim_records: List[Dict[str, Any]]):
-        signals = []
-        decisions = []
+        prepared, pending_nli = self.collect_nli_phase(claim_records)
+        nli_scores: List[Dict[str, float]] = []
+        if (
+            pending_nli
+            and self.verifier_hub is not None
+            and getattr(self.verifier_hub, "nli_detector", None) is not None
+        ):
+            nli_scores = self.verifier_hub.nli_detector.detect_batch(
+                [item[1] for item in pending_nli],
+                [item[2] for item in pending_nli],
+            )
+        return self.finalize_from_nli_scores(prepared, pending_nli, nli_scores)
+
+    def collect_nli_phase(self, claim_records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[Tuple[int, str, str]]]:
+        """Prepare verification signals excluding NLI inference and collect NLI pairs."""
+        prepared = {
+            "claim_records": claim_records,
+            "verifier_state": None,
+        }
 
         if not self.verifier_hub or not getattr(self.verifier_hub, "enabled", False):
-            return signals, decisions
+            return prepared, []
 
         batch_records = []
         for record in claim_records:
@@ -183,7 +204,32 @@ class MitigationOrchestrator:
                 "metadata": metadata,
             })
 
-        batch_signals = self.verifier_hub.verify_claims_batch(batch_records)
+        if not batch_records:
+            return prepared, []
+
+        verifier_state = self.verifier_hub.prepare_verification_collect_nli(batch_records)
+        prepared["verifier_state"] = verifier_state
+        return prepared, list(verifier_state.nli_pending)
+
+    def finalize_from_nli_scores(
+        self,
+        prepared: Dict[str, Any],
+        nli_pending: List[Tuple[int, str, str]],
+        nli_scores: List[Dict[str, float]],
+    ) -> Tuple[List[Any], List[ClaimDecision]]:
+        """Finalize verification by attaching NLI scores and aggregating decisions."""
+        del nli_pending  # Kept for API clarity when orchestrating cross-sample batches.
+        signals: List[Any] = []
+        decisions: List[ClaimDecision] = []
+
+        if not self.verifier_hub or not getattr(self.verifier_hub, "enabled", False):
+            return signals, decisions
+
+        verifier_state = prepared.get("verifier_state")
+        if verifier_state is None:
+            return signals, decisions
+
+        batch_signals = self.verifier_hub.finalize_from_nli_scores(verifier_state, nli_scores)
         for signal in batch_signals:
             if signal is None:
                 continue

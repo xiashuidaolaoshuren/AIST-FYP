@@ -84,9 +84,11 @@ class NLIDetector:
                 'MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli'
             )
             device_config = getattr(config.verification.nli, 'device', 'cuda')
+            self._nli_batch_size = max(1, int(getattr(config.verification.nli, 'batch_size', 32)))
         else:
             self.model_name = 'MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli'
             device_config = 'cuda'
+            self._nli_batch_size = 32
         
         # Determine device (strictly use config value as per Q1: Option B)
         if device_config == 'cuda':
@@ -150,7 +152,7 @@ class NLIDetector:
             
             self.logger.info(
                 f"NLIDetector initialized successfully "
-                f"(device={self.device}, model={self.model_name})"
+                f"(device={self.device}, model={self.model_name}, batch_size={self._nli_batch_size})"
             )
             
         except Exception as e:
@@ -297,8 +299,8 @@ class NLIDetector:
             ... )
         
         Note:
-            This is a placeholder for future batch implementation (Task 3, Q3 Option B).
-            Currently calls detect() in a loop. Can be optimized later for true batch inference.
+            Uses micro-batch chunking with OOM auto-tune. On CUDA OOM, the
+            effective batch size is halved and retried until successful.
         """
         # Validate inputs
         if len(claim_texts) != len(evidence_texts):
@@ -311,33 +313,62 @@ class NLIDetector:
         
         try:
             self.logger.debug(
-                "Processing %d claim-evidence pairs (batched)",
-                len(claim_texts)
+                "Processing %d claim-evidence pairs (batched, micro_batch=%d)",
+                len(claim_texts),
+                self._nli_batch_size,
             )
-
-            inputs = self.tokenizer(
-                evidence_texts,
-                claim_texts,
-                return_tensors="pt",
-                truncation=True,
-                max_length=512,
-                padding=True
-            )
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                logits = outputs.logits
-
-            probabilities = F.softmax(logits, dim=-1).cpu().numpy()
-
             results: list[Dict[str, float]] = []
-            for probs in probabilities:
-                results.append({
-                    'entailment': float(probs[self.label_mapping['entailment']]),
-                    'neutral': float(probs[self.label_mapping['neutral']]),
-                    'contradiction': float(probs[self.label_mapping['contradiction']])
-                })
+
+            idx = 0
+            while idx < len(claim_texts):
+                chunk_size = min(self._nli_batch_size, len(claim_texts) - idx)
+
+                while True:
+                    claim_chunk = claim_texts[idx:idx + chunk_size]
+                    evidence_chunk = evidence_texts[idx:idx + chunk_size]
+                    try:
+                        inputs = self.tokenizer(
+                            evidence_chunk,
+                            claim_chunk,
+                            return_tensors="pt",
+                            truncation=True,
+                            max_length=512,
+                            padding=True
+                        )
+                        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                        with torch.no_grad():
+                            outputs = self.model(**inputs)
+                            logits = outputs.logits
+
+                        probabilities = F.softmax(logits, dim=-1).cpu().numpy()
+                        for probs in probabilities:
+                            results.append({
+                                'entailment': float(probs[self.label_mapping['entailment']]),
+                                'neutral': float(probs[self.label_mapping['neutral']]),
+                                'contradiction': float(probs[self.label_mapping['contradiction']])
+                            })
+                        idx += chunk_size
+                        break
+                    except torch.cuda.OutOfMemoryError:
+                        if self.device.type != 'cuda':
+                            raise
+                        if self._nli_batch_size <= 1:
+                            self.logger.warning(
+                                "NLI OOM at micro_batch=1; falling back to sequential detect() for remaining %d pairs",
+                                len(claim_texts) - idx,
+                            )
+                            raise
+
+                        old_size = self._nli_batch_size
+                        self._nli_batch_size = max(1, self._nli_batch_size // 2)
+                        chunk_size = min(self._nli_batch_size, len(claim_texts) - idx)
+                        self.logger.warning(
+                            "NLI CUDA OOM. Reducing micro_batch from %d to %d and retrying",
+                            old_size,
+                            self._nli_batch_size,
+                        )
+                        torch.cuda.empty_cache()
 
             return results
 

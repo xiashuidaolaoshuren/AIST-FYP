@@ -412,68 +412,53 @@ def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str,
         all_claims.extend(sub_claims)
 
     draft_response = " ".join(combined_response_parts)
-    mitigation_result = {
-        "final_answer": draft_response,
-        "actions": [],
-        "filtered_claim_count": 0,
-        "claim_records": [],
-    }
+    claim_records: list[dict[str, Any]] = []
 
-    if runtime.pipeline.mitigation_orchestrator and runtime.pipeline.mitigation_orchestrator.enabled:
-        claim_records = []
-        for claim in all_claims:
-            verification_metadata = None
-            for entry in sub_answer_metadata:
-                span = entry["char_span"]
-                if claim.answer_char_span[0] >= span[0] and claim.answer_char_span[1] <= span[1]:
-                    verification_metadata = dict(entry["metadata"])
-                    verification_metadata.setdefault("original_query", entry["sub_query"])
-                    break
-            if verification_metadata is None:
-                verification_metadata = {
-                    "text": draft_response,
-                    "original_query": query,
-                    "tokens": [],
-                    "scores": [],
-                }
-            claim_records.append(
-                {
-                    "claim": claim,
-                    "evidence": (
-                        runtime.sentence_retriever.retrieve_from_index(
-                            claim.text,
-                            oracle_ctx_index,
-                            runtime.sentence_retrieval_top_k,
-                        )
-                        if oracle_ctx_index is not None
-                        else evidence_chunks
-                    ) or evidence_chunks,
-                    "metadata": verification_metadata,
-                }
-            )
-
-        mitigation_result = runtime.pipeline.mitigation_orchestrator.apply(
-            query=query,
-            answer_text=draft_response,
-            claim_records=claim_records,
+    for claim in all_claims:
+        verification_metadata = None
+        for entry in sub_answer_metadata:
+            span = entry["char_span"]
+            if claim.answer_char_span[0] >= span[0] and claim.answer_char_span[1] <= span[1]:
+                verification_metadata = dict(entry["metadata"])
+                verification_metadata.setdefault("original_query", entry["sub_query"])
+                break
+        if verification_metadata is None:
+            verification_metadata = {
+                "text": draft_response,
+                "original_query": query,
+                "tokens": [],
+                "scores": [],
+            }
+        claim_records.append(
+            {
+                "claim": claim,
+                "evidence": (
+                    runtime.sentence_retriever.retrieve_from_index(
+                        claim.text,
+                        oracle_ctx_index,
+                        runtime.sentence_retrieval_top_k,
+                    )
+                    if oracle_ctx_index is not None
+                    else evidence_chunks
+                ) or evidence_chunks,
+                "metadata": verification_metadata,
+            }
         )
-
-    claim_evidence_pairs = [
-        {
-            "claim_id": claim.claim_id,
-            "evidence_spans": [chunk.to_dict() for chunk in evidence_chunks],
-        }
-        for claim in all_claims
-    ]
 
     output = {
         "query": query,
         "draft_response": draft_response,
-        "response_after_mitigation": mitigation_result["final_answer"],
-        "mitigation_actions": mitigation_result["actions"],
-        "filtered_claim_count": mitigation_result["filtered_claim_count"],
+        "response_after_mitigation": draft_response,
+        "mitigation_actions": [],
+        "filtered_claim_count": 0,
         "claims_by_sub_answer": claims_by_sub_answer,
-        "claim_evidence_pairs": claim_evidence_pairs,
+        "claim_evidence_pairs": [
+            {
+                "claim_id": claim.claim_id,
+                "evidence_spans": [chunk.to_dict() for chunk in evidence_chunks],
+            }
+            for claim in all_claims
+        ],
         "generator_metadata": {
             "sub_answer_metadata": sub_answer_metadata,
             "original_query": query,
@@ -484,16 +469,50 @@ def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str,
             "num_retrieved": len(evidence_chunks),
             "evidence_doc_ids": [chunk.doc_id for chunk in evidence_chunks[:10]],
         },
+        "__claim_records": claim_records,
     }
 
+    return output
+
+
+def _apply_mitigation_with_optional_precomputed(
+    runtime: VariantRuntime,
+    *,
+    query: str,
+    pipeline_output: dict[str, Any],
+    precomputed_verification: Any = None,
+) -> dict[str, Any]:
+    """Apply mitigation and update pipeline output payload in-place shape."""
+    claim_records = pipeline_output.pop("__claim_records", [])
+    mitigation_result = {
+        "final_answer": pipeline_output.get("draft_response", ""),
+        "actions": [],
+        "filtered_claim_count": 0,
+        "claim_records": [],
+    }
+
+    if runtime.pipeline.mitigation_orchestrator and runtime.pipeline.mitigation_orchestrator.enabled:
+        mitigation_result = runtime.pipeline.mitigation_orchestrator.apply(
+            query=query,
+            answer_text=pipeline_output.get("draft_response", ""),
+            claim_records=claim_records,
+            precomputed_verification=precomputed_verification,
+        )
+
+    pipeline_output["response_after_mitigation"] = mitigation_result["final_answer"]
+    pipeline_output["mitigation_actions"] = mitigation_result["actions"]
+    pipeline_output["filtered_claim_count"] = mitigation_result["filtered_claim_count"]
+
     if mitigation_result.get("claim_records"):
-        output["mitigation_claims"] = [record["claim"].to_dict() for record in mitigation_result["claim_records"]]
-        output["mitigation_evidence_map"] = {
+        pipeline_output["mitigation_claims"] = [
+            record["claim"].to_dict() for record in mitigation_result["claim_records"]
+        ]
+        pipeline_output["mitigation_evidence_map"] = {
             record["claim"].claim_id: [chunk.to_dict() for chunk in record.get("evidence", [])]
             for record in mitigation_result["claim_records"]
         }
 
-    return output
+    return pipeline_output
 
 
 def _generate_system_input(
@@ -505,6 +524,7 @@ def _generate_system_input(
     resume: bool,
 ) -> dict[str, int]:
     records: list[dict[str, Any]] = []
+    pending_oracle_rows: list[dict[str, Any]] = []
     processed_ids: set[str] = set()
     skipped_missing_query = 0
     skipped_missing_passages = 0
@@ -537,8 +557,24 @@ def _generate_system_input(
                 skipped_missing_passages += 1
                 continue
             pipeline_output = _run_with_oracle_context(runtime, query, row)
+            mitigation_orchestrator = getattr(runtime.pipeline, "mitigation_orchestrator", None)
+            if runtime.mitigation_enabled and mitigation_orchestrator and mitigation_orchestrator.enabled:
+                pending_oracle_rows.append(
+                    {
+                        "sample_id": sample_id,
+                        "query": query,
+                        "pipeline_output": pipeline_output,
+                    }
+                )
+                continue
+            pipeline_output = _apply_mitigation_with_optional_precomputed(
+                runtime,
+                query=query,
+                pipeline_output=pipeline_output,
+            )
         else:
             pipeline_output = runtime.pipeline.run(query)
+
         answer_text = (
             pipeline_output.get("response_after_mitigation", "")
             if runtime.mitigation_enabled
@@ -579,6 +615,85 @@ def _generate_system_input(
         processed_ids.add(sample_id)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if pending_oracle_rows:
+        mitigation_orchestrator = getattr(runtime.pipeline, "mitigation_orchestrator", None)
+        all_pending_nli: list[tuple[int, str, str]] = []
+
+        for row_data in pending_oracle_rows:
+            claim_records = row_data["pipeline_output"].get("__claim_records", [])
+            prepared, pending_nli = mitigation_orchestrator.collect_nli_phase(claim_records)
+            row_data["prepared"] = prepared
+            row_data["pending_count"] = len(pending_nli)
+            all_pending_nli.extend(pending_nli)
+
+        nli_scores: list[dict[str, float]] = []
+        if all_pending_nli:
+            verifier_hub = getattr(mitigation_orchestrator, "verifier_hub", None)
+            nli_detector = getattr(verifier_hub, "nli_detector", None) if verifier_hub is not None else None
+            if nli_detector is not None:
+                nli_scores = nli_detector.detect_batch(
+                    [item[1] for item in all_pending_nli],
+                    [item[2] for item in all_pending_nli],
+                )
+
+        score_offset = 0
+        for row_data in pending_oracle_rows:
+            row_scores = nli_scores[score_offset:score_offset + row_data.get("pending_count", 0)]
+            score_offset += row_data.get("pending_count", 0)
+
+            signals, decisions = mitigation_orchestrator.finalize_from_nli_scores(
+                row_data.get("prepared", {}),
+                [],
+                row_scores,
+            )
+            pipeline_output = _apply_mitigation_with_optional_precomputed(
+                runtime,
+                query=row_data["query"],
+                pipeline_output=row_data["pipeline_output"],
+                precomputed_verification=(signals, decisions),
+            )
+
+            answer_text = (
+                pipeline_output.get("response_after_mitigation", "")
+                if runtime.mitigation_enabled
+                else pipeline_output.get("draft_response", "")
+            )
+            if not answer_text:
+                answer_text = pipeline_output.get("draft_response", "")
+
+            mitigation_claims = pipeline_output.get("mitigation_claims", [])
+            if mitigation_claims:
+                claims = [Claim(**item) for item in mitigation_claims]
+            else:
+                claims = _flatten_claims(pipeline_output.get("claims_by_sub_answer", []))
+
+            mitigation_evidence_map = pipeline_output.get("mitigation_evidence_map", {})
+            if mitigation_evidence_map:
+                evidence_map = {
+                    claim_id: [
+                        item if isinstance(item, EvidenceChunk) else EvidenceChunk(**item)
+                        for item in chunks
+                    ]
+                    for claim_id, chunks in mitigation_evidence_map.items()
+                }
+            else:
+                evidence_map = _build_evidence_map(pipeline_output.get("claim_evidence_pairs", []))
+
+            formatted_output = runtime.citation_formatter.format_with_citations(
+                answer_text=answer_text,
+                claims=claims,
+                evidence_map=evidence_map,
+            )
+            citeeval_sample = runtime.citation_formatter.export_citeeval_format(
+                query=row_data["query"],
+                formatted_output=formatted_output,
+                answer_id=row_data["sample_id"],
+            )
+            records.append(citeeval_sample)
+            processed_ids.add(row_data["sample_id"])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -705,7 +820,7 @@ def _write_summary(
     summary_path: Path,
     metrics: dict[str, dict[str, float]],
     *,
-    context_source: str,
+    context_source: str = "retrieval",
     baseline_name: str = "baseline",
 ) -> None:
     baseline = metrics[baseline_name]

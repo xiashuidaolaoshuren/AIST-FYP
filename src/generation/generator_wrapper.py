@@ -14,7 +14,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForCausalLM,
 )
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Union
 import numpy as np
 
 from src.utils.data_structures import EvidenceChunk
@@ -50,8 +50,7 @@ class GeneratorWrapper:
         self,
         model_name: str = 'google/flan-t5-base',
         device: str = 'cuda',
-        load_in_8bit: bool = False,
-        dtype: Optional[torch.dtype] = torch.float16,
+        dtype: Union[str, torch.dtype, None] = 'bf16',
         max_input_tokens: Optional[int] = None,
         enable_thinking: bool = True,
     ):
@@ -64,8 +63,7 @@ class GeneratorWrapper:
         Args:
             model_name: HuggingFace model name (default: google/flan-t5-base)
             device: Device to run on ('cuda' or 'cpu')
-            load_in_8bit: Whether to use 8-bit quantization (for models >1GB)
-            dtype: Data type for model weights (default: float16 for GPU)
+            dtype: Precision mode ('bf16'|'fp16'|'fp32'|'8bit') or torch dtype
             max_input_tokens: Optional tokenizer truncation limit override
             enable_thinking: Whether to enable reasoning mode in supported chat templates
         
@@ -80,10 +78,23 @@ class GeneratorWrapper:
         self.logger = setup_logger(__name__)
         
         self.logger.info(f"Loading model: {model_name}")
-        self.logger.info(f"Device: {device}, 8-bit: {load_in_8bit}, dtype: {dtype}")
+        normalized_dtype_mode = self._normalize_dtype_mode(dtype)
+        is_8bit_mode = normalized_dtype_mode == '8bit'
+        selected_torch_dtype = self._resolve_torch_dtype(normalized_dtype_mode)
+
+        self.logger.info(
+            "Device: %s, dtype_mode: %s, torch_dtype: %s",
+            device,
+            normalized_dtype_mode,
+            selected_torch_dtype,
+        )
 
         # Determine whether we should forward the dtype argument based on device
         is_cuda_device = isinstance(device, str) and device.startswith('cuda')
+        if not is_cuda_device and selected_torch_dtype in (torch.float16, torch.bfloat16):
+            # CPU float16/bfloat16 support is not reliable across transformer stacks.
+            selected_torch_dtype = torch.float32
+            self.logger.info("CPU device detected, upgrading dtype to float32")
         
         # Load tokenizer
         try:
@@ -112,7 +123,7 @@ class GeneratorWrapper:
             model_cls = AutoModelForSeq2SeqLM if self.model_family == 'seq2seq' else AutoModelForCausalLM
 
             quantization_kwargs: Dict[str, Any] = {}
-            if load_in_8bit:
+            if is_8bit_mode:
                 try:
                     from transformers import BitsAndBytesConfig
                     quantization_kwargs['quantization_config'] = BitsAndBytesConfig(load_in_8bit=True)
@@ -122,9 +133,9 @@ class GeneratorWrapper:
                         "falling back to standard precision: %s",
                         quant_err
                     )
-                    load_in_8bit = False
+                    is_8bit_mode = False
 
-            if load_in_8bit:
+            if is_8bit_mode:
                 # 8-bit quantization for memory efficiency
                 try:
                     self.model, loading_info = model_cls.from_pretrained(
@@ -140,17 +151,17 @@ class GeneratorWrapper:
                         model_name,
                         load_err
                     )
-                    load_in_8bit = False
+                    is_8bit_mode = False
 
-                if load_in_8bit:
+                if is_8bit_mode:
                     self.logger.info("Model loaded with 8-bit quantization")
 
-            if not load_in_8bit:
+            if not is_8bit_mode:
                 # Standard loading
                 if is_cuda_device and torch.cuda.is_available():
                     model_kwargs = {'device_map': 'auto', **safe_tensor_kwargs}
-                    if dtype is not None:
-                        model_kwargs['dtype'] = dtype
+                    if selected_torch_dtype is not None:
+                        model_kwargs['torch_dtype'] = selected_torch_dtype
                     try:
                         self.model, loading_info = model_cls.from_pretrained(
                             model_name,
@@ -171,8 +182,8 @@ class GeneratorWrapper:
                         )
                 else:
                     cpu_kwargs = {**safe_tensor_kwargs}
-                    if dtype is not None and not is_cuda_device:
-                        cpu_kwargs['dtype'] = torch.float32 if dtype == torch.float16 else dtype
+                    if selected_torch_dtype is not None and not is_cuda_device:
+                        cpu_kwargs['torch_dtype'] = selected_torch_dtype
                     try:
                         cpu_model, loading_info = model_cls.from_pretrained(
                             model_name,
@@ -214,6 +225,50 @@ class GeneratorWrapper:
         
         except Exception as e:
             raise ValueError(f"Failed to load model: {e}")
+
+    def _normalize_dtype_mode(self, dtype: Union[str, torch.dtype, None]) -> str:
+        """Normalize precision mode to one of: bf16, fp16, fp32, 8bit."""
+        if dtype is None:
+            return 'bf16'
+
+        if isinstance(dtype, torch.dtype):
+            mapping = {
+                torch.bfloat16: 'bf16',
+                torch.float16: 'fp16',
+                torch.float32: 'fp32',
+            }
+            if dtype in mapping:
+                return mapping[dtype]
+            raise ValueError(f"Unsupported torch dtype: {dtype}")
+
+        mode = str(dtype).strip().lower()
+        aliases = {
+            'bf16': 'bf16',
+            'bfloat16': 'bf16',
+            'fp16': 'fp16',
+            'float16': 'fp16',
+            'fp32': 'fp32',
+            'float32': 'fp32',
+            '8bit': '8bit',
+            'int8': '8bit',
+        }
+        if mode not in aliases:
+            raise ValueError(
+                f"Unsupported dtype mode '{dtype}'. Expected one of: bf16, fp16, fp32, 8bit"
+            )
+        return aliases[mode]
+
+    def _resolve_torch_dtype(self, mode: str) -> Optional[torch.dtype]:
+        """Resolve torch dtype for a normalized precision mode."""
+        if mode == 'bf16':
+            return torch.bfloat16
+        if mode == 'fp16':
+            return torch.float16
+        if mode == 'fp32':
+            return torch.float32
+        if mode == '8bit':
+            return None
+        raise ValueError(f"Unknown dtype mode: {mode}")
 
     def _repair_missing_embeddings_if_needed(self, loading_info: Dict[str, Any]) -> bool:
         """Repair missing LongT5 encoder/decoder embeddings from shared weights."""

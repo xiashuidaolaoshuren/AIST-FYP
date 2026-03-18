@@ -23,7 +23,7 @@ generation:
   temperature: 0.7
   top_p: 0.9
   do_sample: false
-  load_in_8bit: false
+  torch_dtype: "fp32"
 
 logging:
   log_level: "WARNING"

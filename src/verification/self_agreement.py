@@ -12,6 +12,7 @@ Based on the self-consistency method from:
 
 import torch
 import numpy as np
+import hashlib
 from typing import List, Dict, Optional, Tuple
 from sentence_transformers import SentenceTransformer
 
@@ -93,6 +94,19 @@ class SelfAgreementDetector:
             raise ValueError(f"Failed to load similarity model: {e}")
         
         self.logger.info("SelfAgreementDetector initialized successfully")
+        self._sample_cache: Dict[str, List[str]] = {}
+
+    def _cache_key(self, query: str, evidence_chunks: Optional[List[EvidenceChunk]]) -> str:
+        """Build a stable cache key from query text and evidence chunk texts."""
+        evidence_chunks = evidence_chunks or []
+        evidence_texts = [str(chunk.text).strip() for chunk in evidence_chunks if getattr(chunk, 'text', None)]
+        evidence_texts.sort()
+        raw = query.strip() + "\n" + "\n".join(evidence_texts)
+        return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+    def clear_cache(self) -> None:
+        """Clear in-memory generation sample cache."""
+        self._sample_cache.clear()
     
     def generate_samples(
         self,
@@ -135,6 +149,12 @@ class SelfAgreementDetector:
         
         if evidence_chunks is None:
             evidence_chunks = []
+
+        cache_key = self._cache_key(query, evidence_chunks)
+        cached = self._sample_cache.get(cache_key)
+        if cached is not None:
+            self.logger.debug("SelfAgreement sample cache hit")
+            return list(cached)
         
         # Set random seed for deterministic mode
         if self.deterministic:
@@ -198,6 +218,8 @@ class SelfAgreementDetector:
         # Validate we have at least some samples
         if len(samples) == 0:
             raise RuntimeError(f"All {k} generation attempts produced empty samples")
+
+        self._sample_cache[cache_key] = list(samples)
         
         self.logger.debug(f"Successfully generated {len(samples)}/{k} valid samples")
         return samples
