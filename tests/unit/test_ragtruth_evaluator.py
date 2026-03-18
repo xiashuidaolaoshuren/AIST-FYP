@@ -483,6 +483,165 @@ class TestRAGTruthEvaluator(unittest.TestCase):
         self.assertFalse(result['detected_hallucination'])
         self.assertAlmostEqual(result['low_confidence_ratio'], 0.5)
 
+    def test_summary_ragtruth_eval_requires_sentence_retriever(self):
+        """Summary samples in ragtruth_eval must fail fast without sentence retriever."""
+        self.config.evaluation.benchmarks.ragtruth.ragtruth_eval_mode = 'ragtruth_eval'
+        self.config.evaluation.benchmarks.ragtruth.teacher_forced_intrinsic = False
+
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator,
+            sentence_retriever=None,
+        )
+
+        sample = {
+            'id': 'summary_1',
+            'source_id': 'src_2',
+            'task_type': 'Summary',
+            'question': 'Summarize the following document.',
+            'dataset_prompt': 'Summarize the text.',
+            'contexts': ['A document body.'],
+            'gold_labels': [],
+            'gold_response': 'A short summary.'
+        }
+
+        with patch('src.evaluation.ragtruth_evaluator.extract_claims') as mock_extract:
+            mock_extract.return_value = []
+            with self.assertRaises(RuntimeError) as exc:
+                evaluator._prepare_sample_for_verification(sample)
+        self.assertIn('require sentence retrieval evidence', str(exc.exception))
+
+    def test_summary_ragtruth_eval_disallows_full_context_fallback(self):
+        """Summary strict policy should error when sentence retriever returns no evidence."""
+        self.config.evaluation.benchmarks.ragtruth.ragtruth_eval_mode = 'ragtruth_eval'
+        self.config.evaluation.benchmarks.ragtruth.teacher_forced_intrinsic = False
+
+        mock_retriever = Mock()
+        mock_retriever.retrieve.return_value = []
+
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator,
+            sentence_retriever=mock_retriever,
+        )
+
+        claim = Claim(
+            claim_id='c1',
+            answer_id='summary_2',
+            text='The key point of the document is X.',
+            answer_char_span=[0, 33],
+            extraction_method='auto',
+        )
+
+        sample = {
+            'id': 'summary_2',
+            'source_id': 'src_2',
+            'task_type': 'Summary',
+            'question': 'Summarize the following document.',
+            'dataset_prompt': 'Summarize the text.',
+            'contexts': ['A document body.'],
+            'gold_labels': [],
+            'gold_response': 'A short summary.'
+        }
+
+        with patch('src.evaluation.ragtruth_evaluator.extract_claims', return_value=[claim]):
+            with self.assertRaises(RuntimeError) as exc:
+                evaluator._prepare_sample_for_verification(sample)
+        self.assertIn('Strict index-only policy', str(exc.exception))
+
+    def test_compute_metrics_includes_per_task(self):
+        """Per-task metrics should be present and numerically consistent."""
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        results = [
+            {
+                'sample_id': 'qa_1',
+                'task_type': 'QA',
+                'gold_has_hallucination': True,
+                'detected_hallucination': True,
+                'num_claims': 2,
+                'contradictory_count': 1,
+                'low_confidence_count': 0,
+            },
+            {
+                'sample_id': 'qa_2',
+                'task_type': 'QA',
+                'gold_has_hallucination': False,
+                'detected_hallucination': False,
+                'num_claims': 1,
+                'contradictory_count': 0,
+                'low_confidence_count': 0,
+            },
+            {
+                'sample_id': 'summary_1',
+                'task_type': 'Summary',
+                'gold_has_hallucination': True,
+                'detected_hallucination': False,
+                'num_claims': 3,
+                'contradictory_count': 0,
+                'low_confidence_count': 1,
+            },
+        ]
+
+        metrics = evaluator._compute_metrics(results)
+
+        self.assertIn('per_task', metrics)
+        self.assertIn('QA', metrics['per_task'])
+        self.assertIn('Summary', metrics['per_task'])
+
+        qa_metrics = metrics['per_task']['QA']
+        self.assertEqual(qa_metrics['num_samples'], 2)
+        self.assertEqual(qa_metrics['confusion_matrix']['true_positives'], 1)
+        self.assertEqual(qa_metrics['confusion_matrix']['true_negatives'], 1)
+        self.assertEqual(qa_metrics['statistics']['total_claims'], 3)
+
+        summary_metrics = metrics['per_task']['Summary']
+        self.assertEqual(summary_metrics['num_samples'], 1)
+        self.assertEqual(summary_metrics['confusion_matrix']['false_negatives'], 1)
+        self.assertEqual(summary_metrics['statistics']['detected_low_confidence_claims'], 1)
+
+    def test_save_results_includes_unique_tasks_metadata(self):
+        """Saved output metadata should expose unique task types."""
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        metrics = {
+            'overall': {'accuracy': 0.9, 'f1': 0.85},
+            'per_task': {
+                'QA': {'num_samples': 1},
+                'Summary': {'num_samples': 1}
+            },
+            'confusion_matrix': {'true_positives': 1},
+            'statistics': {'total_samples': 2}
+        }
+
+        results = [
+            {'sample_id': 'qa_1', 'task_type': 'QA', 'detected_hallucination': True},
+            {'sample_id': 'sum_1', 'task_type': 'Summary', 'detected_hallucination': False}
+        ]
+
+        output_path = Path(self.temp_dir) / 'results_with_tasks.json'
+        evaluator._save_results(metrics, results, str(output_path))
+
+        with open(output_path, 'r', encoding='utf-8') as f:
+            saved = json.load(f)
+
+        self.assertIn('unique_tasks', saved['metadata'])
+        self.assertEqual(saved['metadata']['unique_tasks'], ['QA', 'Summary'])
+
 
 if __name__ == '__main__':
     unittest.main()

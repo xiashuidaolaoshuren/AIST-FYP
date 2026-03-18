@@ -709,6 +709,8 @@ class RAGTruthEvaluator:
     def _prepare_sample_for_verification(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare model outputs and claim-evidence pairs before verification."""
         sample_id = sample['id']
+        task_type = sample.get('task_type', 'Unknown')
+        task_id = sample.get('source_id')
         question = sample['question']
         dataset_prompt = sample.get('dataset_prompt', '')
         gold_labels = sample['gold_labels']
@@ -761,11 +763,22 @@ class RAGTruthEvaluator:
                         str(e)
                     )
 
+            if task_type == 'Summary' and self.sentence_retriever is None:
+                raise RuntimeError(
+                    "Summary samples in ragtruth_eval mode require sentence retrieval evidence. "
+                    "Configure and pass a sentence retriever (prebuilt index) before running evaluation."
+                )
+
             if self.sentence_retriever is not None and evidence_chunks:
                 for claim in claims:
                     per_claim_ev = self.sentence_retriever.retrieve(
                         claim.text, str(sample_id), self.sentence_retrieval_top_k
                     )
+                    if task_type == 'Summary' and not per_claim_ev:
+                        raise RuntimeError(
+                            f"Summary sample {sample_id} returned no sentence evidence for claim '{claim.text[:120]}'. "
+                            "Strict index-only policy forbids fallback to full gold context."
+                        )
                     resolved_pairs.append({
                         'claim': claim,
                         'evidence': per_claim_ev if per_claim_ev else evidence_chunks,
@@ -845,6 +858,8 @@ class RAGTruthEvaluator:
         return {
             'sample': sample,
             'sample_id': sample_id,
+            'task_type': task_type,
+            'task_id': task_id,
             'question': question,
             'generated_response': generated_response,
             'hallucination_gold_labels': hallucination_gold_labels,
@@ -862,6 +877,8 @@ class RAGTruthEvaluator:
     ) -> Dict[str, Any]:
         """Finalize sample outputs and metric labels after verification."""
         sample_id = prepared['sample_id']
+        task_type = prepared.get('task_type', 'Unknown')
+        task_id = prepared.get('task_id')
         question = prepared['question']
         generated_response = prepared['generated_response']
         resolved_pairs = prepared['resolved_pairs']
@@ -945,6 +962,8 @@ class RAGTruthEvaluator:
         
         return {
             'sample_id': sample_id,
+            'task_type': task_type,
+            'task_id': task_id,
             'question': question,
             'generated_response': generated_response,
             'response_after_mitigation': filtered_response,
@@ -1299,6 +1318,63 @@ class RAGTruthEvaluator:
         total_claim_hallucinations = sum(int(r.get('contradictory_count', 0)) for r in results)
         total_low_confidence_claims = sum(int(r.get('low_confidence_count', 0)) for r in results)
 
+        per_task: Dict[str, Any] = {}
+        task_types = sorted({str(r.get('task_type', 'Unknown')) for r in results})
+        for task_type in task_types:
+            task_results = [r for r in results if str(r.get('task_type', 'Unknown')) == task_type]
+            if not task_results:
+                continue
+
+            y_true_task = [1 if r['gold_has_hallucination'] else 0 for r in task_results]
+            y_pred_task = [1 if r['detected_hallucination'] else 0 for r in task_results]
+
+            task_accuracy = accuracy_score(y_true_task, y_pred_task)
+            task_precision, task_recall, task_f1, _ = precision_recall_fscore_support(
+                y_true_task,
+                y_pred_task,
+                average='binary',
+                zero_division=0
+            )
+            task_cm = confusion_matrix(y_true_task, y_pred_task, labels=[0, 1])
+            task_tn, task_fp, task_fn, task_tp = task_cm.ravel()
+
+            task_total_claims = sum(int(r.get('num_claims', 0)) for r in task_results)
+            task_detected_claim_hallucinations = sum(
+                int(r.get('contradictory_count', 0)) for r in task_results
+            )
+            task_detected_low_confidence_claims = sum(
+                int(r.get('low_confidence_count', 0)) for r in task_results
+            )
+
+            per_task[task_type] = {
+                'accuracy': float(task_accuracy),
+                'precision': float(task_precision),
+                'recall': float(task_recall),
+                'f1': float(task_f1),
+                'num_samples': len(task_results),
+                'confusion_matrix': {
+                    'true_negatives': int(task_tn),
+                    'false_positives': int(task_fp),
+                    'false_negatives': int(task_fn),
+                    'true_positives': int(task_tp)
+                },
+                'statistics': {
+                    'total_samples': len(task_results),
+                    'gold_hallucinations': int(sum(y_true_task)),
+                    'detected_hallucinations': int(sum(y_pred_task)),
+                    'correct_detections': int(task_tp),
+                    'missed_hallucinations': int(task_fn),
+                    'false_alarms': int(task_fp),
+                    'total_claims': int(task_total_claims),
+                    'detected_claim_hallucinations': int(task_detected_claim_hallucinations),
+                    'detected_low_confidence_claims': int(task_detected_low_confidence_claims),
+                    'avg_claims_per_sample': float(task_total_claims / len(task_results)) if task_results else 0.0,
+                    'avg_claim_hallucinations_per_sample': (
+                        float(task_detected_claim_hallucinations / len(task_results)) if task_results else 0.0
+                    )
+                }
+            }
+
         metrics = {
             'overall': {
                 'accuracy': float(accuracy),
@@ -1307,6 +1383,7 @@ class RAGTruthEvaluator:
                 'f1': float(f1),
                 'num_samples': len(results)
             },
+            'per_task': per_task,
             'confusion_matrix': {
                 'true_negatives': int(tn),
                 'false_positives': int(fp),
@@ -1358,7 +1435,8 @@ class RAGTruthEvaluator:
                 'evaluator': 'RAGTruthEvaluator',
                 'num_samples': len(results),
                 'benchmark': 'RAGTruth',
-                'ragtruth_eval_mode': self.ragtruth_eval_mode
+                'ragtruth_eval_mode': self.ragtruth_eval_mode,
+                'unique_tasks': sorted({str(r.get('task_type', 'Unknown')) for r in results})
             }
         }
         

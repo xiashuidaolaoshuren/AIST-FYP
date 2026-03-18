@@ -75,6 +75,11 @@ evaluation:
       low_coverage_ratio_threshold: 0.3
 ```
 
+  Summary-policy note:
+
+  - In `ragtruth_eval` mode, Summary samples are evaluated with strict sentence-index evidence.
+  - If the sentence retriever/index is unavailable, evaluation fails fast instead of falling back to full-document gold context.
+
 Disable multi-question splitting (recommended for RAGTruth evaluation stability):
 
 ```yaml
@@ -228,6 +233,34 @@ When using `--save-results`, outputs detailed JSON file:
       "f1": 0.80,
       "num_samples": 100
     },
+    "per_task": {
+      "QA": {
+        "accuracy": 0.88,
+        "precision": 0.85,
+        "recall": 0.82,
+        "f1": 0.83,
+        "num_samples": 40,
+        "confusion_matrix": {
+          "true_negatives": 12,
+          "false_positives": 2,
+          "false_negatives": 4,
+          "true_positives": 22
+        },
+        "statistics": {
+          "total_samples": 40,
+          "gold_hallucinations": 26,
+          "detected_hallucinations": 24,
+          "correct_detections": 22,
+          "missed_hallucinations": 4,
+          "false_alarms": 2,
+          "total_claims": 180,
+          "detected_claim_hallucinations": 30,
+          "detected_low_confidence_claims": 12,
+          "avg_claims_per_sample": 4.5,
+          "avg_claim_hallucinations_per_sample": 0.75
+        }
+      }
+    },
     "confusion_matrix": {
       "true_negatives": 41,
       "false_positives": 9,
@@ -246,6 +279,8 @@ When using `--save-results`, outputs detailed JSON file:
   "sample_results": [
     {
       "sample_id": "resp_1",
+      "task_type": "QA",
+      "task_id": "src_1",
       "question": "What is the capital of France?",
       "generated_response": "The capital is Paris.",
       "num_claims": 1,
@@ -259,7 +294,9 @@ When using `--save-results`, outputs detailed JSON file:
   "metadata": {
     "evaluator": "RAGTruthEvaluator",
     "num_samples": 100,
-    "benchmark": "RAGTruth"
+    "benchmark": "RAGTruth",
+    "ragtruth_eval_mode": "ragtruth_eval",
+    "unique_tasks": ["Data2txt", "QA", "Summary"]
   }
 }
 ```
@@ -277,6 +314,7 @@ When using `--save-results`, outputs detailed JSON file:
 2. **Sample Evaluation** (for each sample)
   - Extract question and contexts from source info
   - If `ragtruth_eval_mode: ragtruth_eval`: use dataset response + gold contexts
+  - For Summary in `ragtruth_eval`, require sentence-index evidence and do not fallback to full-context verification
   - If `teacher_forced_intrinsic: true` in `ragtruth_eval`, score the gold response with teacher forcing to compute intrinsic uncertainty (without replacing response text)
   - If `ragtruth_eval_mode: normal`: run RAG pipeline to generate responses
   - Verify each claim using VerifierHub (all detectors)
