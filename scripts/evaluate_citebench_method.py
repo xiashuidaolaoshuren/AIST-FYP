@@ -134,14 +134,31 @@ def _extract_metric_scores(out_file: Path) -> dict[str, Any]:
     return result
 
 
-def _collect_method_metrics(system_input: Path, modules: str, version: str, model_name: str) -> tuple[dict[str, Any], int | None]:
-    citeeval_name = system_input.with_suffix(".citeeval").name
+def _collect_method_metrics(
+    system_input: Path,
+    modules: str,
+    version: str,
+    model_name: str,
+    max_samples: int | None,
+) -> tuple[dict[str, Any], int | None]:
+    citeeval_name_candidates: list[str] = [system_input.with_suffix(".citeeval").name]
+    if max_samples is not None:
+        sampled_name = f"system.{system_input.stem}.subset_{max_samples}.citeeval"
+        if sampled_name not in citeeval_name_candidates:
+            citeeval_name_candidates.append(sampled_name)
+
     metrics: dict[str, Any] = {}
     row_counts: list[int] = []
 
     for module in [mod.strip() for mod in modules.split(",") if mod.strip()]:
-        out_path = SYSTEM_OUTPUT_DIR / f"{citeeval_name}.{version}.{module}.{model_name}.out"
-        if out_path.exists():
+        out_path: Path | None = None
+        for citeeval_name in citeeval_name_candidates:
+            candidate = SYSTEM_OUTPUT_DIR / f"{citeeval_name}.{version}.{module}.{model_name}.out"
+            if candidate.exists():
+                out_path = candidate
+                break
+
+        if out_path is not None:
             summary = _extract_metric_scores(out_path)
             metrics[module] = {
                 "out_file": str(out_path),
@@ -150,7 +167,10 @@ def _collect_method_metrics(system_input: Path, modules: str, version: str, mode
             row_counts.append(int(summary.get("num_rows", 0)))
         else:
             metrics[module] = {
-                "out_file": str(out_path),
+                "out_file": str(
+                    SYSTEM_OUTPUT_DIR
+                    / f"{citeeval_name_candidates[0]}.{version}.{module}.{model_name}.out"
+                ),
                 "summary": None,
             }
 
@@ -212,6 +232,7 @@ def main() -> int:
         modules=args.modules,
         version=args.version,
         model_name=args.model_name,
+        max_samples=args.max_samples,
     )
 
     summary = {
