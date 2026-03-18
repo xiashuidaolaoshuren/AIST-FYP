@@ -642,6 +642,126 @@ class TestRAGTruthEvaluator(unittest.TestCase):
         self.assertIn('unique_tasks', saved['metadata'])
         self.assertEqual(saved['metadata']['unique_tasks'], ['QA', 'Summary'])
 
+    def test_save_results_persists_selection_fingerprint(self):
+        """_save_results should persist selection fingerprint metadata when provided."""
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        metrics = {
+            'overall': {'accuracy': 1.0, 'f1': 1.0},
+            'per_task': {},
+            'confusion_matrix': {'true_positives': 0},
+            'statistics': {'total_samples': 0}
+        }
+
+        output_path = Path(self.temp_dir) / 'results_with_fingerprint.json'
+        run_context = {
+            'split': 'test',
+            'max_samples': 20,
+            'samples_per_task': 20,
+            'dataset_path': str(self.dataset_path),
+            'selection_fingerprint': {
+                'split': 'test',
+                'max_samples': 20,
+                'samples_per_task': 20,
+                'ragtruth_eval_mode': 'ragtruth_eval',
+                'dataset_path': str(self.dataset_path),
+            }
+        }
+
+        evaluator._save_results(metrics, [], str(output_path), run_context=run_context)
+
+        with open(output_path, 'r', encoding='utf-8') as f:
+            saved = json.load(f)
+
+        self.assertIn('selection_fingerprint', saved['metadata'])
+        self.assertEqual(saved['metadata']['split'], 'test')
+        self.assertEqual(saved['metadata']['samples_per_task'], 20)
+
+    def test_run_evaluation_resume_fresh_on_mismatch(self):
+        """Resume policy fresh-on-mismatch should ignore incompatible resume file and continue."""
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        output_path = Path(self.temp_dir) / 'resume_mismatch.json'
+        resume_payload = {
+            'metrics': {'overall': {'num_samples': 1}},
+            'sample_results': [
+                {'sample_id': 'not_in_selection', 'detected_hallucination': True}
+            ],
+            'metadata': {
+                'selection_fingerprint': {
+                    'split': 'train',
+                    'max_samples': None,
+                    'samples_per_task': None,
+                    'ragtruth_eval_mode': 'normal',
+                    'dataset_path': str(self.dataset_path),
+                }
+            }
+        }
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(resume_payload, f)
+
+        with patch.object(evaluator, '_evaluate_batch', return_value=[]), \
+             patch.object(evaluator, '_compute_metrics', return_value={'overall': {'num_samples': 0}, 'statistics': {'total_samples': 0}, 'confusion_matrix': {}, 'per_task': {}}), \
+             patch.object(evaluator, '_print_summary', return_value=None), \
+             patch.object(evaluator, '_save_results', return_value=None):
+            metrics = evaluator.run_evaluation(
+                split='test',
+                max_samples=1,
+                batch_size=1,
+                save_results=False,
+                resume_from_output=str(output_path),
+                resume_policy='fresh-on-mismatch',
+            )
+
+        self.assertIn('overall', metrics)
+
+    def test_run_evaluation_resume_strict_mismatch_raises(self):
+        """Resume policy strict should raise on incompatible resume fingerprint."""
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        output_path = Path(self.temp_dir) / 'resume_mismatch_strict.json'
+        resume_payload = {
+            'sample_results': [],
+            'metadata': {
+                'selection_fingerprint': {
+                    'split': 'train',
+                    'max_samples': None,
+                    'samples_per_task': None,
+                    'ragtruth_eval_mode': 'normal',
+                    'dataset_path': str(self.dataset_path),
+                }
+            }
+        }
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(resume_payload, f)
+
+        with self.assertRaises(ValueError) as exc:
+            evaluator.run_evaluation(
+                split='test',
+                max_samples=1,
+                batch_size=1,
+                save_results=False,
+                resume_from_output=str(output_path),
+                resume_policy='strict',
+            )
+
+        self.assertIn('selection fingerprint differs', str(exc.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -156,6 +156,13 @@ def main():
         help='Resume from existing output JSON when available'
     )
     parser.add_argument(
+        '--resume-policy',
+        type=str,
+        default='strict',
+        choices=['strict', 'fresh-on-mismatch'],
+        help='How to handle incompatible resume files (default: strict)'
+    )
+    parser.add_argument(
         '--ragtruth-eval-mode',
         type=str,
         default='ragtruth_eval',
@@ -237,6 +244,7 @@ def main():
     logger.info(f"Data strategy: {args.strategy}")
     logger.info(f"Save results: {args.save_results}")
     logger.info(f"RAGTruth eval mode: {args.ragtruth_eval_mode}")
+    logger.info(f"Resume policy: {args.resume_policy}")
 
     effective_output_path = args.output_path
     if args.save_results and effective_output_path is None:
@@ -307,7 +315,13 @@ def main():
     if not isinstance(sr_cfg, dict):
         sr_cfg = {}
     sentence_retriever = None
-    if sr_cfg.get('enabled', False):
+    sr_enabled = bool(sr_cfg.get('enabled', False))
+    if args.ragtruth_eval_mode == 'ragtruth_eval' and not sr_enabled:
+        raise ValueError(
+            "RAGTruth strict Summary policy requires sentence retrieval in ragtruth_eval mode. "
+            "Enable verification.sentence_retrieval.enabled in config or use --ragtruth-eval-mode normal."
+        )
+    if sr_enabled:
         index_dir_tpl = sr_cfg.get('index_dir', 'data/indexes/{dataset}_sentences/{split}')
         index_dir = index_dir_tpl.format(dataset='ragtruth', split=args.split)
         logger.info(f"🔧 Loading sentence index from {index_dir}...")
@@ -345,6 +359,7 @@ def main():
             save_results=args.save_results,
             output_path=effective_output_path,
             resume_from_output=resume_source,
+            resume_policy=args.resume_policy,
         )
         
         logger.info("\n✅ Evaluation completed successfully!")

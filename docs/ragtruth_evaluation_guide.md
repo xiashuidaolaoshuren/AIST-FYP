@@ -24,6 +24,12 @@ python scripts/demo_ragtruth_eval.py --split test
 
 # Full evaluation with results export
 python scripts/demo_ragtruth_eval.py --split test --save-results
+
+# Resume with strict compatibility checks (default)
+python scripts/demo_ragtruth_eval.py --split test --save-results --resume
+
+# Resume but auto-start fresh if selection changed
+python scripts/demo_ragtruth_eval.py --split test --save-results --resume --resume-policy fresh-on-mismatch
 ```
 
 ### 3. Programmatic Usage
@@ -296,10 +302,25 @@ When using `--save-results`, outputs detailed JSON file:
     "num_samples": 100,
     "benchmark": "RAGTruth",
     "ragtruth_eval_mode": "ragtruth_eval",
-    "unique_tasks": ["Data2txt", "QA", "Summary"]
+    "unique_tasks": ["Data2txt", "QA", "Summary"],
+    "selection_fingerprint": {
+      "split": "test",
+      "max_samples": 100,
+      "samples_per_task": null,
+      "ragtruth_eval_mode": "ragtruth_eval",
+      "dataset_path": ".../benchmark/RAGTruth/dataset"
+    }
   }
 }
 ```
+
+## Resume Troubleshooting
+
+- Error `Resume mismatch: sample_id 'X' not found in current dataset selection` means your existing output file was created with a different selection configuration.
+- Selection compatibility now uses `metadata.selection_fingerprint` (split, max_samples, samples_per_task, ragtruth_eval_mode, dataset_path).
+- If you intentionally changed sampling settings, either:
+  - run without `--resume`, or
+  - use `--resume --resume-policy fresh-on-mismatch` to start a clean run automatically.
 
 ## Evaluation Pipeline
 

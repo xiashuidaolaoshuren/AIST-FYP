@@ -245,7 +245,8 @@ class RAGTruthEvaluator:
         batch_size: int = 10,
         save_results: bool = True,
         output_path: Optional[str] = None,
-        resume_from_output: Optional[str] = None
+        resume_from_output: Optional[str] = None,
+        resume_policy: str = 'strict',
     ) -> Dict[str, Any]:
         """
         Run complete evaluation on RAGTruth benchmark.
@@ -270,6 +271,9 @@ class RAGTruthEvaluator:
             save_results: Whether to save detailed results to file
             output_path: Path to save results JSON (auto-generated if None)
             resume_from_output: Existing output JSON path to resume from
+            resume_policy: Resume behavior when existing output is incompatible:
+                - strict: raise mismatch error
+                - fresh-on-mismatch: log warning and start a fresh run
             
         Returns:
             Dictionary containing:
@@ -300,10 +304,30 @@ class RAGTruthEvaluator:
         self.logger.info(f"Batch size: {batch_size}")
         self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
         self.logger.info(f"Teacher-forced intrinsic: {self.teacher_forced_intrinsic}")
+        self.logger.info(f"Resume policy: {resume_policy}")
         if samples_per_task is not None and max_samples is not None:
             self.logger.info("Sampling precedence: using samples_per_task and ignoring max_samples")
         if resume_from_output:
             self.logger.info(f"Resume source: {resume_from_output}")
+
+        allowed_resume_policies = {'strict', 'fresh-on-mismatch'}
+        if resume_policy not in allowed_resume_policies:
+            raise ValueError(
+                f"Invalid resume_policy '{resume_policy}' (expected one of {sorted(allowed_resume_policies)})"
+            )
+
+        run_context = {
+            'split': split,
+            'max_samples': max_samples,
+            'samples_per_task': samples_per_task,
+            'ragtruth_eval_mode': self.ragtruth_eval_mode,
+            'dataset_path': str(self.benchmark_dir.resolve()),
+            'selection_fingerprint': self._build_selection_fingerprint(
+                split=split,
+                max_samples=max_samples,
+                samples_per_task=samples_per_task,
+            ),
+        }
         
         # Step 1: Load dataset
         self.logger.info("\nStep 1: Loading RAGTruth dataset...")
@@ -323,38 +347,63 @@ class RAGTruthEvaluator:
         if resume_from_output:
             resume_path = Path(resume_from_output)
             if resume_path.exists():
-                with open(resume_path, 'r', encoding='utf-8') as f:
-                    resume_payload = json.load(f)
+                try:
+                    with open(resume_path, 'r', encoding='utf-8') as f:
+                        resume_payload = json.load(f)
 
-                existing_results = resume_payload.get('sample_results', [])
-                if not isinstance(existing_results, list):
-                    raise ValueError(f"Invalid resume file format (sample_results must be a list): {resume_path}")
+                    resume_meta = resume_payload.get('metadata', {})
+                    if not isinstance(resume_meta, dict):
+                        resume_meta = {}
 
-                seen_resume_ids: set[str] = set()
-                for result in existing_results:
-                    sample_id = str(result.get('sample_id', ''))
-                    if not sample_id:
-                        raise ValueError(f"Resume file contains sample without sample_id: {resume_path}")
-                    if sample_id not in sample_id_universe:
+                    existing_fingerprint = resume_meta.get('selection_fingerprint')
+                    if existing_fingerprint is not None:
+                        if existing_fingerprint != run_context['selection_fingerprint']:
+                            raise ValueError(
+                                "Resume mismatch: selection fingerprint differs from current run. "
+                                f"existing={existing_fingerprint}, current={run_context['selection_fingerprint']}"
+                            )
+
+                    existing_results = resume_payload.get('sample_results', [])
+                    if not isinstance(existing_results, list):
+                        raise ValueError(f"Invalid resume file format (sample_results must be a list): {resume_path}")
+
+                    seen_resume_ids: set[str] = set()
+                    for result in existing_results:
+                        sample_id = str(result.get('sample_id', ''))
+                        if not sample_id:
+                            raise ValueError(f"Resume file contains sample without sample_id: {resume_path}")
+                        if sample_id not in sample_id_universe:
+                            raise ValueError(
+                                f"Resume mismatch: sample_id '{sample_id}' not found in current dataset selection"
+                            )
+                        if sample_id in seen_resume_ids:
+                            raise ValueError(f"Resume file contains duplicate sample_id '{sample_id}': {resume_path}")
+                        seen_resume_ids.add(sample_id)
+
+                    if max_samples is not None and len(existing_results) > len(samples):
                         raise ValueError(
-                            f"Resume mismatch: sample_id '{sample_id}' not found in current dataset selection"
+                            f"Resume mismatch: existing results ({len(existing_results)}) exceed current sample limit ({len(samples)})"
                         )
-                    if sample_id in seen_resume_ids:
-                        raise ValueError(f"Resume file contains duplicate sample_id '{sample_id}': {resume_path}")
-                    seen_resume_ids.add(sample_id)
 
-                if max_samples is not None and len(existing_results) > len(samples):
-                    raise ValueError(
-                        f"Resume mismatch: existing results ({len(existing_results)}) exceed current sample limit ({len(samples)})"
+                    all_results.extend(existing_results)
+                    resume_count = len(existing_results)
+                    self.logger.info(
+                        "Loaded %d existing sample results for resume from %s",
+                        resume_count,
+                        resume_path,
                     )
-
-                all_results.extend(existing_results)
-                resume_count = len(existing_results)
-                self.logger.info(
-                    "Loaded %d existing sample results for resume from %s",
-                    resume_count,
-                    resume_path,
-                )
+                except ValueError as exc:
+                    if resume_policy == 'fresh-on-mismatch':
+                        self.logger.warning(
+                            "Resume payload at %s is incompatible (%s). Starting fresh run due to resume_policy=%s.",
+                            resume_path,
+                            str(exc),
+                            resume_policy,
+                        )
+                        all_results = []
+                        resume_count = 0
+                    else:
+                        raise
             else:
                 self.logger.info("Resume file not found at %s, starting fresh", resume_path)
 
@@ -385,7 +434,7 @@ class RAGTruthEvaluator:
                     all_results.append(result)
                     if save_results and output_path is not None:
                         interim_metrics = self._compute_metrics(all_results)
-                        self._save_results(interim_metrics, all_results, output_path)
+                        self._save_results(interim_metrics, all_results, output_path, run_context=run_context)
                 sample_progress.update(len(batch))
         
         # Step 3: Compute metrics
@@ -399,7 +448,7 @@ class RAGTruthEvaluator:
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = output_dir / f'ragtruth_eval_{split}.json'
             
-            self._save_results(metrics, all_results, output_path)
+            self._save_results(metrics, all_results, output_path, run_context=run_context)
             self.logger.info(f"Results saved to: {output_path}")
         
         # Print summary
@@ -1418,7 +1467,8 @@ class RAGTruthEvaluator:
         self,
         metrics: Dict[str, Any],
         results: List[Dict[str, Any]],
-        output_path: str
+        output_path: str,
+        run_context: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Save evaluation metrics and detailed results to JSON file.
@@ -1439,6 +1489,12 @@ class RAGTruthEvaluator:
                 'unique_tasks': sorted({str(r.get('task_type', 'Unknown')) for r in results})
             }
         }
+        if isinstance(run_context, dict):
+            output['metadata']['selection_fingerprint'] = run_context.get('selection_fingerprint')
+            output['metadata']['split'] = run_context.get('split')
+            output['metadata']['max_samples'] = run_context.get('max_samples')
+            output['metadata']['samples_per_task'] = run_context.get('samples_per_task')
+            output['metadata']['dataset_path'] = run_context.get('dataset_path')
         
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1447,6 +1503,21 @@ class RAGTruthEvaluator:
             json.dump(output, f, indent=2, ensure_ascii=False)
         
         self.logger.info(f"Saved evaluation results to: {output_path}")
+
+    def _build_selection_fingerprint(
+        self,
+        split: str,
+        max_samples: Optional[int],
+        samples_per_task: Optional[int],
+    ) -> Dict[str, Any]:
+        """Build a deterministic selection fingerprint for resume compatibility checks."""
+        return {
+            'split': split,
+            'max_samples': max_samples,
+            'samples_per_task': samples_per_task,
+            'ragtruth_eval_mode': self.ragtruth_eval_mode,
+            'dataset_path': str(self.benchmark_dir.resolve()),
+        }
     
     def _print_summary(self, metrics: Dict[str, Any]) -> None:
         """
