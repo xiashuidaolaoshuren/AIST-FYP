@@ -20,6 +20,42 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_OUTPUT_DIR = PROJECT_ROOT / "benchmark" / "CiteEval" / "data" / "system_eval_outputs"
 
 
+def _ensure_eval_runtime_dependencies() -> str | None:
+    """Return a human-readable error message if runtime deps are unavailable."""
+    try:
+        import configobj  # noqa: F401
+    except Exception as exc:
+        return f"missing_dependency: configobj ({exc})"
+
+    try:
+        import nltk
+        from nltk.data import find
+    except Exception as exc:
+        return f"missing_dependency: nltk ({exc})"
+
+    try:
+        find("tokenizers/punkt_tab/english/")
+    except LookupError:
+        # Try to self-heal in non-notebook CLI runs.
+        try:
+            nltk.download("punkt", quiet=True)
+            nltk.download("punkt_tab", quiet=True)
+            find("tokenizers/punkt_tab/english/")
+        except Exception as exc:
+            return f"missing_nltk_resource: punkt_tab ({exc})"
+
+    return None
+
+
+def _extract_error_hint(stderr: str) -> str | None:
+    lowered = (stderr or "").lower()
+    if "punkt_tab" in lowered:
+        return "missing_nltk_punkt_tab"
+    if "configobj" in lowered:
+        return "missing_configobj"
+    return None
+
+
 def _run_eval(
     system_input: Path,
     provider: str,
@@ -149,16 +185,27 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     system_input = Path(args.system_input).resolve()
-    proc = _run_eval(
-        system_input=system_input,
-        provider=args.provider,
-        model_name=args.model_name,
-        modules=args.modules,
-        version=args.version,
-        context_source=args.context_source,
-        max_samples=args.max_samples,
-        dry_run=args.dry_run,
-    )
+    preflight_error = _ensure_eval_runtime_dependencies()
+    if preflight_error:
+        proc = subprocess.CompletedProcess(
+            args=["preflight"],
+            returncode=2,
+            stdout="",
+            stderr=f"CiteBench evaluation preflight failed: {preflight_error}",
+        )
+    else:
+        proc = _run_eval(
+            system_input=system_input,
+            provider=args.provider,
+            model_name=args.model_name,
+            modules=args.modules,
+            version=args.version,
+            context_source=args.context_source,
+            max_samples=args.max_samples,
+            dry_run=args.dry_run,
+        )
+
+    error_hint = _extract_error_hint(proc.stderr)
 
     module_metrics, evaluated_rows = _collect_method_metrics(
         system_input=system_input,
@@ -182,6 +229,7 @@ def main() -> int:
             "evaluated_rows": evaluated_rows,
         },
         "command_returncode": proc.returncode,
+        "error_hint": error_hint,
         "module_metrics": module_metrics,
     }
 
@@ -209,6 +257,7 @@ def main() -> int:
                 "summary_path": str(summary_path),
                 "output_dir": str(output_dir),
                 "evaluated_rows": evaluated_rows,
+                "error_hint": error_hint,
             },
             ensure_ascii=False,
         )
