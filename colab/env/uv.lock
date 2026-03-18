@@ -156,10 +156,12 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "spacy" },
     { name = "torch" },
     { name = "torchaudio" },
     { name = "torchvision" },
     { name = "tqdm" },
+    { name = "transformers" },
 ]
 
 [package.optional-dependencies]
@@ -179,8 +181,6 @@ mitigation = [
     { name = "pandas" },
     { name = "scikit-learn" },
     { name = "sentence-transformers" },
-    { name = "spacy" },
-    { name = "transformers" },
 ]
 preprocessing = [
     { name = "accelerate" },
@@ -192,8 +192,6 @@ preprocessing = [
     { name = "rank-bm25" },
     { name = "scikit-learn" },
     { name = "sentence-transformers" },
-    { name = "spacy" },
-    { name = "transformers" },
     { name = "wikiextractor" },
 ]
 
@@ -224,14 +222,12 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'preprocessing'", specifier = "==1.7.2" },
     { name = "sentence-transformers", marker = "extra == 'mitigation'", specifier = "==5.1.1" },
     { name = "sentence-transformers", marker = "extra == 'preprocessing'", specifier = "==5.1.1" },
-    { name = "spacy", marker = "extra == 'mitigation'", specifier = "==3.7.2" },
-    { name = "spacy", marker = "extra == 'preprocessing'", specifier = "==3.7.2" },
+    { name = "spacy", specifier = "==3.7.2" },
     { name = "torch", specifier = "==2.5.1+cu121", index = "https://download.pytorch.org/whl/cu121" },
     { name = "torchaudio", specifier = "==2.5.1+cu121", index = "https://download.pytorch.org/whl/cu121" },
     { name = "torchvision", specifier = "==0.20.1+cu121", index = "https://download.pytorch.org/whl/cu121" },
     { name = "tqdm", specifier = "==4.67.1" },
-    { name = "transformers", marker = "extra == 'mitigation'", specifier = "==4.56.2" },
-    { name = "transformers", marker = "extra == 'preprocessing'", specifier = "==4.56.2" },
+    { name = "transformers", specifier = "==4.56.2" },
     { name = "wikiextractor", marker = "extra == 'preprocessing'", specifier = "==3.0.6" },
 ]
 provides-extras = ["preprocessing", "evaluation", "mitigation"]
@@ -2382,10 +2378,10 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp311-cp311-linux_x86_64.whl", hash = "sha256:9e6f03e6410cb3557978dea25fb30ce3e7c165e8377fcc8e0e1ddc700503d38b" },
-    { url = "https://download.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp311-cp311-win_amd64.whl", hash = "sha256:f9397ff9c6e8fa1b4fdc94939411ac65fe43f66d66367ee80603bc7ce10e18e2" },
-    { url = "https://download.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp312-cp312-linux_x86_64.whl", hash = "sha256:5648a01f23033f15d60dc638f91c2d4c66c0a01621162471e806064acda63b70" },
-    { url = "https://download.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp312-cp312-win_amd64.whl", hash = "sha256:80400d75da5852bb5491f6259d47a163a00c2d1479ed57d3d95fde205e1b2815" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp311-cp311-linux_x86_64.whl", hash = "sha256:9e6f03e6410cb3557978dea25fb30ce3e7c165e8377fcc8e0e1ddc700503d38b" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp311-cp311-win_amd64.whl", hash = "sha256:f9397ff9c6e8fa1b4fdc94939411ac65fe43f66d66367ee80603bc7ce10e18e2" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp312-cp312-linux_x86_64.whl", hash = "sha256:5648a01f23033f15d60dc638f91c2d4c66c0a01621162471e806064acda63b70" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchaudio-2.5.1%2Bcu121-cp312-cp312-win_amd64.whl", hash = "sha256:80400d75da5852bb5491f6259d47a163a00c2d1479ed57d3d95fde205e1b2815" },
 ]
 
 [[package]]
@@ -2398,10 +2394,10 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp311-cp311-linux_x86_64.whl", hash = "sha256:237609a3551c2b68f32bcd3f3875dca93836010d83922ef2f3bd3a7540caee58" },
-    { url = "https://download.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp311-cp311-win_amd64.whl", hash = "sha256:00143c941b30f2d5001b58f8caada826aaa4dce94b8ae4192730e5c34165fa8c" },
-    { url = "https://download.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp312-cp312-linux_x86_64.whl", hash = "sha256:48cf3a716f70370ed5dcb656e7497415ef37860b07e67ea4b1ef8598efe28445" },
-    { url = "https://download.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp312-cp312-win_amd64.whl", hash = "sha256:12b764936fc3fde29d7165adc7c721e491fa75c7a498c9fbaa08757b5fe59fe7" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp311-cp311-linux_x86_64.whl", hash = "sha256:237609a3551c2b68f32bcd3f3875dca93836010d83922ef2f3bd3a7540caee58" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp311-cp311-win_amd64.whl", hash = "sha256:00143c941b30f2d5001b58f8caada826aaa4dce94b8ae4192730e5c34165fa8c" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp312-cp312-linux_x86_64.whl", hash = "sha256:48cf3a716f70370ed5dcb656e7497415ef37860b07e67ea4b1ef8598efe28445" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torchvision-0.20.1%2Bcu121-cp312-cp312-win_amd64.whl", hash = "sha256:12b764936fc3fde29d7165adc7c721e491fa75c7a498c9fbaa08757b5fe59fe7" },
 ]
 
 [[package]]

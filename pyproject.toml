@@ -12,7 +12,6 @@ dependencies = [
   "datasets==4.1.1",
   "sentence-transformers==5.1.1",
   "faiss-cpu==1.12.0",
-  "rank-bm25==0.2.2",
   "numpy==2.3.3",
   "pandas==2.3.3",
   "tqdm==4.67.1",
@@ -33,6 +32,7 @@ dependencies = [
   "nltk==3.9.1",
   "openai==1.16.2",
   "gradio>=4.0.0",
+  "rank-bm25>=0.2.2",
 ]
 
 [dependency-groups]

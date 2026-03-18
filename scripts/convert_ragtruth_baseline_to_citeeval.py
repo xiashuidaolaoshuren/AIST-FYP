@@ -107,6 +107,24 @@ def _fallback_source_passage(sample: dict[str, Any], source_map: dict[str, str])
     return []
 
 
+def _fallback_input_passages(sample: dict[str, Any]) -> list[dict[str, str]]:
+    """Use passages already present in baseline-style rows when available."""
+    raw_passages = sample.get("passages")
+    if not isinstance(raw_passages, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for idx, item in enumerate(raw_passages, start=1):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        title = str(item.get("title", "")).strip() or f"ragtruth_input_{idx}"
+        normalized.append({"title": title, "text": text})
+    return normalized
+
+
 def _to_citeeval_passages(passages: list[dict[str, str]]) -> list[dict[str, str]]:
     return [
         {"id": str(i + 1), "title": p["title"], "text": p["text"]}
@@ -116,6 +134,8 @@ def _to_citeeval_passages(passages: list[dict[str, str]]) -> list[dict[str, str]
 
 def _normalize_passages(sample: dict[str, Any], source_map: dict[str, str]) -> list[dict[str, str]]:
     passages = _collect_claim_passages(sample)
+    if not passages:
+        passages = _fallback_input_passages(sample)
     if not passages:
         passages = _fallback_source_passage(sample, source_map)
     return _to_citeeval_passages(passages)

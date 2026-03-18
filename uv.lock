@@ -96,7 +96,6 @@ dependencies = [
     { name = "faiss-cpu" },
     { name = "gradio" },
     { name = "huggingface-hub" },
-    { name = "lettucedetect" },
     { name = "matplotlib" },
     { name = "nltk" },
     { name = "numpy" },
@@ -129,6 +128,7 @@ citeeval = [
     { name = "httpcore" },
     { name = "httpx" },
     { name = "joblib" },
+    { name = "lettucedetect" },
     { name = "pydantic" },
     { name = "pydantic-core" },
     { name = "regex" },
@@ -155,7 +155,6 @@ requires-dist = [
     { name = "faiss-cpu", specifier = "==1.12.0" },
     { name = "gradio", specifier = ">=4.0.0" },
     { name = "huggingface-hub", specifier = "==0.35.3" },
-    { name = "lettucedetect", specifier = ">=0.1.6" },
     { name = "matplotlib", specifier = "==3.10.6" },
     { name = "nltk", specifier = "==3.9.1" },
     { name = "numpy", specifier = "==2.3.3" },
@@ -164,7 +163,7 @@ requires-dist = [
     { name = "pyarrow", specifier = "==21.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = "==6.0.3" },
-    { name = "rank-bm25", specifier = "==0.2.2" },
+    { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "requests", specifier = "==2.32.5" },
     { name = "safetensors", specifier = "==0.6.2" },
     { name = "scikit-learn", specifier = "==1.7.2" },
@@ -188,6 +187,7 @@ citeeval = [
     { name = "httpcore", specifier = "==1.0.9" },
     { name = "httpx", specifier = "==0.27.2" },
     { name = "joblib", specifier = "==1.5.1" },
+    { name = "lettucedetect", specifier = ">=0.1.6" },
     { name = "pydantic", specifier = "==2.11.5" },
     { name = "pydantic-core", specifier = "==2.33.2" },
     { name = "regex", specifier = "==2024.11.6" },
@@ -2057,8 +2057,8 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu126/torchaudio-2.9.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:08002a88f54d3bf38a86e5ec44e99729090de4a30b2d0019d78bcd7061d16f29" },
-    { url = "https://download.pytorch.org/whl/cu126/torchaudio-2.9.0%2Bcu126-cp312-cp312-win_amd64.whl", hash = "sha256:95242d1ff69cd9eeea786a7aa5a0399cda93f1cef46a6d36229281c385bf63b9" },
+    { url = "https://download-r2.pytorch.org/whl/cu126/torchaudio-2.9.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:08002a88f54d3bf38a86e5ec44e99729090de4a30b2d0019d78bcd7061d16f29" },
+    { url = "https://download-r2.pytorch.org/whl/cu126/torchaudio-2.9.0%2Bcu126-cp312-cp312-win_amd64.whl", hash = "sha256:95242d1ff69cd9eeea786a7aa5a0399cda93f1cef46a6d36229281c385bf63b9" },
 ]
 
 [[package]]
@@ -2071,8 +2071,8 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu126/torchvision-0.24.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:b7c53e2777afb0362cbd8c2b3b80272d512aae6156ff014a999ae5c5e601667d" },
-    { url = "https://download.pytorch.org/whl/cu126/torchvision-0.24.0%2Bcu126-cp312-cp312-win_amd64.whl", hash = "sha256:60727fcbcdc4c87213d177c159a76cbc7b6484c97278f3617e53ba8433056d81" },
+    { url = "https://download-r2.pytorch.org/whl/cu126/torchvision-0.24.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:b7c53e2777afb0362cbd8c2b3b80272d512aae6156ff014a999ae5c5e601667d" },
+    { url = "https://download-r2.pytorch.org/whl/cu126/torchvision-0.24.0%2Bcu126-cp312-cp312-win_amd64.whl", hash = "sha256:60727fcbcdc4c87213d177c159a76cbc7b6484c97278f3617e53ba8433056d81" },
 ]
 
 [[package]]
