@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -47,6 +48,7 @@ project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 from src.utils.config import Config  # noqa: E402
+from src.data_processing.text_chunker import chunk_data2txt  # noqa: E402
 from src.utils.logger import setup_logger  # noqa: E402
 from src.utils.nlp_utils import get_spacy_model  # noqa: E402
 
@@ -101,6 +103,16 @@ def _split_to_sentences(
             )
             global_idx += 1
     return sents
+
+
+def _strip_qa_step_numbers(passage: str) -> str:
+    """Remove line-leading ordinal markers like '1  Step text' in QA passages."""
+    if not passage:
+        return passage
+    cleaned_lines = []
+    for line in passage.splitlines():
+        cleaned_lines.append(re.sub(r'^\s*\d+\s+', '', line))
+    return "\n".join(cleaned_lines).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +173,7 @@ def _load_ragtruth_samples(
                     passage = passage.strip()
                     if passage.startswith("passage "):
                         passage = passage.split(":", 1)[1].strip()
+                    passage = _strip_qa_step_numbers(passage)
                     if passage:
                         contexts.append(passage)
             elif task_type == "Summary":
@@ -170,7 +183,7 @@ def _load_ragtruth_samples(
                     else [json.dumps(source_info)]
                 )
             else:  # Data2txt
-                contexts = [json.dumps(source_info, indent=2)]
+                contexts = chunk_data2txt(source_info)
 
             samples.append((sample_id, contexts))
 

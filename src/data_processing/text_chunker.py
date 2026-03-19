@@ -6,8 +6,136 @@ chunk dictionaries with metadata for retrieval and indexing.
 """
 
 import spacy
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from src.utils.logger import setup_logger
+
+
+def _format_yes_no(value: Any) -> str:
+    """Format common boolean-like values into readable yes/no text."""
+    if value is True:
+        return "Yes"
+    if value is False:
+        return "No"
+    if value is None:
+        return "Unknown"
+    return str(value)
+
+
+def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
+    """
+    Convert a RAGTruth Data2txt source_info dict into natural-language contexts.
+
+    The output is a list of context strings that can be sentence-split and indexed
+    for retrieval. This avoids indexing raw JSON fragments as evidence.
+    """
+    if not isinstance(source_info, dict):
+        return [str(source_info)]
+
+    contexts: List[str] = []
+
+    name = source_info.get('name')
+    address = source_info.get('address')
+    city = source_info.get('city')
+    state = source_info.get('state')
+    categories = source_info.get('categories')
+    stars = source_info.get('business_stars')
+
+    parts: List[str] = []
+    if name:
+        parts.append(str(name))
+    if categories:
+        parts.append(f"is listed under {categories}")
+
+    location_parts = [p for p in [address, city, state] if p]
+    if location_parts:
+        if parts:
+            parts.append(f"located at {', '.join(str(p) for p in location_parts)}")
+        else:
+            parts.append(f"Located at {', '.join(str(p) for p in location_parts)}")
+
+    if stars is not None:
+        parts.append(f"with a business rating of {stars} stars")
+
+    if parts:
+        contexts.append(" ".join(parts) + ".")
+
+    hours = source_info.get('hours')
+    if isinstance(hours, dict) and hours:
+        hour_parts = []
+        for day, value in hours.items():
+            if value is None:
+                continue
+            value_text = str(value).replace('-', ' to ')
+            hour_parts.append(f"{day}: {value_text}")
+        if hour_parts:
+            contexts.append("Operating hours are " + "; ".join(hour_parts) + ".")
+
+    attributes = source_info.get('attributes')
+    if isinstance(attributes, dict) and attributes:
+        attr_lines: List[str] = []
+
+        reservations = attributes.get('RestaurantsReservations')
+        if reservations is not None:
+            attr_lines.append(f"Reservations: {_format_yes_no(reservations)}")
+
+        outdoor = attributes.get('OutdoorSeating')
+        if outdoor is not None:
+            attr_lines.append(f"Outdoor seating: {_format_yes_no(outdoor)}")
+
+        wifi = attributes.get('WiFi')
+        if wifi is not None:
+            attr_lines.append(f"WiFi: {wifi}")
+
+        takeout = attributes.get('RestaurantsTakeOut')
+        if takeout is not None:
+            attr_lines.append(f"Takeout: {_format_yes_no(takeout)}")
+
+        groups = attributes.get('RestaurantsGoodForGroups')
+        if groups is not None:
+            attr_lines.append(f"Good for groups: {_format_yes_no(groups)}")
+
+        parking = attributes.get('BusinessParking')
+        if isinstance(parking, dict):
+            enabled = [k for k, v in parking.items() if v is True]
+            if enabled:
+                attr_lines.append("Parking options include " + ", ".join(enabled))
+            elif any(v is False for v in parking.values()):
+                attr_lines.append("No parking options are marked as available")
+
+        ambience = attributes.get('Ambience')
+        if isinstance(ambience, dict):
+            ambience_flags = [k for k, v in ambience.items() if v is True]
+            if ambience_flags:
+                attr_lines.append("Ambience includes " + ", ".join(ambience_flags))
+
+        if attr_lines:
+            contexts.append("Business attributes: " + ". ".join(attr_lines) + ".")
+
+    review_info = source_info.get('review_info')
+    if isinstance(review_info, list):
+        for review in review_info:
+            if not isinstance(review, dict):
+                continue
+            review_text = str(review.get('review_text', '')).strip()
+            if not review_text:
+                continue
+
+            prefix_bits: List[str] = []
+            if review.get('review_stars') is not None:
+                prefix_bits.append(f"Review rating: {review.get('review_stars')} stars")
+            if review.get('review_date'):
+                prefix_bits.append(f"Review date: {review.get('review_date')}")
+
+            if prefix_bits:
+                contexts.append(". ".join(prefix_bits) + ". " + review_text)
+            else:
+                contexts.append(review_text)
+
+    # Safe fallback to avoid empty contexts.
+    if not contexts:
+        contexts.append(str(source_info))
+
+    return contexts
 
 
 class TextChunker:
@@ -54,7 +182,7 @@ class TextChunker:
             
             self.logger.info("Loaded spaCy model en_core_web_sm with sentencizer")
         
-        except OSError as e:
+        except OSError:
             self.logger.error(
                 "spaCy model 'en_core_web_sm' not found. "
                 "Please run: python -m spacy download en_core_web_sm"

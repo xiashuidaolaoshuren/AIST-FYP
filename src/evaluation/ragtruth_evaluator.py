@@ -44,6 +44,7 @@ References:
 
 import json
 import os
+import re
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -62,6 +63,7 @@ from src.utils.logger import setup_logger
 from src.utils.data_structures import ClaimDecision, Claim, EvidenceChunk
 from src.generation.claim_extractor import extract_claims
 from src.mitigation.orchestrator import MitigationOrchestrator
+from src.data_processing.text_chunker import chunk_data2txt
 
 
 class RAGTruthEvaluator:
@@ -620,6 +622,12 @@ class RAGTruthEvaluator:
                 if passage and passage.startswith('passage '):
                     # Remove "passage N:" prefix
                     passage = passage.split(':', 1)[1].strip()
+                # Remove line-leading step ordinals (e.g., "1  Preheat ...").
+                if passage:
+                    passage = '\n'.join(
+                        re.sub(r'^\s*\d+\s+', '', line) for line in passage.splitlines()
+                    ).strip()
+                if passage:
                     passages.append(passage)
             
             return question, passages
@@ -633,8 +641,7 @@ class RAGTruthEvaluator:
         elif task_type == 'Data2txt':
             # Data2txt: generate text from structured data
             question = "Generate a description from the following data."
-            # Convert structured data to string representation
-            contexts = [json.dumps(source_info, indent=2)]
+            contexts = chunk_data2txt(source_info)
             return question, contexts
         
         else:

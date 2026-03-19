@@ -456,6 +456,8 @@ class RuleBasedAggregator:
             self.thresholds = {
                 'contradiction': float(getattr(agg_config, 'contradiction_threshold', 0.5)),
                 'entailment': float(getattr(agg_config, 'entailment_threshold', 0.7)),
+                'entailment_override': float(getattr(agg_config, 'entailment_override_threshold', 0.9)),
+                'contradiction_margin': float(getattr(agg_config, 'contradiction_entailment_margin', 0.1)),
                 'coverage': float(getattr(agg_config, 'coverage_threshold', 0.6)),
                 'entropy_conf': float(getattr(agg_config, 'entropy_confidence_threshold', 0.4)),
                 'consistency_conf': float(getattr(agg_config, 'consistency_confidence_threshold', 0.4)),
@@ -466,6 +468,8 @@ class RuleBasedAggregator:
             self.thresholds = {
                 'contradiction': 0.5,
                 'entailment': 0.7,
+                'entailment_override': 0.9,
+                'contradiction_margin': 0.1,
                 'coverage': 0.6,
                 'entropy_conf': 0.4,
                 'consistency_conf': 0.4,
@@ -605,16 +609,33 @@ class RuleBasedAggregator:
         # Rule 1: Contradictory Detection (highest priority)
         # Check NLI contradiction
         if contradict_conf > self.thresholds['contradiction']:
-            return (
-                'Contradictory',
-                f"High NLI contradiction detected ({contradict_conf:.2f} > "
-                f"{self.thresholds['contradiction']:.2f}). Evidence contradicts claim."
-            )
+            # Guard against multi-evidence conflict where entailment and contradiction
+            # originate from different chunks. Strong entailment should suppress
+            # contradictory classification unless contradiction is competitive.
+            if (
+                support_conf >= self.thresholds['entailment_override']
+                and (support_conf - contradict_conf) > self.thresholds['contradiction_margin']
+            ):
+                self.logger.debug(
+                    "Suppressing contradictory decision due to strong entailment: "
+                    "support=%.3f, contradiction=%.3f",
+                    support_conf,
+                    contradict_conf,
+                )
+            elif contradict_conf >= (support_conf - self.thresholds['contradiction_margin']):
+                return (
+                    'Contradictory',
+                    f"High NLI contradiction detected ({contradict_conf:.2f} > "
+                    f"{self.thresholds['contradiction']:.2f}). Evidence contradicts claim."
+                )
         
         # Check numeric mismatch (if claim contains numbers)
         if self._has_numeric_claims(signal) and not signal.numeric_check:
             numeric_contradiction_threshold = self.thresholds['contradiction'] * 0.6
-            if contradict_conf > numeric_contradiction_threshold:
+            if (
+                contradict_conf > numeric_contradiction_threshold
+                and contradict_conf >= (support_conf - self.thresholds['contradiction_margin'])
+            ):
                 return (
                     'Contradictory',
                     f"Numeric fact mismatch with contradiction corroboration "

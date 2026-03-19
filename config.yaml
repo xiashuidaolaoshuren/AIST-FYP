@@ -316,6 +316,14 @@ verification:
     # NLI thresholds for claim classification
     # Contradiction threshold: Minimum NLI contradiction score to flag as contradictory
     contradiction_threshold: 0.5
+
+    # If entailment is very strong, suppress contradictory labels caused by
+    # cross-chunk max aggregation conflicts.
+    entailment_override_threshold: 0.9
+
+    # Contradiction must be competitive with entailment by this margin.
+    # Higher values make contradictory decisions more conservative.
+    contradiction_entailment_margin: 0.1
     
     # Entailment threshold: Minimum NLI entailment score required for "Supported" status
     entailment_threshold: 0.65
