@@ -253,6 +253,7 @@ def main():
         effective_output_path = str(default_output_dir / f'ragtruth_eval_{args.split}.json')
 
     resume_source = effective_output_path if args.resume else None
+    logger.info(f"Effective output path: {effective_output_path}")
     if args.resume:
         logger.info(f"Resume enabled: source={resume_source}")
     
@@ -283,6 +284,36 @@ def main():
     config._config['evaluation'].setdefault('benchmarks', {})
     config._config['evaluation']['benchmarks'].setdefault('ragtruth', {})
     config._config['evaluation']['benchmarks']['ragtruth']['ragtruth_eval_mode'] = args.ragtruth_eval_mode
+
+    verification_cfg = config.get('verification', {})
+    if not isinstance(verification_cfg, dict):
+        verification_cfg = {}
+    verification_modules = verification_cfg.get('modules', {})
+    if not isinstance(verification_modules, dict):
+        verification_modules = {}
+    mitigation_cfg = config.get('mitigation', {})
+    if not isinstance(mitigation_cfg, dict):
+        mitigation_cfg = {}
+
+    logger.info(
+        "Effective verification config: enabled=%s, modules=%s",
+        bool(verification_cfg.get('enabled', True)),
+        {
+            'intrinsic': bool(verification_modules.get('intrinsic', False)),
+            'grounded': bool(verification_modules.get('grounded', False)),
+            'nli': bool(verification_modules.get('nli', False)),
+            'self_agreement': bool(verification_modules.get('self_agreement', False)),
+        }
+    )
+    logger.info(
+        "Effective mitigation config: enabled=%s, modules=%s",
+        bool(mitigation_cfg.get('enabled', False)),
+        {
+            'reranker': bool((mitigation_cfg.get('reranker') or {}).get('enabled', False)) if isinstance(mitigation_cfg.get('reranker'), dict) else bool(mitigation_cfg.get('reranker', False)),
+            'filter': bool((mitigation_cfg.get('filter') or {}).get('enabled', False)) if isinstance(mitigation_cfg.get('filter'), dict) else bool(mitigation_cfg.get('filter', False)),
+            'reprompt': bool((mitigation_cfg.get('reprompt') or {}).get('enabled', False)) if isinstance(mitigation_cfg.get('reprompt'), dict) else bool(mitigation_cfg.get('reprompt', False)),
+        }
+    )
     setup_bar.set_postfix_str(setup_steps[0])
     setup_bar.update(1)
     

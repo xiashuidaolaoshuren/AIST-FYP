@@ -290,6 +290,65 @@ def _load_existing_num_samples(output_json: Path) -> int | None:
     return None
 
 
+def _load_existing_metadata(output_json: Path) -> dict[str, Any] | None:
+    if not output_json.exists():
+        return None
+    with output_json.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        return metadata
+    return None
+
+
+def _build_expected_resume_fingerprint(
+    *,
+    config_payload: dict[str, Any],
+    split: str,
+    max_samples: int | None,
+    samples_per_task: int | None,
+    ragtruth_eval_mode: str,
+    dataset_path: str,
+) -> dict[str, Any]:
+    verification_cfg = config_payload.get("verification", {})
+    if not isinstance(verification_cfg, dict):
+        verification_cfg = {}
+
+    verification_modules = verification_cfg.get("modules", {})
+    if not isinstance(verification_modules, dict):
+        verification_modules = {}
+
+    mitigation_cfg = config_payload.get("mitigation", {})
+    if not isinstance(mitigation_cfg, dict):
+        mitigation_cfg = {}
+
+    def module_flag(raw_value: Any) -> bool:
+        if isinstance(raw_value, dict):
+            return bool(raw_value.get("enabled", False))
+        return bool(raw_value)
+
+    return {
+        "split": split,
+        "max_samples": max_samples,
+        "samples_per_task": samples_per_task,
+        "ragtruth_eval_mode": ragtruth_eval_mode,
+        "dataset_path": dataset_path,
+        "verification_enabled": bool(verification_cfg.get("enabled", True)),
+        "verification_modules": {
+            "intrinsic": module_flag(verification_modules.get("intrinsic", False)),
+            "grounded": module_flag(verification_modules.get("grounded", False)),
+            "nli": module_flag(verification_modules.get("nli", False)),
+            "self_agreement": module_flag(verification_modules.get("self_agreement", False)),
+        },
+        "mitigation_enabled": bool(mitigation_cfg.get("enabled", False)),
+        "mitigation_modules": {
+            "reranker": module_flag(mitigation_cfg.get("reranker", False)),
+            "filter": module_flag(mitigation_cfg.get("filter", False)),
+            "reprompt": module_flag(mitigation_cfg.get("reprompt", False)),
+        },
+    }
+
+
 def _delta(base: float, current: float) -> float:
     return current - base
 
@@ -458,6 +517,13 @@ def main() -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     base_config = _load_yaml(base_config_path)
+    base_dataset_path = (
+        base_config.get("evaluation", {})
+        .get("benchmarks", {})
+        .get("ragtruth", {})
+        .get("dataset_path", "benchmark/RAGTruth/dataset")
+    )
+    resolved_dataset_path = str((project_root / str(base_dataset_path)).resolve())
 
     variant_metrics: dict[str, dict[str, Any]] = {}
 
@@ -468,20 +534,26 @@ def main() -> int:
 
         result_path = run_dir / f"ragtruth_{variant}.json"
         if args.resume and result_path.exists():
-            existing_count = _load_existing_num_samples(result_path)
-            if existing_count is not None and args.samples_per_task is None and args.max_samples is not None:
-                if existing_count > args.max_samples:
-                    raise ValueError(
-                        f"Resume mismatch for variant '{variant}': existing samples {existing_count} exceed max-samples {args.max_samples}."
-                    )
-                if existing_count == args.max_samples:
-                    print(f"[resume:{variant}] already complete ({existing_count}/{args.max_samples}), skipping")
-                    variant_metrics[variant] = _load_metrics(result_path)
-                    continue
-            elif existing_count is not None and args.samples_per_task is None and args.max_samples is None:
-                print(f"[resume:{variant}] existing output detected ({existing_count} samples), skipping")
-                variant_metrics[variant] = _load_metrics(result_path)
-                continue
+            existing_metadata = _load_existing_metadata(result_path)
+            if not isinstance(existing_metadata, dict):
+                raise ValueError(
+                    f"Resume mismatch for variant '{variant}': missing metadata in {result_path}."
+                )
+            existing_fingerprint = existing_metadata.get("selection_fingerprint")
+            expected_fingerprint = _build_expected_resume_fingerprint(
+                config_payload=config_payload,
+                split=args.split,
+                max_samples=args.max_samples,
+                samples_per_task=args.samples_per_task,
+                ragtruth_eval_mode=args.ragtruth_eval_mode,
+                dataset_path=resolved_dataset_path,
+            )
+            if not isinstance(existing_fingerprint, dict) or existing_fingerprint != expected_fingerprint:
+                raise ValueError(
+                    "Resume mismatch for variant "
+                    f"'{variant}': selection fingerprint differs. "
+                    f"existing={existing_fingerprint}, expected={expected_fingerprint}"
+                )
 
         _run_variant(
             project_root=project_root,

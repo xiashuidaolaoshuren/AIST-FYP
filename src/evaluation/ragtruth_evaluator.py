@@ -148,6 +148,18 @@ class RAGTruthEvaluator:
             mitigation_config = {}
 
         self.mitigation_enabled = bool(mitigation_config.get('enabled', False))
+        self.mitigation_module_flags = self._extract_module_flags(
+            mitigation_config,
+            ('reranker', 'filter', 'reprompt')
+        )
+        verification_config = self.config.get('verification', {})
+        if not isinstance(verification_config, dict):
+            verification_config = {}
+        self.verification_enabled = bool(verification_config.get('enabled', True))
+        self.verification_module_flags = self._extract_module_flags(
+            verification_config.get('modules', {}),
+            ('intrinsic', 'grounded', 'nli', 'self_agreement')
+        )
         self.mitigation_orchestrator = None
         
         # Get benchmark directory from config
@@ -218,6 +230,16 @@ class RAGTruthEvaluator:
             self.teacher_forced_intrinsic,
             self.low_confidence_ratio_threshold,
             self.low_coverage_ratio_threshold
+        )
+        self.logger.info(
+            "Effective verification config: enabled=%s, modules=%s",
+            self.verification_enabled,
+            self.verification_module_flags,
+        )
+        self.logger.info(
+            "Effective mitigation config: enabled=%s, modules=%s",
+            self.mitigation_enabled,
+            self.mitigation_module_flags,
         )
 
         if self.mitigation_enabled:
@@ -357,6 +379,10 @@ class RAGTruthEvaluator:
 
                     existing_fingerprint = resume_meta.get('selection_fingerprint')
                     if existing_fingerprint is not None:
+                        if not isinstance(existing_fingerprint, dict):
+                            raise ValueError(
+                                "Resume mismatch: metadata.selection_fingerprint is not an object"
+                            )
                         if existing_fingerprint != run_context['selection_fingerprint']:
                             raise ValueError(
                                 "Resume mismatch: selection fingerprint differs from current run. "
@@ -938,7 +964,11 @@ class RAGTruthEvaluator:
         mitigation_actions = []
         filtered_response = generated_response
         removed_count = 0
-        if self.mitigation_orchestrator and self.mitigation_orchestrator.enabled and resolved_pairs:
+        mitigation_runtime_enabled = bool(
+            self.mitigation_orchestrator and self.mitigation_orchestrator.enabled
+        )
+        mitigation_applied = False
+        if mitigation_runtime_enabled and resolved_pairs:
             mitigation_result = self.mitigation_orchestrator.apply(
                 query=question,
                 answer_text=generated_response,
@@ -953,6 +983,7 @@ class RAGTruthEvaluator:
             claim_decisions = mitigation_result.get('decisions', claim_decisions)
             claim_signals = mitigation_result.get('signals', claim_signals)
             verified_pairs = resolved_pairs
+            mitigation_applied = bool(mitigation_actions) or removed_count > 0 or filtered_response != generated_response
         
         # Step 3: Compare with gold annotations
         gold_has_hallucination = len(hallucination_gold_labels) > 0
@@ -1028,7 +1059,8 @@ class RAGTruthEvaluator:
             'low_confidence_ratio': low_confidence_ratio,
             'low_coverage_count': low_coverage_count,
             'low_coverage_ratio': low_coverage_ratio,
-            'mitigation_enabled': self.mitigation_enabled,
+            'mitigation_enabled': mitigation_runtime_enabled,
+            'mitigation_applied': mitigation_applied,
             'mitigation_actions': mitigation_actions,
             'filtered_claim_count': removed_count,
             'claim_results': claim_results
@@ -1517,7 +1549,26 @@ class RAGTruthEvaluator:
             'samples_per_task': samples_per_task,
             'ragtruth_eval_mode': self.ragtruth_eval_mode,
             'dataset_path': str(self.benchmark_dir.resolve()),
+            'verification_enabled': self.verification_enabled,
+            'verification_modules': self.verification_module_flags,
+            'mitigation_enabled': self.mitigation_enabled,
+            'mitigation_modules': self.mitigation_module_flags,
         }
+
+    @staticmethod
+    def _extract_module_flags(module_config: Any, module_names: tuple[str, ...]) -> Dict[str, bool]:
+        """Extract deterministic enabled/disabled flags for configured modules."""
+        if not isinstance(module_config, dict):
+            module_config = {}
+
+        flags: Dict[str, bool] = {}
+        for name in module_names:
+            raw_value = module_config.get(name, False)
+            if isinstance(raw_value, dict):
+                flags[name] = bool(raw_value.get('enabled', False))
+            else:
+                flags[name] = bool(raw_value)
+        return flags
     
     def _print_summary(self, metrics: Dict[str, Any]) -> None:
         """

@@ -762,6 +762,100 @@ class TestRAGTruthEvaluator(unittest.TestCase):
 
         self.assertIn('selection fingerprint differs', str(exc.exception))
 
+    def test_selection_fingerprint_includes_mode_flags(self):
+        """Selection fingerprint should include verification/mitigation mode flags."""
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator
+        )
+
+        fingerprint = evaluator._build_selection_fingerprint(
+            split='test',
+            max_samples=5,
+            samples_per_task=2,
+        )
+
+        self.assertIn('verification_enabled', fingerprint)
+        self.assertIn('verification_modules', fingerprint)
+        self.assertIn('mitigation_enabled', fingerprint)
+        self.assertIn('mitigation_modules', fingerprint)
+
+    def test_finalize_result_uses_runtime_mitigation_state(self):
+        """Result should mark mitigation disabled when orchestrator is unavailable at runtime."""
+
+        def mock_get(key, default=None):
+            if key == 'mitigation':
+                return {
+                    'enabled': True,
+                    'reranker': {'enabled': True},
+                    'filter': {'enabled': True},
+                    'reprompt': {'enabled': True},
+                }
+            if key == 'verification':
+                return {
+                    'enabled': True,
+                    'modules': {
+                        'intrinsic': True,
+                        'grounded': True,
+                        'nli': True,
+                        'self_agreement': True,
+                    }
+                }
+            return default
+
+        self.config.get.side_effect = mock_get
+
+        with patch('src.evaluation.ragtruth_evaluator.MitigationOrchestrator', side_effect=RuntimeError('init failure')):
+            evaluator = RAGTruthEvaluator(
+                self.config,
+                self.rag_pipeline,
+                self.verifier_hub,
+                self.aggregator
+            )
+
+        claim = Claim(
+            claim_id='c1',
+            answer_id='a1',
+            text='Paris is the capital of France.',
+            answer_char_span=[0, 31],
+            extraction_method='test',
+        )
+        decision = ClaimDecision(
+            claim_id='c1',
+            status='Supported',
+            rationale='Evidence supports claim.',
+            primary_evidence='doc_1',
+            signals_ref=[],
+            confidence={'coverage_score': 1.0}
+        )
+        prepared = {
+            'sample': {},
+            'sample_id': 's1',
+            'task_type': 'QA',
+            'task_id': 'task_1',
+            'question': 'What is the capital of France?',
+            'generated_response': 'Paris is the capital of France.',
+            'hallucination_gold_labels': [],
+            'context_source': 'gold_contexts',
+            'evaluation_track': 'ragtruth_eval',
+            'resolved_pairs': [{'claim': claim, 'evidence': [], 'metadata': {}}],
+        }
+
+        result = evaluator._finalize_sample_result(
+            prepared=prepared,
+            claim_decisions=[decision],
+            claim_signals=[],
+            verified_pairs=[{'claim': claim, 'evidence': []}],
+        )
+
+        self.assertFalse(result['mitigation_enabled'])
+        self.assertFalse(result['mitigation_applied'])
+        self.assertEqual(result['mitigation_actions'], [])
+        self.assertEqual(result['filtered_claim_count'], 0)
+        self.assertEqual(result['response_after_mitigation'], result['generated_response'])
+
 
 if __name__ == '__main__':
     unittest.main()
