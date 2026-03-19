@@ -609,10 +609,14 @@ class RuleBasedAggregator:
         # Rule 1: Contradictory Detection (highest priority)
         # Check NLI contradiction
         if contradict_conf > self.thresholds['contradiction']:
+            if signal.primary_nli_mode == 'entailment':
+                self.logger.debug(
+                    "Suppressing contradictory decision because primary NLI mode is entailment"
+                )
             # Guard against multi-evidence conflict where entailment and contradiction
             # originate from different chunks. Strong entailment should suppress
             # contradictory classification unless contradiction is competitive.
-            if (
+            elif (
                 support_conf >= self.thresholds['entailment_override']
                 and (support_conf - contradict_conf) > self.thresholds['contradiction_margin']
             ):

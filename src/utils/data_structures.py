@@ -123,6 +123,11 @@ class VerifierSignal:
         numeric_check: Boolean indicating if numeric facts match
         per_chunk_signals: Optional list of per-chunk signal details for multi-evidence verification
                           Each entry contains {doc_id, sent_id, coverage, uncertainty, ...}
+        primary_nli_mode: Optional primary NLI mode selected during multi-evidence fusion
+                 ('entailment', 'contradiction', or None)
+        max_entailment_chunk_idx: Optional index of chunk with max entailment signal
+        max_contradiction_chunk_idx: Optional index of chunk with max contradiction signal
+        nli_coherence_score: Optional coherence score for NLI alignment across chunks [0, 1]
     """
     claim_id: str
     doc_id: str
@@ -134,6 +139,10 @@ class VerifierSignal:
     citation_span_match: float
     numeric_check: bool
     per_chunk_signals: Optional[List[Dict[str, Any]]] = None
+    primary_nli_mode: Optional[str] = None
+    max_entailment_chunk_idx: Optional[int] = None
+    max_contradiction_chunk_idx: Optional[int] = None
+    nli_coherence_score: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the dataclass to a dictionary."""

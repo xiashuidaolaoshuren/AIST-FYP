@@ -188,6 +188,14 @@ verification:
 
   # Extra margin over max entailment before contradiction becomes primary
   contradiction_priority_margin: 0.0
+
+  # Minimum NLI agreement ratio across chunks to accept contradiction-first
+  # primary selection when contradiction and entailment come from different chunks.
+  coherence_threshold: 0.6
+
+  # Contradiction can still become primary if it strongly dominates entailment,
+  # even when cross-chunk coherence is weak.
+  contradiction_dominance_factor: 1.5
   
   # spaCy model for NER and noun phrase extraction
   spacy_model: "en_core_web_sm"

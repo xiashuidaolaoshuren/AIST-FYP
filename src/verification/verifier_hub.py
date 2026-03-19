@@ -110,6 +110,12 @@ class VerifierHub:
             self.contradiction_priority_margin = float(
                 getattr(config.verification, 'contradiction_priority_margin', 0.0)
             )
+            self.coherence_threshold = float(
+                getattr(config.verification, 'coherence_threshold', 0.6)
+            )
+            self.contradiction_dominance_factor = float(
+                getattr(config.verification, 'contradiction_dominance_factor', 1.5)
+            )
             self.strict_logits = bool(
                 getattr(getattr(config.verification, 'intrinsic', None), 'strict_logits', False)
             )
@@ -119,6 +125,8 @@ class VerifierHub:
             self.contradiction_first_fusion = False
             self.contradiction_priority_threshold = 0.5
             self.contradiction_priority_margin = 0.0
+            self.coherence_threshold = 0.6
+            self.contradiction_dominance_factor = 1.5
             self.strict_logits = False
 
         # Per-module enable flags (default: all enabled)
@@ -857,7 +865,11 @@ class VerifierHub:
                 consistency=consistency_signal,  # Task 4: Self-agreement consistency
                 citation_span_match=aggregated['citation_span_match'],
                 numeric_check=aggregated['numeric_check'],
-                per_chunk_signals=per_chunk_signals  # Store detailed breakdown
+                per_chunk_signals=per_chunk_signals,  # Store detailed breakdown
+                primary_nli_mode=aggregated.get('primary_nli_mode'),
+                max_entailment_chunk_idx=aggregated.get('max_entailment_chunk_idx'),
+                max_contradiction_chunk_idx=aggregated.get('max_contradiction_chunk_idx'),
+                nli_coherence_score=aggregated.get('nli_coherence_score'),
             )
             
             self.logger.info(
@@ -908,6 +920,10 @@ class VerifierHub:
             contradictions = [s.get('nli', {}).get('contradiction', 0.33) for s in per_chunk_signals]
         
         primary_chunk_idx = None
+        primary_nli_mode = None
+        max_entailment_chunk_idx = None
+        max_contradiction_chunk_idx = None
+        nli_coherence_score = None
         
         if self.aggregation_method == 'max':
             # Optimistic: best coverage, lowest uncertainty, highest entailment
@@ -918,6 +934,9 @@ class VerifierHub:
                 max_contradiction = max(contradictions)
                 entailment_chunk_idx = entailments.index(max_entailment)
                 contradiction_chunk_idx = contradictions.index(max_contradiction)
+                max_entailment_chunk_idx = entailment_chunk_idx
+                max_contradiction_chunk_idx = contradiction_chunk_idx
+                nli_coherence_score = self._compute_nli_coherence_score(per_chunk_signals)
 
                 use_contradiction_primary = (
                     self.contradiction_first_fusion
@@ -925,17 +944,43 @@ class VerifierHub:
                     and max_contradiction >= (max_entailment + self.contradiction_priority_margin)
                 )
 
-                primary_chunk_idx = (
-                    contradiction_chunk_idx
-                    if use_contradiction_primary
-                    else entailment_chunk_idx
-                )
                 if use_contradiction_primary:
-                    self.logger.debug(
-                        "Primary evidence switched to contradiction-first: "
-                        f"chunk {primary_chunk_idx} with contradiction={max_contradiction:.3f}, "
-                        f"entailment_max={max_entailment:.3f}"
+                    same_chunk_signal = contradiction_chunk_idx == entailment_chunk_idx
+                    coherent_contradiction = (
+                        nli_coherence_score is not None
+                        and nli_coherence_score >= self.coherence_threshold
                     )
+                    dominant_contradiction = (
+                        max_contradiction >= (max_entailment * self.contradiction_dominance_factor)
+                    )
+
+                    if same_chunk_signal or coherent_contradiction or dominant_contradiction:
+                        primary_chunk_idx = contradiction_chunk_idx
+                        primary_nli_mode = 'contradiction'
+                    else:
+                        primary_chunk_idx = entailment_chunk_idx
+                        primary_nli_mode = 'entailment'
+                else:
+                    primary_chunk_idx = entailment_chunk_idx
+                    primary_nli_mode = 'entailment'
+
+                if use_contradiction_primary:
+                    if primary_nli_mode == 'contradiction':
+                        self.logger.debug(
+                            "Primary evidence switched to contradiction-first: "
+                            f"chunk {primary_chunk_idx} with contradiction={max_contradiction:.3f}, "
+                            f"entailment_max={max_entailment:.3f}, coherence={nli_coherence_score:.3f}"
+                        )
+                    else:
+                        self.logger.debug(
+                            "Contradiction-first candidate suppressed due to incoherence: "
+                            f"contradiction_chunk={contradiction_chunk_idx}, "
+                            f"entailment_chunk={entailment_chunk_idx}, "
+                            f"contradiction={max_contradiction:.3f}, entailment={max_entailment:.3f}, "
+                            f"coherence={nli_coherence_score:.3f}, "
+                            f"coherence_threshold={self.coherence_threshold:.3f}, "
+                            f"dominance_factor={self.contradiction_dominance_factor:.3f}"
+                        )
                 else:
                     self.logger.debug(
                         f"Primary evidence: chunk {primary_chunk_idx} "
@@ -964,6 +1009,10 @@ class VerifierHub:
                         else min(contradictions)
                     )
                 }
+                result['primary_nli_mode'] = primary_nli_mode
+                result['max_entailment_chunk_idx'] = max_entailment_chunk_idx
+                result['max_contradiction_chunk_idx'] = max_contradiction_chunk_idx
+                result['nli_coherence_score'] = nli_coherence_score
             return result, primary_chunk_idx
         else:  # mean
             # Average all scores (no primary evidence tracking for mean method)
@@ -985,7 +1034,43 @@ class VerifierHub:
                     'neutral': sum(neutrals) / len(neutrals),
                     'contradiction': sum(contradictions) / len(contradictions)
                 }
+                result['primary_nli_mode'] = None
+                result['max_entailment_chunk_idx'] = None
+                result['max_contradiction_chunk_idx'] = None
+                result['nli_coherence_score'] = self._compute_nli_coherence_score(per_chunk_signals)
             return result, None
+
+    def _compute_nli_coherence_score(self, per_chunk_signals: List[Dict]) -> float:
+        """Compute [0,1] coherence of NLI verdict tendency across evidence chunks."""
+        if not per_chunk_signals:
+            return 0.5
+
+        if len(per_chunk_signals) == 1:
+            return 1.0
+
+        votes = []
+        for chunk_signal in per_chunk_signals:
+            nli = chunk_signal.get('nli')
+            if not nli:
+                continue
+            entail = float(nli.get('entailment', 0.0))
+            contradict = float(nli.get('contradiction', 0.0))
+            if contradict > entail:
+                votes.append('contradiction')
+            elif entail > contradict:
+                votes.append('entailment')
+            else:
+                votes.append('neutral')
+
+        if not votes:
+            return 0.5
+
+        counts = {}
+        for vote in votes:
+            counts[vote] = counts.get(vote, 0) + 1
+        majority_ratio = max(counts.values()) / len(votes)
+
+        return float(majority_ratio)
     
     def is_enabled(self) -> bool:
         """
