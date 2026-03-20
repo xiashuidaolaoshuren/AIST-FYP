@@ -196,6 +196,21 @@ class TestRuleBasedAggregator:
         assert decision.status == 'Contradictory'
         assert 'numeric' in decision.rationale.lower()
         assert 'corroboration' in decision.rationale.lower()
+
+    def test_aggregate_ambiguous_mode_suppresses_contradictory(self, aggregator, mock_signal_base):
+        """Ambiguous primary NLI mode should suppress contradictory rule firing."""
+        signal_dict = mock_signal_base.copy()
+        signal_dict['nli'] = {
+            'entailment': 0.93,
+            'contradiction': 0.97,
+            'neutral': 0.01,
+        }
+        signal_dict['primary_nli_mode'] = 'ambiguous'
+        signal = VerifierSignal(**signal_dict)
+
+        decision = aggregator.aggregate(signal)
+
+        assert decision.status == 'Low Confidence'
     
     def test_contradictory_confidence_breakdown(self, aggregator, mock_signal_contradictory_nli):
         """Test confidence breakdown for contradictory classification."""

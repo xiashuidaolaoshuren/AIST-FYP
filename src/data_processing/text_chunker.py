@@ -21,6 +21,33 @@ def _format_yes_no(value: Any) -> str:
     return str(value)
 
 
+def _to_12h(time_text: str) -> str:
+    """Convert 24-hour-like time strings (e.g., '17:0') to 12-hour format."""
+    raw = str(time_text).strip()
+    if ':' not in raw:
+        return raw
+
+    parts = raw.split(':')
+    if len(parts) != 2:
+        return raw
+
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except (TypeError, ValueError):
+        return raw
+
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return raw
+
+    period = 'AM' if hour < 12 else 'PM'
+    hour_12 = hour % 12
+    if hour_12 == 0:
+        hour_12 = 12
+
+    return f"{hour_12}:{minute:02d} {period}"
+
+
 def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
     """
     Convert a RAGTruth Data2txt source_info dict into natural-language contexts.
@@ -65,7 +92,12 @@ def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
         for day, value in hours.items():
             if value is None:
                 continue
-            value_text = str(value).replace('-', ' to ')
+            raw_range = str(value)
+            if '-' in raw_range:
+                time_points = [p.strip() for p in raw_range.split('-', 1)]
+                value_text = ' to '.join(_to_12h(p) for p in time_points)
+            else:
+                value_text = _to_12h(raw_range)
             hour_parts.append(f"{day}: {value_text}")
         if hour_parts:
             contexts.append("Operating hours are " + "; ".join(hour_parts) + ".")
@@ -76,23 +108,43 @@ def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
 
         reservations = attributes.get('RestaurantsReservations')
         if reservations is not None:
-            attr_lines.append(f"Reservations: {_format_yes_no(reservations)}")
+            if reservations is True:
+                attr_lines.append("The restaurant accepts reservations")
+            elif reservations is False:
+                attr_lines.append("The restaurant does not accept reservations")
 
         outdoor = attributes.get('OutdoorSeating')
         if outdoor is not None:
-            attr_lines.append(f"Outdoor seating: {_format_yes_no(outdoor)}")
+            if outdoor is True:
+                attr_lines.append("Outdoor seating is available")
+            elif outdoor is False:
+                attr_lines.append("Outdoor seating is not available")
 
         wifi = attributes.get('WiFi')
         if wifi is not None:
-            attr_lines.append(f"WiFi: {wifi}")
+            wifi_text = str(wifi).strip().lower()
+            if wifi_text == 'free':
+                attr_lines.append("Free WiFi is available")
+            elif wifi_text in {'paid', 'fee'}:
+                attr_lines.append("Paid WiFi is available")
+            elif wifi_text in {'no', 'none', 'false'}:
+                attr_lines.append("WiFi is not available")
+            else:
+                attr_lines.append(f"WiFi setting is {wifi}")
 
         takeout = attributes.get('RestaurantsTakeOut')
         if takeout is not None:
-            attr_lines.append(f"Takeout: {_format_yes_no(takeout)}")
+            if takeout is True:
+                attr_lines.append("Takeout is available")
+            elif takeout is False:
+                attr_lines.append("Takeout is not available")
 
         groups = attributes.get('RestaurantsGoodForGroups')
         if groups is not None:
-            attr_lines.append(f"Good for groups: {_format_yes_no(groups)}")
+            if groups is True:
+                attr_lines.append("The venue is good for groups")
+            elif groups is False:
+                attr_lines.append("The venue is not good for groups")
 
         parking = attributes.get('BusinessParking')
         if isinstance(parking, dict):
@@ -109,7 +161,7 @@ def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
                 attr_lines.append("Ambience includes " + ", ".join(ambience_flags))
 
         if attr_lines:
-            contexts.append("Business attributes: " + ". ".join(attr_lines) + ".")
+            contexts.append(". ".join(attr_lines) + ".")
 
     review_info = source_info.get('review_info')
     if isinstance(review_info, list):

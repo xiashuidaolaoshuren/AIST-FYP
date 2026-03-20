@@ -196,6 +196,10 @@ verification:
   # Contradiction can still become primary if it strongly dominates entailment,
   # even when cross-chunk coherence is weak.
   contradiction_dominance_factor: 1.5
+
+  # If max entailment and max contradiction are both above this threshold on the
+  # same evidence chunk, treat NLI as ambiguous and avoid forcing contradiction.
+  nli_ambiguity_threshold: 0.85
   
   # spaCy model for NER and noun phrase extraction
   spacy_model: "en_core_web_sm"

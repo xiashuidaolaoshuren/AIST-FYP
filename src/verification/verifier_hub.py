@@ -116,6 +116,9 @@ class VerifierHub:
             self.contradiction_dominance_factor = float(
                 getattr(config.verification, 'contradiction_dominance_factor', 1.5)
             )
+            self.nli_ambiguity_threshold = float(
+                getattr(config.verification, 'nli_ambiguity_threshold', 0.85)
+            )
             self.strict_logits = bool(
                 getattr(getattr(config.verification, 'intrinsic', None), 'strict_logits', False)
             )
@@ -127,6 +130,7 @@ class VerifierHub:
             self.contradiction_priority_margin = 0.0
             self.coherence_threshold = 0.6
             self.contradiction_dominance_factor = 1.5
+            self.nli_ambiguity_threshold = 0.85
             self.strict_logits = False
 
         # Per-module enable flags (default: all enabled)
@@ -953,8 +957,16 @@ class VerifierHub:
                     dominant_contradiction = (
                         max_contradiction >= (max_entailment * self.contradiction_dominance_factor)
                     )
+                    ambiguous_same_chunk = (
+                        same_chunk_signal
+                        and max_entailment >= self.nli_ambiguity_threshold
+                        and max_contradiction >= self.nli_ambiguity_threshold
+                    )
 
-                    if same_chunk_signal or coherent_contradiction or dominant_contradiction:
+                    if ambiguous_same_chunk:
+                        primary_chunk_idx = entailment_chunk_idx
+                        primary_nli_mode = 'ambiguous'
+                    elif same_chunk_signal or coherent_contradiction or dominant_contradiction:
                         primary_chunk_idx = contradiction_chunk_idx
                         primary_nli_mode = 'contradiction'
                     else:
@@ -970,6 +982,13 @@ class VerifierHub:
                             "Primary evidence switched to contradiction-first: "
                             f"chunk {primary_chunk_idx} with contradiction={max_contradiction:.3f}, "
                             f"entailment_max={max_entailment:.3f}, coherence={nli_coherence_score:.3f}"
+                        )
+                    elif primary_nli_mode == 'ambiguous':
+                        self.logger.debug(
+                            "Contradiction-first candidate suppressed due to ambiguous same-chunk NLI: "
+                            f"chunk={primary_chunk_idx}, contradiction={max_contradiction:.3f}, "
+                            f"entailment={max_entailment:.3f}, "
+                            f"ambiguity_threshold={self.nli_ambiguity_threshold:.3f}"
                         )
                     else:
                         self.logger.debug(
