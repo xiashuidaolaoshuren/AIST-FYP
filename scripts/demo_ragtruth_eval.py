@@ -173,6 +173,11 @@ def main():
             'gold_context_generation generates responses from benchmark gold contexts'
         )
     )
+    parser.add_argument(
+        '--disable-mitigation',
+        action='store_true',
+        help='Force-disable mitigation modules for this run regardless of config file defaults'
+    )
     
     args = parser.parse_args()
 
@@ -222,6 +227,16 @@ def main():
         runtime_config['verification'].setdefault('intrinsic', {})
         runtime_config['verification']['intrinsic']['strict_logits'] = (args.strict_logits == 'true')
 
+    if args.disable_mitigation:
+        runtime_config.setdefault('mitigation', {})
+        runtime_config['mitigation']['enabled'] = False
+        runtime_config['mitigation'].setdefault('reranker', {})
+        runtime_config['mitigation'].setdefault('filter', {})
+        runtime_config['mitigation'].setdefault('reprompt', {})
+        runtime_config['mitigation']['reranker']['enabled'] = False
+        runtime_config['mitigation']['filter']['enabled'] = False
+        runtime_config['mitigation']['reprompt']['enabled'] = False
+
     runtime_config_dir = Path('outputs')
     runtime_config_dir.mkdir(exist_ok=True)
     runtime_config_path = runtime_config_dir / f"runtime_config_eval_{uuid.uuid4().hex[:8]}.yaml"
@@ -245,6 +260,7 @@ def main():
     logger.info(f"Save results: {args.save_results}")
     logger.info(f"RAGTruth eval mode: {args.ragtruth_eval_mode}")
     logger.info(f"Resume policy: {args.resume_policy}")
+    logger.info(f"Force mitigation disabled: {args.disable_mitigation}")
 
     effective_output_path = args.output_path
     if args.save_results and effective_output_path is None:
