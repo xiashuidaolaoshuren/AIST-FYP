@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nltk.tokenize import sent_tokenize
+
 
 def _load_rows(path: Path) -> list[dict[str, Any]]:
     if path.suffix.lower() == ".jsonl":
@@ -78,6 +80,104 @@ def _normalize_passages(value: Any, fallback_title: str = "lettucedetect_context
     return passages
 
 
+def _normalize_spans(value: Any, confidence_threshold: float) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    if not isinstance(value, list):
+        return spans
+
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        start = item.get("start")
+        end = item.get("end")
+        confidence = item.get("confidence", item.get("hallucination_score", 1.0))
+
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        if end <= start:
+            continue
+        if isinstance(confidence, (int, float)) and float(confidence) < confidence_threshold:
+            continue
+        spans.append((start, end))
+
+    return spans
+
+
+def _sentence_spans(text: str) -> list[tuple[str, int, int]]:
+    if not text:
+        return []
+
+    sentences: list[str]
+    try:
+        sentences = sent_tokenize(text)
+    except Exception:
+        # Fallback when punkt resources are unavailable in ad-hoc local runs.
+        sentences = [s for s in text.split(".") if s.strip()]
+        sentences = [f"{s.strip()}." for s in sentences]
+
+    spans: list[tuple[str, int, int]] = []
+    cursor = 0
+    for sentence in sentences:
+        candidate = sentence.strip()
+        if not candidate:
+            continue
+        start = text.find(candidate, cursor)
+        if start < 0:
+            start = text.find(candidate)
+            if start < 0:
+                continue
+        end = start + len(candidate)
+        spans.append((candidate, start, end))
+        cursor = end
+    return spans
+
+
+def _has_overlap(sent_start: int, sent_end: int, spans: list[tuple[int, int]]) -> bool:
+    for span_start, span_end in spans:
+        if sent_start < span_end and sent_end > span_start:
+            return True
+    return False
+
+
+def _build_citation_suffix(passages: list[dict[str, str]]) -> str:
+    refs: list[str] = []
+    for idx, passage in enumerate(passages, start=1):
+        pid = _as_text(passage.get("id")) or str(idx)
+        refs.append(f"[{pid}]")
+    return "".join(refs)
+
+
+def _inject_span_citations(
+    response: str,
+    spans_raw: Any,
+    passages: list[dict[str, str]],
+    confidence_threshold: float,
+) -> str:
+    if not response:
+        return response
+
+    sentence_units = _sentence_spans(response)
+    if not sentence_units:
+        return response
+
+    hallucinated_spans = _normalize_spans(spans_raw, confidence_threshold=confidence_threshold)
+    citation_suffix = _build_citation_suffix(passages)
+    if not citation_suffix:
+        return response
+
+    rewritten: list[str] = []
+    for sentence, sent_start, sent_end in sentence_units:
+        sentence_text = sentence.strip()
+        if not sentence_text:
+            continue
+        hallucinated = _has_overlap(sent_start, sent_end, hallucinated_spans)
+        if hallucinated:
+            rewritten.append(sentence_text)
+        else:
+            rewritten.append(f"{sentence_text} {citation_suffix}")
+    return " ".join(rewritten)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert LettuceDetect output to CiteEval system-eval JSON")
     parser.add_argument("--input", required=True, help="LettuceDetect raw output (.json/.jsonl)")
@@ -85,6 +185,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--id-key", default="id", help="Dotted key path for sample id")
     parser.add_argument("--query-key", default="query", help="Dotted key path for query/question")
     parser.add_argument("--pred-key", default="response", help="Dotted key path for predicted answer text")
+    parser.add_argument("--spans-key", default="spans", help="Dotted key path for hallucination spans")
     parser.add_argument("--passages-key", default="passages", help="Dotted key path for passage list/text")
     parser.add_argument(
         "--fallback-context-key",
@@ -92,8 +193,46 @@ def parse_args() -> argparse.Namespace:
         help="Dotted key path for source text if passages-key is empty",
     )
     parser.add_argument("--strict", action="store_true", help="Drop rows with empty pred or passages")
+    parser.add_argument(
+        "--use-span-citations",
+        action="store_true",
+        help="Inject citations for non-hallucinated sentences based on detector spans",
+    )
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=0.5,
+        help="Minimum span confidence to mark a sentence as hallucinated",
+    )
     parser.add_argument("--report-json", default=None, help="Optional path to write conversion stats JSON")
     return parser.parse_args()
+
+
+def _convert_row(
+    row: dict[str, Any],
+    idx: int,
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], bool, bool]:
+    row_id = _as_text(_get_path(row, args.id_key)) or f"sample_{idx + 1}"
+    query = _as_text(_get_path(row, args.query_key))
+    pred = _as_text(_get_path(row, args.pred_key))
+    passages = _normalize_passages(_get_path(row, args.passages_key))
+    spans = _get_path(row, args.spans_key)
+    if not passages:
+        passages = _normalize_passages(_get_path(row, args.fallback_context_key))
+
+    if args.use_span_citations and pred:
+        pred = _inject_span_citations(
+            response=pred,
+            spans_raw=spans,
+            passages=passages,
+            confidence_threshold=args.confidence_threshold,
+        )
+
+    missing_pred = not bool(pred)
+    missing_passages = not bool(passages)
+    converted = {"id": row_id, "query": query, "passages": passages, "pred": pred}
+    return converted, missing_pred, missing_passages
 
 
 def main() -> int:
@@ -107,23 +246,18 @@ def main() -> int:
     skipped_empty_passages = 0
 
     for idx, row in enumerate(rows):
-        row_id = _as_text(_get_path(row, args.id_key)) or f"sample_{idx + 1}"
-        query = _as_text(_get_path(row, args.query_key))
-        pred = _as_text(_get_path(row, args.pred_key))
-        passages = _normalize_passages(_get_path(row, args.passages_key))
-        if not passages:
-            passages = _normalize_passages(_get_path(row, args.fallback_context_key))
+        converted_row, missing_pred, missing_passages = _convert_row(row=row, idx=idx, args=args)
 
-        if not pred:
+        if missing_pred:
             skipped_empty_pred += 1
             if args.strict:
                 continue
-        if not passages:
+        if missing_passages:
             skipped_empty_passages += 1
             if args.strict:
                 continue
 
-        converted.append({"id": row_id, "query": query, "passages": passages, "pred": pred})
+        converted.append(converted_row)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as handle:
@@ -132,6 +266,8 @@ def main() -> int:
     report = {
         "input": str(input_path),
         "output": str(output_path),
+        "citation_mode": "span_injected" if args.use_span_citations else "original",
+        "confidence_threshold": args.confidence_threshold,
         "total_input": len(rows),
         "total_output": len(converted),
         "skipped_empty_pred": skipped_empty_pred,

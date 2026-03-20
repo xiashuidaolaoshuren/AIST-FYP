@@ -230,6 +230,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--include-flat-context", action="store_true")
+    parser.add_argument("--use-span-citations", action="store_true")
+    parser.add_argument("--confidence-threshold", type=float, default=0.5)
     parser.add_argument("--output-dir", default=None)
 
     parser.add_argument("--dry-run", action="store_true")
@@ -297,11 +299,19 @@ def _run_downstream_conversion(args: argparse.Namespace, raw_predictions: Path, 
         "query",
         "--pred-key",
         "response",
+        "--spans-key",
+        "spans",
         "--passages-key",
         "passages",
         "--report-json",
         str(artifact_paths["downstream_report"]),
     ]
+    if args.use_span_citations:
+        convert_downstream_cmd.extend([
+            "--use-span-citations",
+            "--confidence-threshold",
+            str(args.confidence_threshold),
+        ])
     if args.strict:
         convert_downstream_cmd.append("--strict")
 
@@ -327,6 +337,8 @@ def _write_manifest(
         "model_path": args.model_path,
         "lang": args.lang,
         "strict": args.strict,
+        "use_span_citations": args.use_span_citations,
+        "confidence_threshold": args.confidence_threshold,
         "dry_run": args.dry_run,
         "inference_stats": inference_stats,
     }
