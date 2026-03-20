@@ -111,6 +111,36 @@ def _extract_metric_scores(out_file: Path) -> dict[str, Any]:
     answer_ratings: list[float] = []
     sentence_ratings: list[float] = []
 
+    # CA-specific: rows contain sent_id2type instead of answer_rating / sent_id2rating.
+    # Detect CA output by checking the first non-empty row.
+    is_ca_output = any("sent_id2type" in row for row in rows)
+
+    if is_ca_output:
+        # CA type labels from citeeval_config.json: 1=Query, 2=Retrieval, 3=Response, 4=Model
+        ca_type_labels = {"1": "Query", "2": "Retrieval", "3": "Response", "4": "Model"}
+        ca_type_counts: dict[str, int] = {}
+        num_classified_sentences = 0
+        for row in rows:
+            sent_id2type = row.get("sent_id2type")
+            if not isinstance(sent_id2type, dict):
+                continue
+            for sent_data in sent_id2type.values():
+                ca_pred = None
+                if isinstance(sent_data, dict):
+                    ca_pred = sent_data.get("ca_pred")
+                elif isinstance(sent_data, str):
+                    ca_pred = sent_data
+                if ca_pred is not None:
+                    label = ca_type_labels.get(str(ca_pred), str(ca_pred))
+                    ca_type_counts[label] = ca_type_counts.get(label, 0) + 1
+                    num_classified_sentences += 1
+
+        return {
+            "num_rows": len(rows),
+            "num_classified_sentences": num_classified_sentences,
+            "ca_type_distribution": ca_type_counts,
+        }
+
     for row in rows:
         answer_rating = row.get("answer_rating")
         if isinstance(answer_rating, (int, float)):
@@ -131,6 +161,9 @@ def _extract_metric_scores(out_file: Path) -> dict[str, Any]:
         result["mean_answer_rating"] = mean(answer_ratings)
     if sentence_ratings:
         result["mean_sentence_rating"] = mean(sentence_ratings)
+    # Add sentence coverage ratio for CR modules so callers can detect near-zero coverage.
+    if len(rows) > 0:
+        result["cr_sentence_coverage"] = round(len(sentence_ratings) / len(rows), 4)
     return result
 
 
