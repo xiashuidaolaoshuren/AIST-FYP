@@ -111,9 +111,13 @@ def _extract_metric_scores(out_file: Path) -> dict[str, Any]:
     answer_ratings: list[float] = []
     sentence_ratings: list[float] = []
 
-    # CA-specific: rows contain sent_id2type instead of answer_rating / sent_id2rating.
-    # Detect CA output by checking the first non-empty row.
-    is_ca_output = any("sent_id2type" in row for row in rows)
+    # Determine module type from the filename rather than inspecting content.
+    # Filename pattern: ...{version}.{module}.{model}.out  →  stem parts[-2] = module.
+    # CR output files (cr_itercoe, cr_editdist) also carry sent_id2type from the CA
+    # pipeline step, so content-based detection would misidentify them as CA.
+    stem_parts = out_file.stem.split(".")
+    module_name = stem_parts[-2] if len(stem_parts) >= 2 else ""
+    is_ca_output = module_name == "ca"
 
     if is_ca_output:
         # CA type labels from citeeval_config.json: 1=Query, 2=Retrieval, 3=Response, 4=Model
@@ -174,11 +178,16 @@ def _collect_method_metrics(
     model_name: str,
     max_samples: int | None,
 ) -> tuple[dict[str, Any], int | None]:
-    citeeval_name_candidates: list[str] = [system_input.with_suffix(".citeeval").name]
+    # When max_samples is set, try the sampled filenames FIRST so stale full-run
+    # output files in SYSTEM_OUTPUT_DIR are not picked up instead.
+    citeeval_name_candidates: list[str] = []
     if max_samples is not None:
         sampled_name = f"system.{system_input.stem}.subset_{max_samples}.citeeval"
-        if sampled_name not in citeeval_name_candidates:
-            citeeval_name_candidates.append(sampled_name)
+        citeeval_name_candidates.append(sampled_name)
+    # Always include the unsampled variant as a fallback.
+    unsampled_name = system_input.with_suffix(".citeeval").name
+    if unsampled_name not in citeeval_name_candidates:
+        citeeval_name_candidates.append(unsampled_name)
 
     metrics: dict[str, Any] = {}
     row_counts: list[int] = []
