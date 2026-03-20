@@ -48,6 +48,15 @@ def _to_12h(time_text: str) -> str:
     return f"{hour_12}:{minute:02d} {period}"
 
 
+def _is_closed_range(raw_range: str) -> bool:
+    """Return True when a time range indicates the business is closed for that day."""
+    if '-' not in raw_range:
+        return False
+
+    start, end = [p.strip() for p in raw_range.split('-', 1)]
+    return start in {'0:0', '00:00'} and end in {'0:0', '00:00'}
+
+
 def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
     """
     Convert a RAGTruth Data2txt source_info dict into natural-language contexts.
@@ -93,6 +102,8 @@ def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
             if value is None:
                 continue
             raw_range = str(value)
+            if _is_closed_range(raw_range):
+                continue
             if '-' in raw_range:
                 time_points = [p.strip() for p in raw_range.split('-', 1)]
                 value_text = ' to '.join(_to_12h(p) for p in time_points)
@@ -146,6 +157,13 @@ def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
             elif groups is False:
                 attr_lines.append("The venue is not good for groups")
 
+        music = attributes.get('Music')
+        if music is not None:
+            if music is True:
+                attr_lines.append("Live music is available")
+            elif music is False:
+                attr_lines.append("Live music is not available")
+
         parking = attributes.get('BusinessParking')
         if isinstance(parking, dict):
             enabled = [k for k, v in parking.items() if v is True]
@@ -158,7 +176,7 @@ def chunk_data2txt(source_info: Dict[str, Any]) -> List[str]:
         if isinstance(ambience, dict):
             ambience_flags = [k for k, v in ambience.items() if v is True]
             if ambience_flags:
-                attr_lines.append("Ambience includes " + ", ".join(ambience_flags))
+                attr_lines.append("The ambiance is described as " + ", ".join(ambience_flags))
 
         if attr_lines:
             contexts.append(". ".join(attr_lines) + ".")

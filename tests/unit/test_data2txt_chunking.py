@@ -14,6 +14,7 @@ def test_chunk_data2txt_formats_hours_and_attributes_naturally():
         'hours': {
             'Monday': '17:30-23:0',
             'Sunday': '9:0-14:0',
+            'Tuesday': '0:0-0:0',
         },
         'attributes': {
             'RestaurantsReservations': True,
@@ -21,10 +22,16 @@ def test_chunk_data2txt_formats_hours_and_attributes_naturally():
             'WiFi': 'free',
             'RestaurantsTakeOut': True,
             'RestaurantsGoodForGroups': True,
+            'Music': True,
             'BusinessParking': {
                 'garage': True,
                 'street': True,
                 'valet': True,
+            },
+            'Ambience': {
+                'classy': True,
+                'casual': True,
+                'romantic': False,
             },
         },
     }
@@ -34,10 +41,13 @@ def test_chunk_data2txt_formats_hours_and_attributes_naturally():
 
     assert 'Monday: 5:30 PM to 11:00 PM' in full_text
     assert 'Sunday: 9:00 AM to 2:00 PM' in full_text
+    assert 'Tuesday:' not in full_text
     assert 'The restaurant accepts reservations.' in full_text
     assert 'Outdoor seating is not available.' in full_text
     assert 'Free WiFi is available.' in full_text
     assert 'Takeout is available.' in full_text
     assert 'The venue is good for groups.' in full_text
+    assert 'Live music is available.' in full_text
     assert 'Parking options include garage, street, valet.' in full_text
+    assert 'The ambiance is described as classy, casual.' in full_text
     assert 'Business attributes: Reservations: Yes.' not in full_text
