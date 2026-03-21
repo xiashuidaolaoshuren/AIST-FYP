@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from tqdm import tqdm
 
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
@@ -543,8 +544,16 @@ def _generate_system_input(
         records.extend(existing_payload)
         print(f"[resume] loaded {len(records)} existing samples from {output_path}")
 
-    for row_index, row in enumerate(source_queries):
+    sample_progress = tqdm(
+        enumerate(source_queries),
+        total=len(source_queries),
+        desc="Generating samples",
+        unit="sample",
+        initial=len(processed_ids),
+    )
+    for row_index, row in sample_progress:
         sample_id = str(row.get("id", f"sample_{row_index + 1}"))
+        sample_progress.set_postfix_str(f"id={sample_id}")
         if sample_id in processed_ids:
             continue
         query = str(row.get("query", "")).strip()
@@ -620,7 +629,7 @@ def _generate_system_input(
         mitigation_orchestrator = getattr(runtime.pipeline, "mitigation_orchestrator", None)
         all_pending_nli: list[tuple[int, str, str]] = []
 
-        for row_data in pending_oracle_rows:
+        for row_data in tqdm(pending_oracle_rows, desc="Collecting NLI phase", unit="row"):
             claim_records = row_data["pipeline_output"].get("__claim_records", [])
             prepared, pending_nli = mitigation_orchestrator.collect_nli_phase(claim_records)
             row_data["prepared"] = prepared
@@ -638,7 +647,7 @@ def _generate_system_input(
                 )
 
         score_offset = 0
-        for row_data in pending_oracle_rows:
+        for row_data in tqdm(pending_oracle_rows, desc="Finalizing oracle rows", unit="row"):
             row_scores = nli_scores[score_offset:score_offset + row_data.get("pending_count", 0)]
             score_offset += row_data.get("pending_count", 0)
 
@@ -953,7 +962,7 @@ def main() -> int:
     citeeval_root = project_root / "benchmark" / "CiteEval"
     citeeval_src = project_root / "benchmark" / "CiteEval" / "src"
 
-    for variant in args.variants:
+    for variant in tqdm(args.variants, desc="Variants", unit="variant"):
         config_payload = _deep_update(deepcopy(base_config), _variant_patch(variant))
         variant_config_path = config_dir / f"config_{variant}.yaml"
         _write_yaml(variant_config_path, config_payload)
