@@ -303,8 +303,8 @@ verification:
   # Requires a pre-built sentence index. Build with:
   #   python scripts/build_sentence_index.py --dataset ragtruth --split test
   sentence_retrieval:
-    enabled: false
-    top_k: 5
+    enabled: true
+    top_k: 8
     # Path template for the pre-built sentence index.
     # {dataset} => "ragtruth" or "citeeval"; {split} => evaluation split (e.g., "test")
     index_dir: "data/indexes/{dataset}_sentences/{split}"

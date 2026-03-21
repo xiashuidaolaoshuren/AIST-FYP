@@ -950,6 +950,16 @@ class VerifierHub:
 
                 if use_contradiction_primary:
                     same_chunk_signal = contradiction_chunk_idx == entailment_chunk_idx
+                    contradiction_doc_id = str(
+                        per_chunk_signals[contradiction_chunk_idx].get('doc_id', '')
+                    )
+                    entailment_doc_id = str(
+                        per_chunk_signals[entailment_chunk_idx].get('doc_id', '')
+                    )
+                    same_paragraph_signal = (
+                        bool(contradiction_doc_id)
+                        and contradiction_doc_id == entailment_doc_id
+                    )
                     coherent_contradiction = (
                         nli_coherence_score is not None
                         and nli_coherence_score >= self.coherence_threshold
@@ -958,7 +968,7 @@ class VerifierHub:
                         max_contradiction >= (max_entailment * self.contradiction_dominance_factor)
                     )
                     ambiguous_same_chunk = (
-                        same_chunk_signal
+                        (same_chunk_signal or same_paragraph_signal)
                         and max_entailment >= self.nli_ambiguity_threshold
                         and max_contradiction >= self.nli_ambiguity_threshold
                     )
@@ -985,7 +995,7 @@ class VerifierHub:
                         )
                     elif primary_nli_mode == 'ambiguous':
                         self.logger.debug(
-                            "Contradiction-first candidate suppressed due to ambiguous same-chunk NLI: "
+                            "Contradiction-first candidate suppressed due to ambiguous same-source NLI: "
                             f"chunk={primary_chunk_idx}, contradiction={max_contradiction:.3f}, "
                             f"entailment={max_entailment:.3f}, "
                             f"ambiguity_threshold={self.nli_ambiguity_threshold:.3f}"
