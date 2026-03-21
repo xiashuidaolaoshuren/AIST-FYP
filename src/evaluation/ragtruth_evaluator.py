@@ -852,9 +852,24 @@ class RAGTruthEvaluator:
                 )
 
             if self.sentence_retriever is not None and evidence_chunks:
-                for claim in claims:
-                    per_claim_ev = self.sentence_retriever.retrieve(
-                        claim.text, str(sample_id), self.sentence_retrieval_top_k
+                claim_texts = [claim.text for claim in claims]
+                if hasattr(self.sentence_retriever, 'retrieve_batch'):
+                    per_claim_evidence = self.sentence_retriever.retrieve_batch(
+                        claim_texts,
+                        str(sample_id),
+                        self.sentence_retrieval_top_k,
+                    )
+                else:
+                    per_claim_evidence = [
+                        self.sentence_retriever.retrieve(
+                            claim_text, str(sample_id), self.sentence_retrieval_top_k
+                        )
+                        for claim_text in claim_texts
+                    ]
+
+                for idx, claim in enumerate(claims):
+                    per_claim_ev = (
+                        per_claim_evidence[idx] if idx < len(per_claim_evidence) else []
                     )
                     if task_type == 'Summary' and not per_claim_ev:
                         raise RuntimeError(
@@ -1174,9 +1189,24 @@ class RAGTruthEvaluator:
                 evidence_chunks
             )
             claim_evidence_pairs = []
-            for claim in all_claims:
-                per_claim_ev = self.sentence_retriever.retrieve_from_index(
-                    claim.text, ctx_index, self.sentence_retrieval_top_k
+            claim_texts = [claim.text for claim in all_claims]
+            if hasattr(self.sentence_retriever, 'retrieve_from_index_batch'):
+                per_claim_evidence = self.sentence_retriever.retrieve_from_index_batch(
+                    claim_texts,
+                    ctx_index,
+                    self.sentence_retrieval_top_k,
+                )
+            else:
+                per_claim_evidence = [
+                    self.sentence_retriever.retrieve_from_index(
+                        claim_text, ctx_index, self.sentence_retrieval_top_k
+                    )
+                    for claim_text in claim_texts
+                ]
+
+            for idx, claim in enumerate(all_claims):
+                per_claim_ev = (
+                    per_claim_evidence[idx] if idx < len(per_claim_evidence) else []
                 )
                 claim_evidence_pairs.append({
                     'claim': claim,

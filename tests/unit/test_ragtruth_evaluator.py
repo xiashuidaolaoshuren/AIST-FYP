@@ -519,7 +519,7 @@ class TestRAGTruthEvaluator(unittest.TestCase):
         self.config.evaluation.benchmarks.ragtruth.teacher_forced_intrinsic = False
 
         mock_retriever = Mock()
-        mock_retriever.retrieve.return_value = []
+        mock_retriever.retrieve_batch.return_value = [[]]
 
         evaluator = RAGTruthEvaluator(
             self.config,

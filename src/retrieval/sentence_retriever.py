@@ -217,6 +217,52 @@ class EvidenceSentenceRetriever:
             top_k,
         )
 
+    def retrieve_batch(
+        self,
+        query_texts: List[str],
+        sample_id: str,
+        top_k: int = 5,
+    ) -> List[List[EvidenceChunk]]:
+        """
+        Retrieve top-k sentence EvidenceChunks for each query in *query_texts*
+        scoped to *sample_id* using the pre-built file index.
+
+        Returns one list per query text. If sample_id is missing, each query
+        receives an empty evidence list.
+        """
+        if not query_texts:
+            return []
+
+        if (
+            self._sample_index is None
+            or self._sentences is None
+            or self._embeddings is None
+        ):
+            raise RuntimeError(
+                "No pre-built index loaded. Use from_index() or call _load_index()."
+            )
+
+        key = str(sample_id)
+        if key not in self._sample_index:
+            self.logger.warning(
+                "sample_id '%s' not in sentence index; returning empty for %d claims.",
+                key,
+                len(query_texts),
+            )
+            return [[] for _ in query_texts]
+
+        row_start, row_end = self._sample_index[key]
+        if row_end <= row_start:
+            return [[] for _ in query_texts]
+
+        sample_embeddings = self._embeddings[row_start:row_end].astype(np.float32)
+        return self._cosine_topk_batch(
+            query_texts,
+            sample_embeddings,
+            self._sentences[row_start:row_end],
+            top_k,
+        )
+
     # ------------------------------------------------------------------
     # On-the-fly index building and retrieval
     # ------------------------------------------------------------------
@@ -289,6 +335,24 @@ class EvidenceSentenceRetriever:
             query_text, ctx_index.embeddings, ctx_index.sentences, top_k
         )
 
+    def retrieve_from_index_batch(
+        self,
+        query_texts: List[str],
+        ctx_index: ContextSentenceIndex,
+        top_k: int = 5,
+    ) -> List[List[EvidenceChunk]]:
+        """
+        Retrieve top-k EvidenceChunks for each query from an in-memory
+        ContextSentenceIndex. Returns one list per query.
+        """
+        if not query_texts:
+            return []
+        if ctx_index.embeddings.shape[0] == 0:
+            return [[] for _ in query_texts]
+        return self._cosine_topk_batch(
+            query_texts, ctx_index.embeddings, ctx_index.sentences, top_k
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -331,6 +395,61 @@ class EvidenceSentenceRetriever:
                 )
             )
         return chunks
+
+    def _cosine_topk_batch(
+        self,
+        query_texts: List[str],
+        embeddings: np.ndarray,   # (n, dim), L2-normalised float32
+        sentences: List[dict],
+        top_k: int,
+    ) -> List[List[EvidenceChunk]]:
+        """
+        Batched variant of _cosine_topk that encodes all queries in one pass.
+        """
+        if not query_texts:
+            return []
+
+        query_vecs = self._encoder.encode(
+            query_texts,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        ).astype(np.float32)  # shape (num_queries, dim)
+
+        scores_matrix = embeddings @ query_vecs.T  # shape (num_sents, num_queries)
+        all_chunks: List[List[EvidenceChunk]] = []
+        num_sents = scores_matrix.shape[0]
+
+        for query_idx in range(scores_matrix.shape[1]):
+            scores = scores_matrix[:, query_idx]
+            n = min(top_k, num_sents)
+            if n <= 0:
+                all_chunks.append([])
+                continue
+
+            top_idx = np.argpartition(scores, -n)[-n:]
+            top_idx = top_idx[np.argsort(scores[top_idx])[::-1]]
+
+            chunks: List[EvidenceChunk] = []
+            for rank, local_i in enumerate(top_idx, start=1):
+                local_i = int(local_i)
+                sent = sentences[local_i]
+                chunks.append(
+                    EvidenceChunk(
+                        doc_id=sent.get("doc_id", f"sent_{local_i}"),
+                        sent_id=int(sent.get("sent_idx", local_i)),
+                        text=sent["text"],
+                        char_start=int(sent.get("char_start", 0)),
+                        char_end=int(sent.get("char_end", len(sent["text"]))),
+                        score_dense=float(scores[local_i]),
+                        rank=rank,
+                        source=sent.get("source", "gold_context"),
+                        version=sent.get("version", "sentence_v1"),
+                    )
+                )
+            all_chunks.append(chunks)
+
+        return all_chunks
 
     def _split_chunks_to_sentences(
         self, chunks: List[EvidenceChunk]
