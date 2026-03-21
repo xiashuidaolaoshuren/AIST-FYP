@@ -96,6 +96,7 @@ class VerifierHub:
             self.contradiction_first_fusion = bool(
                 getattr(config.verification, 'contradiction_first_fusion', False)
             )
+            sentence_retrieval_cfg = getattr(config.verification, 'sentence_retrieval', None)
             agg_config = getattr(config.verification, 'aggregator', None)
             default_contradiction_threshold = float(
                 getattr(agg_config, 'contradiction_threshold', 0.5)
@@ -119,6 +120,12 @@ class VerifierHub:
             self.nli_ambiguity_threshold = float(
                 getattr(config.verification, 'nli_ambiguity_threshold', 0.85)
             )
+            self.min_entailment_context_threshold = float(
+                getattr(config.verification, 'min_entailment_context_threshold', 0.0)
+            )
+            self.min_dense_score_for_contradiction = float(
+                getattr(sentence_retrieval_cfg, 'min_dense_score_for_contradiction', 0.0)
+            )
             self.strict_logits = bool(
                 getattr(getattr(config.verification, 'intrinsic', None), 'strict_logits', False)
             )
@@ -131,6 +138,8 @@ class VerifierHub:
             self.coherence_threshold = 0.6
             self.contradiction_dominance_factor = 1.5
             self.nli_ambiguity_threshold = 0.85
+            self.min_entailment_context_threshold = 0.0
+            self.min_dense_score_for_contradiction = 0.0
             self.strict_logits = False
 
         # Per-module enable flags (default: all enabled)
@@ -789,6 +798,7 @@ class VerifierHub:
                     chunk_data = {
                         'doc_id': chunk.doc_id,
                         'sent_id': chunk.sent_id,
+                        'score_dense': getattr(chunk, 'score_dense', None),
                         'coverage': grounded_signal,
                         'uncertainty': uncertainty_signal,
                         'citation_span_match': grounded_signal.get('tokens_overlap', 0.0),
@@ -807,6 +817,7 @@ class VerifierHub:
                     fallback = {
                         'doc_id': chunk.doc_id,
                         'sent_id': chunk.sent_id,
+                        'score_dense': None,
                         'coverage': {'entities': 0.0, 'numbers': 0.0, 'tokens_overlap': 0.0},
                         'uncertainty': {'mean_entropy': 0.0},
                         'citation_span_match': 0.0,
@@ -935,9 +946,31 @@ class VerifierHub:
             # contradiction-first when explicitly enabled)
             if nli_available:
                 max_entailment = max(entailments)
-                max_contradiction = max(contradictions)
                 entailment_chunk_idx = entailments.index(max_entailment)
-                contradiction_chunk_idx = contradictions.index(max_contradiction)
+
+                # Optional guard: ignore low-ranked dense retrieval evidence when
+                # selecting contradiction peaks to reduce noise-induced false positives.
+                eligible_contradictions: List[Tuple[int, float]] = []
+                for idx, contradiction in enumerate(contradictions):
+                    score_dense = per_chunk_signals[idx].get('score_dense')
+                    if score_dense is None:
+                        eligible_contradictions.append((idx, contradiction))
+                        continue
+                    try:
+                        if float(score_dense) >= self.min_dense_score_for_contradiction:
+                            eligible_contradictions.append((idx, contradiction))
+                    except (TypeError, ValueError):
+                        eligible_contradictions.append((idx, contradiction))
+
+                if eligible_contradictions:
+                    contradiction_chunk_idx, max_contradiction = max(
+                        eligible_contradictions,
+                        key=lambda item: item[1],
+                    )
+                else:
+                    max_contradiction = max(contradictions)
+                    contradiction_chunk_idx = contradictions.index(max_contradiction)
+
                 max_entailment_chunk_idx = entailment_chunk_idx
                 max_contradiction_chunk_idx = contradiction_chunk_idx
                 nli_coherence_score = self._compute_nli_coherence_score(per_chunk_signals)
@@ -946,6 +979,7 @@ class VerifierHub:
                     self.contradiction_first_fusion
                     and max_contradiction >= self.contradiction_priority_threshold
                     and max_contradiction >= (max_entailment + self.contradiction_priority_margin)
+                    and max_entailment >= self.min_entailment_context_threshold
                 )
 
                 if use_contradiction_primary:

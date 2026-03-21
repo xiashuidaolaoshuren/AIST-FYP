@@ -490,7 +490,7 @@ def test_contradiction_first_fusion_keeps_cross_doc_contradiction():
         'contradiction_first_fusion': True,
         'contradiction_priority_threshold': 0.5,
         'contradiction_priority_margin': 0.0,
-        'coherence_threshold': 0.6,
+        'coherence_threshold': 0.5,
         'contradiction_dominance_factor': 1.5,
         'nli_ambiguity_threshold': 0.85,
         'modules': type('obj', (object,), {
@@ -532,3 +532,123 @@ def test_contradiction_first_fusion_keeps_cross_doc_contradiction():
     assert primary_idx == 1
     assert aggregated['primary_nli_mode'] == 'contradiction'
     assert aggregated['nli']['contradiction'] == pytest.approx(0.97)
+
+
+def test_contradiction_first_fusion_ignores_low_dense_score_for_contradiction():
+    """Low dense-score chunks should be excluded from contradiction peak selection."""
+    config = Config()
+    config.verification = type('obj', (object,), {
+        'enabled': True,
+        'verify_all_evidence': True,
+        'aggregation_method': 'max',
+        'contradiction_first_fusion': True,
+        'contradiction_priority_threshold': 0.5,
+        'contradiction_priority_margin': 0.0,
+        'coherence_threshold': 0.0,
+        'contradiction_dominance_factor': 1.5,
+        'nli_ambiguity_threshold': 0.85,
+        'min_entailment_context_threshold': 0.0,
+        'sentence_retrieval': type('obj', (object,), {
+            'min_dense_score_for_contradiction': 0.35,
+        })(),
+        'modules': type('obj', (object,), {
+            'intrinsic': False,
+            'grounded': False,
+            'nli': False,
+            'self_agreement': False,
+        })(),
+        'intrinsic': type('obj', (object,), {
+            'strict_logits': False,
+            'epsilon': 1e-10,
+        })(),
+    })()
+
+    hub = VerifierHub(config)
+    per_chunk_signals = [
+        {
+            'doc_id': 'doc_1',
+            'sent_id': 1,
+            'score_dense': 0.90,
+            'coverage': {'entities': 0.8, 'numbers': 1.0, 'tokens_overlap': 0.8},
+            'uncertainty': {'mean_entropy': 0.9},
+            'citation_span_match': 0.8,
+            'numeric_check': True,
+            'nli': {'entailment': 0.70, 'neutral': 0.20, 'contradiction': 0.20},
+        },
+        {
+            'doc_id': 'doc_2',
+            'sent_id': 2,
+            'score_dense': 0.30,
+            'coverage': {'entities': 0.5, 'numbers': 0.0, 'tokens_overlap': 0.5},
+            'uncertainty': {'mean_entropy': 1.1},
+            'citation_span_match': 0.5,
+            'numeric_check': False,
+            'nli': {'entailment': 0.10, 'neutral': 0.10, 'contradiction': 0.95},
+        },
+    ]
+
+    aggregated, primary_idx = hub._aggregate_signals(per_chunk_signals)
+
+    assert primary_idx == 0
+    assert aggregated['primary_nli_mode'] == 'entailment'
+    assert aggregated['nli']['contradiction'] == pytest.approx(0.20)
+
+
+def test_contradiction_first_fusion_respects_min_entailment_guard():
+    """High contradiction should not become primary when entailment context is too weak."""
+    config = Config()
+    config.verification = type('obj', (object,), {
+        'enabled': True,
+        'verify_all_evidence': True,
+        'aggregation_method': 'max',
+        'contradiction_first_fusion': True,
+        'contradiction_priority_threshold': 0.5,
+        'contradiction_priority_margin': 0.0,
+        'coherence_threshold': 0.0,
+        'contradiction_dominance_factor': 1.5,
+        'nli_ambiguity_threshold': 0.85,
+        'min_entailment_context_threshold': 0.10,
+        'sentence_retrieval': type('obj', (object,), {
+            'min_dense_score_for_contradiction': 0.0,
+        })(),
+        'modules': type('obj', (object,), {
+            'intrinsic': False,
+            'grounded': False,
+            'nli': False,
+            'self_agreement': False,
+        })(),
+        'intrinsic': type('obj', (object,), {
+            'strict_logits': False,
+            'epsilon': 1e-10,
+        })(),
+    })()
+
+    hub = VerifierHub(config)
+    per_chunk_signals = [
+        {
+            'doc_id': 'doc_1',
+            'sent_id': 1,
+            'score_dense': 0.90,
+            'coverage': {'entities': 0.8, 'numbers': 1.0, 'tokens_overlap': 0.8},
+            'uncertainty': {'mean_entropy': 0.9},
+            'citation_span_match': 0.8,
+            'numeric_check': True,
+            'nli': {'entailment': 0.05, 'neutral': 0.20, 'contradiction': 0.10},
+        },
+        {
+            'doc_id': 'doc_2',
+            'sent_id': 2,
+            'score_dense': 0.90,
+            'coverage': {'entities': 0.5, 'numbers': 0.0, 'tokens_overlap': 0.5},
+            'uncertainty': {'mean_entropy': 1.1},
+            'citation_span_match': 0.5,
+            'numeric_check': False,
+            'nli': {'entailment': 0.01, 'neutral': 0.10, 'contradiction': 0.95},
+        },
+    ]
+
+    aggregated, primary_idx = hub._aggregate_signals(per_chunk_signals)
+
+    assert primary_idx == 0
+    assert aggregated['primary_nli_mode'] == 'entailment'
+    assert aggregated['nli']['entailment'] == pytest.approx(0.05)

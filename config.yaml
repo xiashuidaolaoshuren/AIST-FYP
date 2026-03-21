@@ -200,6 +200,10 @@ verification:
   # If max entailment and max contradiction are both above this threshold on the
   # same evidence chunk, treat NLI as ambiguous and avoid forcing contradiction.
   nli_ambiguity_threshold: 0.85
+
+  # Guard contradiction-first fusion when no evidence chunk provides meaningful
+  # entailment context for the claim.
+  min_entailment_context_threshold: 0.10
   
   # spaCy model for NER and noun phrase extraction
   spacy_model: "en_core_web_sm"
@@ -305,6 +309,8 @@ verification:
   sentence_retrieval:
     enabled: true
     top_k: 8
+    # Exclude low-ranked dense matches from contradiction peak selection.
+    min_dense_score_for_contradiction: 0.35
     # Path template for the pre-built sentence index.
     # {dataset} => "ragtruth" or "citeeval"; {split} => evaluation split (e.g., "test")
     index_dir: "data/indexes/{dataset}_sentences/{split}"

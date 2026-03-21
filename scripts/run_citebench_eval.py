@@ -14,6 +14,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from tqdm import tqdm
+
 
 @dataclass(frozen=True)
 class EvalPaths:
@@ -80,6 +82,38 @@ def _build_env(paths: EvalPaths) -> dict[str, str]:
     extra = os.pathsep.join([_to_posix(paths.citeeval_root), _to_posix(paths.citeeval_src)])
     env["PYTHONPATH"] = f"{existing_pythonpath}{os.pathsep}{extra}" if existing_pythonpath else extra
     return env
+
+
+def _ensure_nltk_punkt_tab(cwd: Path, env: dict[str, str], dry_run: bool) -> None:
+    """Ensure NLTK punkt resources exist for CiteEval sentence splitting."""
+    check_cmd = [
+        sys.executable,
+        "-c",
+        "from nltk.data import find; find('tokenizers/punkt_tab/english/'); print('nltk punkt_tab ok')",
+    ]
+    download_cmd = [
+        sys.executable,
+        "-c",
+        "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True); print('nltk punkt resources ready')",
+    ]
+
+    if dry_run:
+        _run_command(check_cmd, cwd=cwd, env=env, dry_run=True, step="system.nltk_preflight.check")
+        return
+
+    check_proc = subprocess.run(
+        check_cmd,
+        cwd=str(cwd),
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    if check_proc.returncode == 0:
+        return
+
+    print("[system.nltk_preflight] punkt_tab missing; downloading punkt resources...")
+    _run_command(download_cmd, cwd=cwd, env=env, dry_run=False, step="system.nltk_preflight.download")
+    _run_command(check_cmd, cwd=cwd, env=env, dry_run=False, step="system.nltk_preflight.recheck")
 
 
 def _resolve_provider_and_model(
@@ -233,68 +267,65 @@ def run_metric_track(paths: EvalPaths, env: dict[str, str], args: argparse.Names
     metric_file = _maybe_subset_file(paths, metric_file, args.max_examples, f"metric_{args.metric_split}")
     paths.metric_output_root.mkdir(parents=True, exist_ok=True)
 
-    _run_command(
-        [
-            sys.executable,
-            "-m",
-            "scripts.run_citeeval",
-            "--response_output_file",
-            _to_posix(metric_file),
-            "--eval_output_dir",
-            _to_posix(paths.metric_output_root),
-            "--modules",
-            args.modules,
-            "--version",
-            args.version,
-            "--model_name",
-            args.model_name,
-            "--n_threads",
-            str(args.n_threads),
-        ],
-        cwd=paths.citeeval_src,
-        env=env,
-        dry_run=args.dry_run,
-        step="metric.run_citeeval",
-    )
+    metric_steps = [
+        {
+            "name": "run_citeeval",
+            "cmd": [
+                sys.executable,
+                "-m",
+                "scripts.run_citeeval",
+                "--response_output_file",
+                _to_posix(metric_file),
+                "--eval_output_dir",
+                _to_posix(paths.metric_output_root),
+                "--modules",
+                args.modules,
+                "--version",
+                args.version,
+                "--model_name",
+                args.model_name,
+                "--n_threads",
+                str(args.n_threads),
+            ],
+        },
+        {
+            "name": "evaluate_ca",
+            "cmd": [
+                sys.executable,
+                "-m",
+                "scripts.evaluate_metric",
+                "--metric",
+                f"{args.version}.ca",
+                "--metric_output",
+                _to_posix(_module_output_file(paths.metric_output_root, metric_file, args.version, "cr_editdist", args.model_name)),
+                "--split",
+                args.metric_split,
+            ],
+        },
+        {
+            "name": "evaluate_cr",
+            "cmd": [
+                sys.executable,
+                "-m",
+                "scripts.evaluate_metric",
+                "--metric",
+                f"{args.version}.cr",
+                "--metric_output",
+                f"{_to_posix(_module_output_file(paths.metric_output_root, metric_file, args.version, 'cr_itercoe', args.model_name))},{_to_posix(_module_output_file(paths.metric_output_root, metric_file, args.version, 'cr_editdist', args.model_name))}",
+                "--split",
+                args.metric_split,
+            ],
+        },
+    ]
 
-    cr_iter_out = _module_output_file(paths.metric_output_root, metric_file, args.version, "cr_itercoe", args.model_name)
-    cr_edit_out = _module_output_file(paths.metric_output_root, metric_file, args.version, "cr_editdist", args.model_name)
-
-    _run_command(
-        [
-            sys.executable,
-            "-m",
-            "scripts.evaluate_metric",
-            "--metric",
-            f"{args.version}.ca",
-            "--metric_output",
-            _to_posix(cr_edit_out),
-            "--split",
-            args.metric_split,
-        ],
-        cwd=paths.citeeval_src,
-        env=env,
-        dry_run=args.dry_run,
-        step="metric.evaluate_ca",
-    )
-
-    _run_command(
-        [
-            sys.executable,
-            "-m",
-            "scripts.evaluate_metric",
-            "--metric",
-            f"{args.version}.cr",
-            "--metric_output",
-            f"{_to_posix(cr_iter_out)},{_to_posix(cr_edit_out)}",
-            "--split",
-            args.metric_split,
-        ],
-        cwd=paths.citeeval_src,
-        env=env,
-        dry_run=args.dry_run,
-        step="metric.evaluate_cr",
-    )
+    for step_info in tqdm(metric_steps, desc="Metric track", unit="step"):
+        _run_command(
+            step_info["cmd"],
+            cwd=paths.citeeval_src,
+            env=env,
+            dry_run=args.dry_run,
+            step=f"metric.{step_info['name']}",
+        )
 
 
 def _system_citeeval_input(system_input: Path) -> Path:
@@ -314,70 +345,70 @@ def run_system_track(paths: EvalPaths, env: dict[str, str], args: argparse.Names
     citeeval_input = _system_citeeval_input(system_input)
     paths.system_eval_output_root.mkdir(parents=True, exist_ok=True)
 
+    _ensure_nltk_punkt_tab(cwd=paths.citeeval_src, env=env, dry_run=args.dry_run)
+
+    cr_iter_out = _module_output_file(paths.system_eval_output_root, citeeval_input, args.version, "cr_itercoe", args.model_name)
+    cr_edit_out = _module_output_file(paths.system_eval_output_root, citeeval_input, args.version, "cr_editdist", args.model_name)
+
+    system_steps = []
     if system_input.suffix == ".json" and not args.skip_convert:
-        _run_command(
-            [
+        system_steps.append({
+            "name": "convert_to_citeeval",
+            "cmd": [
                 sys.executable,
                 "-m",
                 "data.convert_to_citeeval_format",
                 "--system_output_file",
                 _to_posix(system_input),
             ],
+        })
+
+    system_steps.extend([
+        {
+            "name": "run_citeeval",
+            "cmd": [
+                sys.executable,
+                "-m",
+                "scripts.run_citeeval",
+                "--response_output_file",
+                _to_posix(citeeval_input),
+                "--eval_output_dir",
+                _to_posix(paths.system_eval_output_root),
+                "--modules",
+                args.modules,
+                "--version",
+                args.version,
+                "--model_name",
+                args.model_name,
+                "--n_threads",
+                str(args.n_threads),
+            ],
+        },
+        {
+            "name": "evaluate_system",
+            "cmd": [
+                sys.executable,
+                "-m",
+                "scripts.evaluate_system",
+                "--system_output",
+                _to_posix(citeeval_input),
+                "--metric_output",
+                f"{_to_posix(cr_iter_out)},{_to_posix(cr_edit_out)}",
+            ] + (["--cited"] if args.cited_only else []),
+        },
+    ])
+
+    for step_info in tqdm(system_steps, desc="System track", unit="step"):
+        _run_command(
+            step_info["cmd"],
             cwd=paths.citeeval_src,
             env=env,
             dry_run=args.dry_run,
-            step="system.convert_to_citeeval",
+            step=f"system.{step_info['name']}",
         )
 
     if not args.dry_run:
         _require_path(citeeval_input, "converted .citeeval input file")
-
-    _run_command(
-        [
-            sys.executable,
-            "-m",
-            "scripts.run_citeeval",
-            "--response_output_file",
-            _to_posix(citeeval_input),
-            "--eval_output_dir",
-            _to_posix(paths.system_eval_output_root),
-            "--modules",
-            args.modules,
-            "--version",
-            args.version,
-            "--model_name",
-            args.model_name,
-            "--n_threads",
-            str(args.n_threads),
-        ],
-        cwd=paths.citeeval_src,
-        env=env,
-        dry_run=args.dry_run,
-        step="system.run_citeeval",
-    )
-
-    cr_iter_out = _module_output_file(paths.system_eval_output_root, citeeval_input, args.version, "cr_itercoe", args.model_name)
-    cr_edit_out = _module_output_file(paths.system_eval_output_root, citeeval_input, args.version, "cr_editdist", args.model_name)
-
-    command = [
-        sys.executable,
-        "-m",
-        "scripts.evaluate_system",
-        "--system_output",
-        _to_posix(citeeval_input),
-        "--metric_output",
-        f"{_to_posix(cr_iter_out)},{_to_posix(cr_edit_out)}",
-    ]
-    if args.cited_only:
-        command.append("--cited")
-
-    _run_command(
-        command,
-        cwd=paths.citeeval_src,
-        env=env,
-        dry_run=args.dry_run,
-        step="system.evaluate",
-    )
 
 
 def build_parser() -> argparse.ArgumentParser:
