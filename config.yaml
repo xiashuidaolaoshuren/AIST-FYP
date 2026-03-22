@@ -203,7 +203,7 @@ verification:
 
   # Guard contradiction-first fusion when no evidence chunk provides meaningful
   # entailment context for the claim.
-  min_entailment_context_threshold: 0.10
+  min_entailment_context_threshold: 0.0
   
   # spaCy model for NER and noun phrase extraction
   spacy_model: "en_core_web_sm"
@@ -333,7 +333,7 @@ verification:
     
     # NLI thresholds for claim classification
     # Contradiction threshold: Minimum NLI contradiction score to flag as contradictory
-    contradiction_threshold: 0.5
+    contradiction_threshold: 0.6
 
     # If entailment is very strong, suppress contradictory labels caused by
     # cross-chunk max aggregation conflicts.
@@ -500,7 +500,7 @@ evaluation:
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal | gold_context_generation
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
-      low_coverage_ratio_threshold: 0.3  # require weak-evidence corroboration when escalating from Low Confidence
+      low_coverage_ratio_threshold: 0.05  # require weak-evidence corroboration when escalating from Low Confidence
     
     # Future benchmarks
     truthful_qa:
