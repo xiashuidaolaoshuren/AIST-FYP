@@ -106,7 +106,7 @@ def _variant_patch(name: str) -> dict[str, Any]:
     if name in {"full_pipeline", "mitigation_all"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_enabled))
 
-    if name == "verifier_intrinsic_only":
+    if name in {"verifier_intrinsic_filter", "verifier_intrinsic_only"}:
         return {
             "verification": {
                 "enabled": True,
@@ -117,10 +117,15 @@ def _variant_patch(name: str) -> dict[str, Any]:
                     "self_agreement": False,
                 },
             },
-            **deepcopy(all_mitigation_disabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": False},
+                "filter": {"enabled": True},
+                "reprompt": {"enabled": False},
+            },
         }
 
-    if name == "verifier_grounded_only":
+    if name in {"verifier_grounded_filter", "verifier_grounded_only"}:
         return {
             "verification": {
                 "enabled": True,
@@ -131,10 +136,15 @@ def _variant_patch(name: str) -> dict[str, Any]:
                     "self_agreement": False,
                 },
             },
-            **deepcopy(all_mitigation_disabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": False},
+                "filter": {"enabled": True},
+                "reprompt": {"enabled": False},
+            },
         }
 
-    if name == "verifier_nli_only":
+    if name in {"verifier_nli_filter", "verifier_nli_only"}:
         return {
             "verification": {
                 "enabled": True,
@@ -145,10 +155,15 @@ def _variant_patch(name: str) -> dict[str, Any]:
                     "self_agreement": False,
                 },
             },
-            **deepcopy(all_mitigation_disabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": False},
+                "filter": {"enabled": True},
+                "reprompt": {"enabled": False},
+            },
         }
 
-    if name == "verifier_self_agreement_only":
+    if name in {"verifier_self_agreement_filter", "verifier_self_agreement_only"}:
         return {
             "verification": {
                 "enabled": True,
@@ -159,7 +174,12 @@ def _variant_patch(name: str) -> dict[str, Any]:
                     "self_agreement": True,
                 },
             },
-            **deepcopy(all_mitigation_disabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": False},
+                "filter": {"enabled": True},
+                "reprompt": {"enabled": False},
+            },
         }
 
     if name in {"mitigation_filter_only", "filter_only"}:
@@ -513,6 +533,35 @@ def _apply_mitigation_with_optional_precomputed(
             for record in mitigation_result["claim_records"]
         }
 
+    signals = mitigation_result.get("signals") or []
+    claim_records = mitigation_result.get("claim_records") or []
+    nli_values: list[float] = []
+    entropy_values: list[float] = []
+    for signal in signals:
+        nli = getattr(signal, "nli", {}) or {}
+        entailment = nli.get("entail", nli.get("entailment"))
+        if entailment is not None:
+            try:
+                nli_values.append(float(entailment))
+            except (TypeError, ValueError):
+                pass
+        uncertainty = getattr(signal, "uncertainty", {}) or {}
+        mean_entropy = uncertainty.get("mean_entropy")
+        if mean_entropy is not None:
+            try:
+                entropy_values.append(float(mean_entropy))
+            except (TypeError, ValueError):
+                pass
+
+    pipeline_output["verifier_internal_stats"] = {
+        "total_claim_count": len(claim_records),
+        "filtered_claim_count": int(mitigation_result.get("filtered_claim_count", 0) or 0),
+        "nli_entailment_sum": float(sum(nli_values)),
+        "nli_entailment_count": len(nli_values),
+        "entropy_sum": float(sum(entropy_values)),
+        "entropy_count": len(entropy_values),
+    }
+
     return pipeline_output
 
 
@@ -529,6 +578,25 @@ def _generate_system_input(
     processed_ids: set[str] = set()
     skipped_missing_query = 0
     skipped_missing_passages = 0
+    aggregated_internal_stats = {
+        "total_claim_count": 0,
+        "filtered_claim_count": 0,
+        "nli_entailment_sum": 0.0,
+        "nli_entailment_count": 0,
+        "entropy_sum": 0.0,
+        "entropy_count": 0,
+    }
+
+    def _accumulate_internal_stats(pipeline_result: dict[str, Any]) -> None:
+        stats = pipeline_result.get("verifier_internal_stats", {})
+        if not isinstance(stats, dict):
+            return
+        aggregated_internal_stats["total_claim_count"] += int(stats.get("total_claim_count", 0) or 0)
+        aggregated_internal_stats["filtered_claim_count"] += int(stats.get("filtered_claim_count", 0) or 0)
+        aggregated_internal_stats["nli_entailment_sum"] += float(stats.get("nli_entailment_sum", 0.0) or 0.0)
+        aggregated_internal_stats["nli_entailment_count"] += int(stats.get("nli_entailment_count", 0) or 0)
+        aggregated_internal_stats["entropy_sum"] += float(stats.get("entropy_sum", 0.0) or 0.0)
+        aggregated_internal_stats["entropy_count"] += int(stats.get("entropy_count", 0) or 0)
 
     if resume and output_path.exists():
         existing_payload = json.loads(output_path.read_text(encoding="utf-8"))
@@ -622,6 +690,7 @@ def _generate_system_input(
         )
         records.append(citeeval_sample)
         processed_ids.add(sample_id)
+        _accumulate_internal_stats(pipeline_output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -701,16 +770,34 @@ def _generate_system_input(
             )
             records.append(citeeval_sample)
             processed_ids.add(row_data["sample_id"])
+            _accumulate_internal_stats(pipeline_output)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+    total_claim_count = aggregated_internal_stats["total_claim_count"]
+    filtered_claim_count = aggregated_internal_stats["filtered_claim_count"]
+    nli_entailment_count = aggregated_internal_stats["nli_entailment_count"]
+    entropy_count = aggregated_internal_stats["entropy_count"]
     return {
         "total_rows": len(source_queries),
         "generated_rows": len(records),
         "skipped_missing_query": skipped_missing_query,
         "skipped_missing_passages": skipped_missing_passages,
+        "total_claim_count": total_claim_count,
+        "filtered_claim_count": filtered_claim_count,
+        "filter_rate": (filtered_claim_count / total_claim_count) if total_claim_count else 0.0,
+        "avg_nli_entailment": (
+            aggregated_internal_stats["nli_entailment_sum"] / nli_entailment_count
+            if nli_entailment_count
+            else 0.0
+        ),
+        "avg_entropy": (
+            aggregated_internal_stats["entropy_sum"] / entropy_count
+            if entropy_count
+            else 0.0
+        ),
     }
 
 
@@ -840,12 +927,13 @@ def _write_summary(
         f"Context source: `{context_source}`",
         f"Benchmark comparable: `{comparable}`",
         "",
-        "| Variant | Statement Rating | Response Rating | Length | Density | ΔStatement vs Baseline | ΔResponse vs Baseline |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Variant | Statement Rating | Response Rating | Length | Density | Filtered Claims | Filter Rate | Avg NLI Entailment | Avg Entropy | ΔStatement vs Baseline | ΔResponse vs Baseline |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, row in metrics.items():
         lines.append(
             f"| {name} | {row['statement_rating']:.4f} | {row['response_rating']:.4f} | {row['length']:.2f} | {row['density']:.4f} | "
+            f"{row.get('filtered_claim_count', 0)} | {row.get('filter_rate', 0.0):.4f} | {row.get('avg_nli_entailment', 0.0):.4f} | {row.get('avg_entropy', 0.0):.4f} | "
             f"{(row['statement_rating'] - baseline['statement_rating']):+.4f} | {(row['response_rating'] - baseline['response_rating']):+.4f} |"
         )
     summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -901,6 +989,10 @@ def build_parser() -> argparse.ArgumentParser:
             "baseline",
             "full_pipeline",
             "mitigation_all",
+            "verifier_intrinsic_filter",
+            "verifier_grounded_filter",
+            "verifier_nli_filter",
+            "verifier_self_agreement_filter",
             "verifier_intrinsic_only",
             "verifier_grounded_only",
             "verifier_nli_only",
@@ -1010,6 +1102,14 @@ def main() -> int:
             cr_iter_out=cr_iter_out,
             cr_edit_out=cr_edit_out,
             cited_only=args.cited_only,
+        )
+        summary_metrics[variant].update(
+            {
+                "filtered_claim_count": generation_stats[variant].get("filtered_claim_count", 0),
+                "filter_rate": generation_stats[variant].get("filter_rate", 0.0),
+                "avg_nli_entailment": generation_stats[variant].get("avg_nli_entailment", 0.0),
+                "avg_entropy": generation_stats[variant].get("avg_entropy", 0.0),
+            }
         )
 
     if "baseline" not in summary_metrics:
