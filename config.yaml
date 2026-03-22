@@ -184,10 +184,10 @@ verification:
   contradiction_first_fusion: true
 
   # Minimum contradiction score required to prioritize contradictory evidence chunk
-  contradiction_priority_threshold: 0.5
+  contradiction_priority_threshold: 0.65
 
   # Extra margin over max entailment before contradiction becomes primary
-  contradiction_priority_margin: 0.0
+  contradiction_priority_margin: 0.2
 
   # Minimum NLI agreement ratio across chunks to accept contradiction-first
   # primary selection when contradiction and entailment come from different chunks.
@@ -333,7 +333,7 @@ verification:
     
     # NLI thresholds for claim classification
     # Contradiction threshold: Minimum NLI contradiction score to flag as contradictory
-    contradiction_threshold: 0.6
+    contradiction_threshold: 0.68
 
     # If entailment is very strong, suppress contradictory labels caused by
     # cross-chunk max aggregation conflicts.
@@ -500,7 +500,7 @@ evaluation:
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal | gold_context_generation
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
-      low_coverage_ratio_threshold: 0.05  # require weak-evidence corroboration when escalating from Low Confidence
+      low_coverage_ratio_threshold: 0.12  # require weak-evidence corroboration when escalating from Low Confidence
     
     # Future benchmarks
     truthful_qa:
