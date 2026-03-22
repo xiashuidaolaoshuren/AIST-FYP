@@ -361,6 +361,46 @@ def _build_oracle_evidence_chunks(row: dict[str, Any]) -> list[EvidenceChunk]:
     return chunks
 
 
+def _compute_faithfulness_scores(row: dict[str, Any], draft_response: str) -> dict[str, float] | None:
+    """Token F1 and recall between the draft response and gold reference answers.
+
+    Follows SQuAD convention: tokenize by whitespace after lowercasing and
+    stripping punctuation, then take the maximum-F1 reference.  Returns None
+    when the oracle row has no ``answers`` field (e.g. retrieval context path).
+    """
+    answers = row.get("answers")
+    if not answers or not isinstance(answers, list):
+        return None
+
+    def _tokens(text: str) -> list[str]:
+        return [t for t in re.sub(r"[^\w\s]", " ", text.lower()).split() if t]
+
+    pred_tokens = _tokens(draft_response)
+    if not pred_tokens:
+        return {"token_f1": 0.0, "recall": 0.0, "has_answers": True}
+
+    best_f1 = 0.0
+    best_recall = 0.0
+    for ref in answers:
+        if not isinstance(ref, str) or not ref.strip():
+            continue
+        ref_tokens = _tokens(ref)
+        if not ref_tokens:
+            continue
+        common_count = sum(
+            min(pred_tokens.count(t), ref_tokens.count(t))
+            for t in set(pred_tokens) & set(ref_tokens)
+        )
+        precision = common_count / len(pred_tokens)
+        recall = common_count / len(ref_tokens)
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        if f1 > best_f1:
+            best_f1 = f1
+            best_recall = recall
+
+    return {"token_f1": best_f1, "recall": best_recall, "has_answers": True}
+
+
 def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str, Any]) -> dict[str, Any]:
     evidence_chunks = _build_oracle_evidence_chunks(row)
     if not evidence_chunks:
@@ -433,6 +473,7 @@ def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str,
         all_claims.extend(sub_claims)
 
     draft_response = " ".join(combined_response_parts)
+    faithfulness = _compute_faithfulness_scores(row, draft_response)
     claim_records: list[dict[str, Any]] = []
 
     for claim in all_claims:
@@ -490,6 +531,7 @@ def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str,
             "num_retrieved": len(evidence_chunks),
             "evidence_doc_ids": [chunk.doc_id for chunk in evidence_chunks[:10]],
         },
+        "faithfulness": faithfulness,
         "__claim_records": claim_records,
     }
 
@@ -585,6 +627,9 @@ def _generate_system_input(
         "nli_entailment_count": 0,
         "entropy_sum": 0.0,
         "entropy_count": 0,
+        "faithfulness_token_f1_sum": 0.0,
+        "faithfulness_recall_sum": 0.0,
+        "faithfulness_count": 0,
     }
 
     def _accumulate_internal_stats(pipeline_result: dict[str, Any]) -> None:
@@ -597,6 +642,11 @@ def _generate_system_input(
         aggregated_internal_stats["nli_entailment_count"] += int(stats.get("nli_entailment_count", 0) or 0)
         aggregated_internal_stats["entropy_sum"] += float(stats.get("entropy_sum", 0.0) or 0.0)
         aggregated_internal_stats["entropy_count"] += int(stats.get("entropy_count", 0) or 0)
+        faith = pipeline_result.get("faithfulness")
+        if isinstance(faith, dict) and faith.get("has_answers"):
+            aggregated_internal_stats["faithfulness_token_f1_sum"] += float(faith.get("token_f1", 0.0))
+            aggregated_internal_stats["faithfulness_recall_sum"] += float(faith.get("recall", 0.0))
+            aggregated_internal_stats["faithfulness_count"] += 1
 
     if resume and output_path.exists():
         existing_payload = json.loads(output_path.read_text(encoding="utf-8"))
@@ -780,6 +830,7 @@ def _generate_system_input(
     filtered_claim_count = aggregated_internal_stats["filtered_claim_count"]
     nli_entailment_count = aggregated_internal_stats["nli_entailment_count"]
     entropy_count = aggregated_internal_stats["entropy_count"]
+    faithfulness_count = aggregated_internal_stats["faithfulness_count"]
     return {
         "total_rows": len(source_queries),
         "generated_rows": len(records),
@@ -798,6 +849,17 @@ def _generate_system_input(
             if entropy_count
             else 0.0
         ),
+        "avg_token_f1": (
+            aggregated_internal_stats["faithfulness_token_f1_sum"] / faithfulness_count
+            if faithfulness_count
+            else None
+        ),
+        "avg_recall": (
+            aggregated_internal_stats["faithfulness_recall_sum"] / faithfulness_count
+            if faithfulness_count
+            else None
+        ),
+        "faithfulness_sample_count": faithfulness_count,
     }
 
 
@@ -927,13 +989,18 @@ def _write_summary(
         f"Context source: `{context_source}`",
         f"Benchmark comparable: `{comparable}`",
         "",
-        "| Variant | Statement Rating | Response Rating | Length | Density | Filtered Claims | Filter Rate | Avg NLI Entailment | Avg Entropy | ΔStatement vs Baseline | ΔResponse vs Baseline |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Variant | Statement Rating | Response Rating | Length | Density | Filtered Claims | Filter Rate | Avg NLI Entailment | Avg Entropy | Avg Token F1 | Avg Recall | ΔStatement vs Baseline | ΔResponse vs Baseline |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, row in metrics.items():
+        avg_f1 = row.get("avg_token_f1")
+        avg_rec = row.get("avg_recall")
+        f1_str = f"{avg_f1:.4f}" if avg_f1 is not None else "N/A"
+        rec_str = f"{avg_rec:.4f}" if avg_rec is not None else "N/A"
         lines.append(
             f"| {name} | {row['statement_rating']:.4f} | {row['response_rating']:.4f} | {row['length']:.2f} | {row['density']:.4f} | "
             f"{row.get('filtered_claim_count', 0)} | {row.get('filter_rate', 0.0):.4f} | {row.get('avg_nli_entailment', 0.0):.4f} | {row.get('avg_entropy', 0.0):.4f} | "
+            f"{f1_str} | {rec_str} | "
             f"{(row['statement_rating'] - baseline['statement_rating']):+.4f} | {(row['response_rating'] - baseline['response_rating']):+.4f} |"
         )
     summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1109,6 +1176,8 @@ def main() -> int:
                 "filter_rate": generation_stats[variant].get("filter_rate", 0.0),
                 "avg_nli_entailment": generation_stats[variant].get("avg_nli_entailment", 0.0),
                 "avg_entropy": generation_stats[variant].get("avg_entropy", 0.0),
+                "avg_token_f1": generation_stats[variant].get("avg_token_f1"),
+                "avg_recall": generation_stats[variant].get("avg_recall"),
             }
         )
 
