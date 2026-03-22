@@ -501,6 +501,13 @@ evaluation:
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
       low_coverage_ratio_threshold: 0.12  # require weak-evidence corroboration when escalating from Low Confidence
+      # Minimum contradictory claims needed to flag a sample as hallucinated.
+      # Per-task overrides handle task-specific DeBERTa over-firing patterns.
+      min_contradictory_count_for_detection: 1  # global default
+      per_task_min_contradictory:
+        Data2txt: 1
+        QA: 2         # require 2 contradictions; DeBERTa over-fires on QA meta-language & paraphrases
+        Summary: 1
     
     # Future benchmarks
     truthful_qa:

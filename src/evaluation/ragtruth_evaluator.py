@@ -196,6 +196,23 @@ class RAGTruthEvaluator:
             self.low_confidence_ratio_threshold = 0.5
             self.low_coverage_ratio_threshold = 0.3
 
+        # Per-task minimum contradictory claims to flag a sample as hallucinated.
+        try:
+            _bc = config.evaluation.benchmarks.ragtruth
+            self.min_contradictory_count = int(
+                getattr(_bc, 'min_contradictory_count_for_detection', 1)
+            )
+            _raw_per_task = getattr(_bc, 'per_task_min_contradictory', None)
+            if isinstance(_raw_per_task, dict):
+                self.per_task_min_contradictory = {
+                    k: int(v) for k, v in _raw_per_task.items()
+                }
+            else:
+                self.per_task_min_contradictory = {}
+        except AttributeError:
+            self.min_contradictory_count = 1
+            self.per_task_min_contradictory = {}
+
         if isinstance(self.ragtruth_eval_mode, str):
             self.ragtruth_eval_mode = self.ragtruth_eval_mode.strip().lower()
         else:
@@ -809,6 +826,13 @@ class RAGTruthEvaluator:
             context_source = 'gold_context'
             evaluation_track = 'verifier'
             generated_response = sample.get('gold_response', '')
+            if task_type == 'QA':
+                # Strip leading ordinal step numbers (e.g. "1. ", "2) ") from each line
+                # so DeBERTa doesn't read the numbering as contradictory to evidence.
+                generated_response = '\n'.join(
+                    re.sub(r'^\s*\d+[\.\)]\s*', '', line)
+                    for line in generated_response.splitlines()
+                ).strip()
             evidence_chunks = self._build_evidence_from_contexts(sample.get('contexts', []))
             claims = extract_claims(
                 text=generated_response,
@@ -1032,7 +1056,9 @@ class RAGTruthEvaluator:
             if claim_decisions else 0.0
         )
         detected_hallucination = (
-            contradictory_count > 0
+            contradictory_count >= self.per_task_min_contradictory.get(
+                task_type, self.min_contradictory_count
+            )
             or (
                 low_confidence_ratio >= self.low_confidence_ratio_threshold
                 and low_coverage_ratio >= self.low_coverage_ratio_threshold
