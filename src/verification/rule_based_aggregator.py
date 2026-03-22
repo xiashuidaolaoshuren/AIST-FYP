@@ -458,6 +458,12 @@ class RuleBasedAggregator:
                 'entailment': float(getattr(agg_config, 'entailment_threshold', 0.7)),
                 'entailment_override': float(getattr(agg_config, 'entailment_override_threshold', 0.9)),
                 'contradiction_margin': float(getattr(agg_config, 'contradiction_entailment_margin', 0.1)),
+                'max_neutral_for_contradiction': float(
+                    getattr(agg_config, 'max_neutral_for_contradiction', 1.0)
+                ),
+                'min_coverage_for_contradiction': float(
+                    getattr(agg_config, 'min_coverage_for_contradiction', 0.0)
+                ),
                 'coverage': float(getattr(agg_config, 'coverage_threshold', 0.6)),
                 'entropy_conf': float(getattr(agg_config, 'entropy_confidence_threshold', 0.4)),
                 'consistency_conf': float(getattr(agg_config, 'consistency_confidence_threshold', 0.4)),
@@ -470,6 +476,8 @@ class RuleBasedAggregator:
                 'entailment': 0.7,
                 'entailment_override': 0.9,
                 'contradiction_margin': 0.1,
+                'max_neutral_for_contradiction': 1.0,
+                'min_coverage_for_contradiction': 0.0,
                 'coverage': 0.6,
                 'entropy_conf': 0.4,
                 'consistency_conf': 0.4,
@@ -608,8 +616,23 @@ class RuleBasedAggregator:
         """
         # Rule 1: Contradictory Detection (highest priority)
         # Check NLI contradiction
+        neutral_conf = float(signal.nli.get('neutral', 0.0)) if signal.nli else 0.0
         if contradict_conf > self.thresholds['contradiction']:
-            if signal.primary_nli_mode in ('entailment', 'ambiguous'):
+            if neutral_conf > self.thresholds['max_neutral_for_contradiction']:
+                self.logger.debug(
+                    "Suppressing contradictory decision due to high NLI neutral probability: "
+                    "neutral=%.3f, max_neutral=%.3f",
+                    neutral_conf,
+                    self.thresholds['max_neutral_for_contradiction'],
+                )
+            elif coverage_score < self.thresholds['min_coverage_for_contradiction']:
+                self.logger.debug(
+                    "Suppressing contradictory decision due to weak grounding: "
+                    "coverage=%.3f, min_coverage=%.3f",
+                    coverage_score,
+                    self.thresholds['min_coverage_for_contradiction'],
+                )
+            elif signal.primary_nli_mode in ('entailment', 'ambiguous'):
                 self.logger.debug(
                     "Suppressing contradictory decision because primary NLI mode is %s",
                     signal.primary_nli_mode,

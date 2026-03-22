@@ -66,6 +66,15 @@ from src.mitigation.orchestrator import MitigationOrchestrator
 from src.data_processing.text_chunker import chunk_data2txt
 
 
+QA_EPISTEMIC_HEDGE_PATTERN = re.compile(
+    r"\b(unable to|cannot|can't|not possible to|it is unclear|"
+    r"no information|insufficient|based on the (provided|given)|"
+    r"the (passage|context|document) does not|i don't know|"
+    r"i cannot determine|not mentioned|unable to answer)\b",
+    re.IGNORECASE,
+)
+
+
 class RAGTruthEvaluator:
     """
     Evaluation harness for RAGTruth hallucination benchmark.
@@ -805,6 +814,11 @@ class RAGTruthEvaluator:
 
         return results
 
+    @staticmethod
+    def _is_qa_epistemic_claim(claim_text: str) -> bool:
+        """Return True for QA meta/hedge claims that are not factual assertions."""
+        return bool(QA_EPISTEMIC_HEDGE_PATTERN.search((claim_text or '').strip()))
+
     def _prepare_sample_for_verification(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare model outputs and claim-evidence pairs before verification."""
         sample_id = sample['id']
@@ -839,6 +853,19 @@ class RAGTruthEvaluator:
                 answer_id=str(sample_id),
                 method='auto'
             )
+            if task_type == 'QA' and claims:
+                original_count = len(claims)
+                claims = [
+                    claim for claim in claims
+                    if not self._is_qa_epistemic_claim(claim.text)
+                ]
+                filtered_count = original_count - len(claims)
+                if filtered_count > 0:
+                    self.logger.debug(
+                        "Filtered %d QA epistemic/meta claim(s) for sample %s",
+                        filtered_count,
+                        sample_id,
+                    )
             metadata = {
                 'text': generated_response,
                 'original_query': question,

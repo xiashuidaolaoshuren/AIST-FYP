@@ -968,8 +968,10 @@ class VerifierHub:
                         key=lambda item: item[1],
                     )
                 else:
-                    max_contradiction = max(contradictions)
-                    contradiction_chunk_idx = contradictions.index(max_contradiction)
+                    # Respect dense-score gating: if no chunk is eligible, do not
+                    # promote contradiction from low-ranked retrieval noise.
+                    max_contradiction = 0.0
+                    contradiction_chunk_idx = contradictions.index(max(contradictions))
 
                 max_entailment_chunk_idx = entailment_chunk_idx
                 max_contradiction_chunk_idx = contradiction_chunk_idx

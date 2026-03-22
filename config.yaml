@@ -342,6 +342,12 @@ verification:
     # Contradiction must be competitive with entailment by this margin.
     # Higher values make contradictory decisions more conservative.
     contradiction_entailment_margin: 0.1
+
+    # Suppress contradiction when NLI remains highly neutral/uncertain.
+    max_neutral_for_contradiction: 0.25
+
+    # Require minimal evidence grounding before escalating to contradiction.
+    min_coverage_for_contradiction: 0.15
     
     # Entailment threshold: Minimum NLI entailment score required for "Supported" status
     entailment_threshold: 0.65
