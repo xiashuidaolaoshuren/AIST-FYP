@@ -100,11 +100,22 @@ def _variant_patch(name: str) -> dict[str, Any]:
         }
     }
 
-    if name == "baseline":
+    if name in {"baseline", "full_verifier"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
 
     if name in {"full_pipeline", "mitigation_all"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_enabled))
+
+    if name == "full_verifier_filter":
+        return {
+            **deepcopy(all_verifiers_enabled),
+            "mitigation": {
+                "enabled": True,
+                "reranker": {"enabled": False},
+                "filter": {"enabled": True},
+                "reprompt": {"enabled": False},
+            },
+        }
 
     if name in {"verifier_intrinsic_filter", "verifier_intrinsic_only"}:
         return {
@@ -874,14 +885,16 @@ def _run_system_eval(
     modules: str,
     n_threads: int,
     cited_only: bool,
+    metric_eval: bool,
 ) -> None:
+    track = "both" if metric_eval else "system"
     command = [
         sys.executable,
         "scripts/run_citebench_eval.py",
         "--evaluation-role",
         "mitigation",
         "--track",
-        "system",
+        track,
         "--system-input",
         str(system_input),
         "--context-source",
@@ -974,6 +987,19 @@ def _evaluate_system_summary(
     return _parse_evaluate_system_stdout(proc.stdout)
 
 
+def _format_citebench_deltas(
+    *,
+    baseline: dict[str, float] | None,
+    row: dict[str, float],
+) -> tuple[str, str]:
+    if baseline is None:
+        return ("N/A", "N/A")
+    return (
+        f"{(row['statement_rating'] - baseline['statement_rating']):+.4f}",
+        f"{(row['response_rating'] - baseline['response_rating']):+.4f}",
+    )
+
+
 def _write_summary(
     summary_path: Path,
     metrics: dict[str, dict[str, float]],
@@ -981,7 +1007,9 @@ def _write_summary(
     context_source: str = "retrieval",
     baseline_name: str = "baseline",
 ) -> None:
-    baseline = metrics[baseline_name]
+    baseline = metrics.get(baseline_name)
+    has_baseline = baseline is not None
+    baseline_label = baseline_name if has_baseline else "N/A"
     comparable = "yes" if context_source == "retrieval" else "no (diagnostic/oracle)"
     lines = [
         "# CiteBench Module Evaluation Summary",
@@ -989,7 +1017,7 @@ def _write_summary(
         f"Context source: `{context_source}`",
         f"Benchmark comparable: `{comparable}`",
         "",
-        "| Variant | Statement Rating | Response Rating | Length | Density | Filtered Claims | Filter Rate | Avg NLI Entailment | Avg Entropy | Avg Token F1 | Avg Recall | ΔStatement vs Baseline | ΔResponse vs Baseline |",
+        f"| Variant | Statement Rating | Response Rating | Length | Density | Filtered Claims | Filter Rate | Avg NLI Entailment | Avg Entropy | Avg Token F1 | Avg Recall | ΔStatement vs {baseline_label} | ΔResponse vs {baseline_label} |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, row in metrics.items():
@@ -997,11 +1025,14 @@ def _write_summary(
         avg_rec = row.get("avg_recall")
         f1_str = f"{avg_f1:.4f}" if avg_f1 is not None else "N/A"
         rec_str = f"{avg_rec:.4f}" if avg_rec is not None else "N/A"
+        delta_statement, delta_response = _format_citebench_deltas(
+            baseline=baseline,
+            row=row,
+        )
         lines.append(
             f"| {name} | {row['statement_rating']:.4f} | {row['response_rating']:.4f} | {row['length']:.2f} | {row['density']:.4f} | "
             f"{row.get('filtered_claim_count', 0)} | {row.get('filter_rate', 0.0):.4f} | {row.get('avg_nli_entailment', 0.0):.4f} | {row.get('avg_entropy', 0.0):.4f} | "
-            f"{f1_str} | {rec_str} | "
-            f"{(row['statement_rating'] - baseline['statement_rating']):+.4f} | {(row['response_rating'] - baseline['response_rating']):+.4f} |"
+            f"{f1_str} | {rec_str} | {delta_statement} | {delta_response} |"
         )
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text("\n".join(lines), encoding="utf-8")
@@ -1046,7 +1077,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--variants",
         nargs="+",
         default=[
-            "baseline",
+            "full_verifier",
             "full_pipeline",
             "mitigation_filter_only",
             "mitigation_rerank_only",
@@ -1054,8 +1085,10 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         choices=[
             "baseline",
+            "full_verifier",
             "full_pipeline",
             "mitigation_all",
+            "full_verifier_filter",
             "verifier_intrinsic_filter",
             "verifier_grounded_filter",
             "verifier_nli_filter",
@@ -1078,6 +1111,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--modules", type=str, default="ca,ce,cr_itercoe,cr_editdist")
     parser.add_argument("--n-threads", type=int, default=8)
     parser.add_argument("--cited-only", action="store_true")
+    parser.add_argument(
+        "--metric-eval",
+        action="store_true",
+        help="Also run CiteEval metric track in addition to system track (uses --track both).",
+    )
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--resume", action="store_true", help="Resume incomplete variant outputs in-place")
     return parser
@@ -1156,6 +1194,7 @@ def main() -> int:
             modules=args.modules,
             n_threads=args.n_threads,
             cited_only=args.cited_only,
+            metric_eval=args.metric_eval,
         )
 
         citeeval_input = system_input_json.with_suffix(".citeeval")
@@ -1181,8 +1220,11 @@ def main() -> int:
             }
         )
 
-    if "baseline" not in summary_metrics:
-        raise ValueError("`baseline` must be included in --variants for delta computation.")
+    baseline_variant = None
+    if "full_verifier" in summary_metrics:
+        baseline_variant = "full_verifier"
+    elif "baseline" in summary_metrics:
+        baseline_variant = "baseline"
 
     payload = {
         "metadata": {
@@ -1199,7 +1241,9 @@ def main() -> int:
             "modules": args.modules,
             "n_threads": args.n_threads,
             "cited_only": args.cited_only,
+            "metric_eval": args.metric_eval,
             "variants": args.variants,
+            "baseline_variant": baseline_variant,
         },
         "metrics": summary_metrics,
         "generation_stats": generation_stats,
@@ -1209,7 +1253,12 @@ def main() -> int:
     summary_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     summary_md = output_dir / "summary.md"
-    _write_summary(summary_md, summary_metrics, context_source=args.context_source)
+    _write_summary(
+        summary_md,
+        summary_metrics,
+        context_source=args.context_source,
+        baseline_name=baseline_variant or "full_verifier",
+    )
 
     print("\nCiteBench mitigation evaluation completed.")
     print(f"Summary JSON: {summary_json}")

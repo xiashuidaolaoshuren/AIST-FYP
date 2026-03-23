@@ -7,11 +7,11 @@ This script automates a fair comparison by:
 3. Saving per-variant metrics and a delta summary report
 
 Usage examples:
-    # Quick paired check (baseline vs full pipeline) in gold-context generation mode
+    # Quick paired check (full verifier vs full pipeline) in gold-context generation mode
     python scripts/evaluate_mitigation_strategy.py --max-samples 30
 
     # Full independent module matrix
-    python scripts/evaluate_mitigation_strategy.py --variants baseline full_pipeline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only
+    python scripts/evaluate_mitigation_strategy.py --variants full_verifier full_pipeline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only
 
     # Save into custom output directory
     python scripts/evaluate_mitigation_strategy.py --output-dir outputs/mitigation_eval/run_01
@@ -71,7 +71,7 @@ def _variant_patch(name: str) -> dict[str, Any]:
         }
     }
 
-    if name == "baseline":
+    if name in {"baseline", "full_verifier"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
 
     if name in {"full_pipeline", "mitigation_all"}:
@@ -363,52 +363,92 @@ def _drop_pct(base: int, current: int) -> float | None:
     return ((base - current) / base) * 100.0
 
 
+def _format_overall_deltas(
+    *,
+    baseline: dict[str, Any] | None,
+    metric: dict[str, Any],
+) -> tuple[str, str, str]:
+    if baseline is None:
+        return ("N/A", "N/A", "N/A")
+    return (
+        f"{_delta(baseline['f1'], metric['f1']):+.4f}",
+        f"{_delta(baseline['recall'], metric['recall']):+.4f}",
+        f"{_delta(baseline['precision'], metric['precision']):+.4f}",
+    )
+
+
+def _format_hallucination_deltas(
+    *,
+    baseline: dict[str, Any] | None,
+    metric: dict[str, Any],
+) -> tuple[str, str, str, str]:
+    if baseline is None:
+        return ("N/A", "N/A", "N/A", "N/A")
+
+    sample_drop_abs = _drop_abs(baseline['sample_hallucinations'], metric['sample_hallucinations'])
+    claim_drop_abs = _drop_abs(baseline['claim_hallucinations'], metric['claim_hallucinations'])
+    sample_drop_pct = _drop_pct(baseline['sample_hallucinations'], metric['sample_hallucinations'])
+    claim_drop_pct = _drop_pct(baseline['claim_hallucinations'], metric['claim_hallucinations'])
+    return (
+        f"{sample_drop_abs:+d}",
+        "N/A" if sample_drop_pct is None else f"{sample_drop_pct:+.2f}%",
+        f"{claim_drop_abs:+d}",
+        "N/A" if claim_drop_pct is None else f"{claim_drop_pct:+.2f}%",
+    )
+
+
 def _write_summary(
     summary_path: Path,
     *,
     baseline_name: str,
     variant_metrics: dict[str, dict[str, Any]],
 ) -> None:
-    baseline = variant_metrics[baseline_name]
+    baseline = variant_metrics.get(baseline_name)
+    has_baseline = baseline is not None
+    baseline_label = baseline_name if has_baseline else "N/A"
 
     lines = [
         "# Module Evaluation Summary (RAGTruth)",
         "",
         "## Overall Metrics",
         "",
-        "| Variant | Samples | Accuracy | Precision | Recall | F1 | ΔF1 vs Baseline | ΔRecall vs Baseline | ΔPrecision vs Baseline |",
+        f"| Variant | Samples | Accuracy | Precision | Recall | F1 | ΔF1 vs {baseline_label} | ΔRecall vs {baseline_label} | ΔPrecision vs {baseline_label} |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
     for name, metric in variant_metrics.items():
+        f1_delta, recall_delta, precision_delta = _format_overall_deltas(
+            baseline=baseline,
+            metric=metric,
+        )
         lines.append(
             "| "
             f"{name} | {metric['num_samples']} | {metric['accuracy']:.4f} | {metric['precision']:.4f} | "
-            f"{metric['recall']:.4f} | {metric['f1']:.4f} | "
-            f"{_delta(baseline['f1'], metric['f1']):+.4f} | "
-            f"{_delta(baseline['recall'], metric['recall']):+.4f} | "
-            f"{_delta(baseline['precision'], metric['precision']):+.4f} |"
+            f"{metric['recall']:.4f} | {metric['f1']:.4f} | {f1_delta} | {recall_delta} | {precision_delta} |"
         )
 
     lines.extend([
         "",
-        "## Hallucination Reduction vs Baseline",
+        f"## Hallucination Reduction vs {baseline_label}",
         "",
         "| Variant | Hallucinated Samples | Sample Drop (Abs) | Sample Drop (%) | Hallucinated Claims | Claim Drop (Abs) | Claim Drop (%) | Avg Claim Hallucinations / Sample |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ])
 
     for name, metric in variant_metrics.items():
-        sample_drop_abs = _drop_abs(baseline['sample_hallucinations'], metric['sample_hallucinations'])
-        claim_drop_abs = _drop_abs(baseline['claim_hallucinations'], metric['claim_hallucinations'])
-        sample_drop_pct = _drop_pct(baseline['sample_hallucinations'], metric['sample_hallucinations'])
-        claim_drop_pct = _drop_pct(baseline['claim_hallucinations'], metric['claim_hallucinations'])
-        sample_drop_pct_display = "N/A" if sample_drop_pct is None else f"{sample_drop_pct:+.2f}%"
-        claim_drop_pct_display = "N/A" if claim_drop_pct is None else f"{claim_drop_pct:+.2f}%"
+        (
+            sample_drop_abs_display,
+            sample_drop_pct_display,
+            claim_drop_abs_display,
+            claim_drop_pct_display,
+        ) = _format_hallucination_deltas(
+            baseline=baseline,
+            metric=metric,
+        )
         lines.append(
             "| "
-            f"{name} | {metric['sample_hallucinations']} | {sample_drop_abs:+d} | {sample_drop_pct_display} | "
-            f"{metric['claim_hallucinations']} | {claim_drop_abs:+d} | {claim_drop_pct_display} | "
+            f"{name} | {metric['sample_hallucinations']} | {sample_drop_abs_display} | {sample_drop_pct_display} | "
+            f"{metric['claim_hallucinations']} | {claim_drop_abs_display} | {claim_drop_pct_display} | "
             f"{metric['avg_claim_hallucinations_per_sample']:.4f} |"
         )
 
@@ -459,7 +499,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--variants",
         nargs="+",
         default=[
-            "baseline",
+            "full_verifier",
             "full_pipeline",
             "verifier_intrinsic_only",
             "verifier_grounded_only",
@@ -471,6 +511,7 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         choices=[
             "baseline",
+            "full_verifier",
             "full_pipeline",
             "mitigation_all",
             "verifier_intrinsic_only",
@@ -571,8 +612,11 @@ def main() -> int:
 
         variant_metrics[variant] = _load_metrics(result_path)
 
-    if "baseline" not in variant_metrics:
-        raise ValueError("`baseline` must be included in --variants for paired delta computation.")
+    baseline_variant = None
+    if "full_verifier" in variant_metrics:
+        baseline_variant = "full_verifier"
+    elif "baseline" in variant_metrics:
+        baseline_variant = "baseline"
 
     summary_payload = {
         "metadata": {
@@ -591,34 +635,40 @@ def main() -> int:
             }
         },
         "metrics": variant_metrics,
+        "baseline_variant": baseline_variant,
         "deltas_vs_baseline": {},
     }
 
-    baseline_metrics = variant_metrics["baseline"]
-    for variant_name, metric in variant_metrics.items():
-        summary_payload["deltas_vs_baseline"][variant_name] = {
-            "f1_delta": _delta(baseline_metrics["f1"], metric["f1"]),
-            "recall_delta": _delta(baseline_metrics["recall"], metric["recall"]),
-            "precision_delta": _delta(baseline_metrics["precision"], metric["precision"]),
-            "sample_hallucination_drop_abs": _drop_abs(
-                baseline_metrics["sample_hallucinations"], metric["sample_hallucinations"]
-            ),
-            "sample_hallucination_drop_pct": _drop_pct(
-                baseline_metrics["sample_hallucinations"], metric["sample_hallucinations"]
-            ),
-            "claim_hallucination_drop_abs": _drop_abs(
-                baseline_metrics["claim_hallucinations"], metric["claim_hallucinations"]
-            ),
-            "claim_hallucination_drop_pct": _drop_pct(
-                baseline_metrics["claim_hallucinations"], metric["claim_hallucinations"]
-            ),
-        }
+    if baseline_variant:
+        baseline_metrics = variant_metrics[baseline_variant]
+        for variant_name, metric in variant_metrics.items():
+            summary_payload["deltas_vs_baseline"][variant_name] = {
+                "f1_delta": _delta(baseline_metrics["f1"], metric["f1"]),
+                "recall_delta": _delta(baseline_metrics["recall"], metric["recall"]),
+                "precision_delta": _delta(baseline_metrics["precision"], metric["precision"]),
+                "sample_hallucination_drop_abs": _drop_abs(
+                    baseline_metrics["sample_hallucinations"], metric["sample_hallucinations"]
+                ),
+                "sample_hallucination_drop_pct": _drop_pct(
+                    baseline_metrics["sample_hallucinations"], metric["sample_hallucinations"]
+                ),
+                "claim_hallucination_drop_abs": _drop_abs(
+                    baseline_metrics["claim_hallucinations"], metric["claim_hallucinations"]
+                ),
+                "claim_hallucination_drop_pct": _drop_pct(
+                    baseline_metrics["claim_hallucinations"], metric["claim_hallucinations"]
+                ),
+            }
 
     summary_json = output_dir / "summary.json"
     summary_json.write_text(json.dumps(summary_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     summary_md = output_dir / "summary.md"
-    _write_summary(summary_md, baseline_name="baseline", variant_metrics=variant_metrics)
+    _write_summary(
+        summary_md,
+        baseline_name=baseline_variant or "full_verifier",
+        variant_metrics=variant_metrics,
+    )
 
     print("\nMitigation evaluation completed.")
     print(f"Summary JSON: {summary_json}")
