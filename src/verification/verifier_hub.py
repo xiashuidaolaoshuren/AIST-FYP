@@ -973,6 +973,9 @@ class VerifierHub:
                     max_contradiction = 0.0
                     contradiction_chunk_idx = contradictions.index(max(contradictions))
 
+                contradiction_peak_neutral = neutrals[contradiction_chunk_idx]
+                contradiction_peak_entailment = entailments[contradiction_chunk_idx]
+
                 max_entailment_chunk_idx = entailment_chunk_idx
                 max_contradiction_chunk_idx = contradiction_chunk_idx
                 nli_coherence_score = self._compute_nli_coherence_score(per_chunk_signals)
@@ -1068,6 +1071,10 @@ class VerifierHub:
                 result['nli'] = {
                     'entailment': max_entailment,  # Best entailment
                     'neutral': min(neutrals),  # Least neutral (most decisive)
+                    # Neutral/entailment at the contradiction peak chunk. These are
+                    # used by downstream guards to judge contradiction quality.
+                    'neutral_contradiction_peak': contradiction_peak_neutral,
+                    'entailment_contradiction_peak': contradiction_peak_entailment,
                     'contradiction': (
                         max_contradiction
                         if self.contradiction_first_fusion

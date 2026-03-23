@@ -343,6 +343,11 @@ verification:
     # Higher values make contradictory decisions more conservative.
     contradiction_entailment_margin: 0.1
 
+    # If any evidence chunk gives moderate entailment support, require stronger
+    # contradiction before assigning a contradictory label.
+    cross_chunk_entailment_guard_threshold: 0.45
+    cross_chunk_min_contradiction_when_supported: 0.9
+
     # Suppress contradiction when NLI remains highly neutral/uncertain.
     max_neutral_for_contradiction: 0.25
 
