@@ -263,8 +263,8 @@ verification:
   # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
   nli:
     # Pre-trained NLI model from Hugging Face
-    # DeBERTa-v3-base fine-tuned on MNLI, FEVER, and ANLI datasets
-    model_name: "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"
+    # DeBERTa-v3-large fine-tuned on MNLI, FEVER, and ANLI datasets
+    model_name: "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli"
     
     # Device for model inference (strictly use config value)
     # Options: "cuda" (GPU), "cpu"
@@ -345,8 +345,8 @@ verification:
 
     # If any evidence chunk gives moderate entailment support, require stronger
     # contradiction before assigning a contradictory label.
-    cross_chunk_entailment_guard_threshold: 0.45
-    cross_chunk_min_contradiction_when_supported: 0.9
+    cross_chunk_entailment_guard_threshold: 0.30
+    cross_chunk_min_contradiction_when_supported: 0.95
 
     # Suppress contradiction when NLI remains highly neutral/uncertain.
     max_neutral_for_contradiction: 0.25
@@ -518,7 +518,7 @@ evaluation:
       per_task_min_contradictory:
         Data2txt: 1
         QA: 2         # require 2 contradictions; DeBERTa over-fires on QA meta-language & paraphrases
-        Summary: 1
+        Summary: 2    # require 2 contradictions to reduce summary paraphrase/coreference false positives
     
     # Future benchmarks
     truthful_qa:
