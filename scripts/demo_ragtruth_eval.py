@@ -24,7 +24,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import argparse
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import yaml
 from src.utils.config import Config
 from src.utils.logger import setup_logger

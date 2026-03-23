@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from tqdm.auto import tqdm
 
 
 def _deep_update(target: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -235,22 +236,25 @@ def _run_variant(
 
     print(f"\n[run:{variant}] {' '.join(command)}")
 
-    process = subprocess.run(
+    process = subprocess.Popen(
         command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        capture_output=True,
         cwd=str(project_root),
     )
+    assert process.stdout is not None
+    out_lines: list[str] = []
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        out_lines.append(line)
+    process.wait()
 
     if process.returncode != 0:
         raise RuntimeError(
             f"Variant '{variant}' failed with exit code {process.returncode}.\n"
-            f"STDOUT:\n{process.stdout}\n"
-            f"STDERR:\n{process.stderr}"
+            f"OUTPUT:\n{''.join(out_lines)}"
         )
-
-    if process.stdout.strip():
-        print(process.stdout.strip())
 
 
 def _load_metrics(output_json: Path) -> dict[str, Any]:
@@ -568,7 +572,9 @@ def main() -> int:
 
     variant_metrics: dict[str, dict[str, Any]] = {}
 
-    for variant in args.variants:
+    variant_bar = tqdm(args.variants, desc="Variants", unit="variant", position=0)
+    for variant in variant_bar:
+        variant_bar.set_postfix_str(variant)
         config_payload = _deep_update(deepcopy(base_config), _variant_patch(variant))
         variant_config_path = config_dir / f"config_{variant}.yaml"
         _write_yaml(variant_config_path, config_payload)
@@ -611,6 +617,7 @@ def main() -> int:
         )
 
         variant_metrics[variant] = _load_metrics(result_path)
+        variant_bar.set_postfix_str(f"{variant} ✓")
 
     baseline_variant = None
     if "full_verifier" in variant_metrics:

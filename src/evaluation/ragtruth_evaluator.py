@@ -49,7 +49,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
