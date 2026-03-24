@@ -263,8 +263,8 @@ verification:
   # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
   nli:
     # Pre-trained NLI model from Hugging Face
-    # DeBERTa-v3-large fine-tuned on MNLI, FEVER, and ANLI datasets
-    model_name: "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli"
+    # DeBERTa-v3-large fine-tuned on MNLI, FEVER, ANLI, LingNLI, and WANLI datasets
+    model_name: "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"
     
     # Device for model inference (strictly use config value)
     # Options: "cuda" (GPU), "cpu"
@@ -275,7 +275,7 @@ verification:
 
     # Enable bidirectional NLI scoring (evidence->claim and claim->evidence).
     # This helps suppress paraphrase/coreference false positives.
-    bidirectional: true
+    bidirectional: false
   
   # Self-Agreement Detector Configuration (Month 4, Task 4)
   self_agreement:
