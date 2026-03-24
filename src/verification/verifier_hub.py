@@ -123,6 +123,9 @@ class VerifierHub:
             self.min_entailment_context_threshold = float(
                 getattr(config.verification, 'min_entailment_context_threshold', 0.0)
             )
+            self.cross_chunk_conflict_entailment_threshold = float(
+                getattr(config.verification, 'cross_chunk_conflict_entailment_threshold', 0.42)
+            )
             self.min_dense_score_for_contradiction = float(
                 getattr(sentence_retrieval_cfg, 'min_dense_score_for_contradiction', 0.0)
             )
@@ -141,6 +144,7 @@ class VerifierHub:
             self.contradiction_dominance_factor = 1.5
             self.nli_ambiguity_threshold = 0.85
             self.min_entailment_context_threshold = 0.0
+            self.cross_chunk_conflict_entailment_threshold = 0.42
             self.min_dense_score_for_contradiction = 0.0
             self.strict_logits = False
             self.bidirectional_nli = False
@@ -1046,6 +1050,29 @@ class VerifierHub:
                     else:
                         primary_chunk_idx = entailment_chunk_idx
                         primary_nli_mode = 'entailment'
+
+                    # Option C: cross-chunk conflict guard.
+                    # When contradiction and entailment peaks come from DIFFERENT evidence
+                    # chunks (cross-source) and substantial entailment exists elsewhere,
+                    # the contradiction may be a cross-predicate / cross-event artifact
+                    # rather than a genuine claim error. Demote to 'ambiguous' so the
+                    # aggregator suppression guard prevents a false-positive verdict.
+                    if (
+                        primary_nli_mode == 'contradiction'
+                        and not same_chunk_signal
+                        and not same_paragraph_signal
+                        and max_entailment >= self.cross_chunk_conflict_entailment_threshold
+                    ):
+                        primary_chunk_idx = entailment_chunk_idx
+                        primary_nli_mode = 'ambiguous'
+                        self.logger.debug(
+                            "Option C: cross-chunk conflict detected — "
+                            f"contradiction_chunk={contradiction_chunk_idx} "
+                            f"(contradiction={max_contradiction:.3f}), "
+                            f"entailment_chunk={entailment_chunk_idx} "
+                            f"(entailment={max_entailment:.3f}) — "
+                            "demoting to ambiguous"
+                        )
                 else:
                     primary_chunk_idx = entailment_chunk_idx
                     primary_nli_mode = 'entailment'

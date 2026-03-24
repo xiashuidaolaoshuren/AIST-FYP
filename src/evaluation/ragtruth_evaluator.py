@@ -213,8 +213,15 @@ class RAGTruthEvaluator:
             )
             _raw_per_task = getattr(_bc, 'per_task_min_contradictory', None)
             if isinstance(_raw_per_task, dict):
+                per_task_cfg = _raw_per_task
+            elif hasattr(_raw_per_task, 'to_dict'):
+                per_task_cfg = _raw_per_task.to_dict()
+            else:
+                per_task_cfg = None
+
+            if isinstance(per_task_cfg, dict):
                 self.per_task_min_contradictory = {
-                    k: int(v) for k, v in _raw_per_task.items()
+                    k: int(v) for k, v in per_task_cfg.items()
                 }
             else:
                 self.per_task_min_contradictory = {}

@@ -204,6 +204,13 @@ verification:
   # Guard contradiction-first fusion when no evidence chunk provides meaningful
   # entailment context for the claim.
   min_entailment_context_threshold: 0.0
+
+  # Option C: cross-chunk conflict guard threshold.
+  # When the contradiction-peak chunk and the entailment-peak chunk are from
+  # DIFFERENT evidence sources (cross-chunk), and the peak entailment across
+  # all chunks >= this threshold, the evidence is considered conflicting and
+  # primary_nli_mode is set to 'ambiguous' to prevent a FP contradiction verdict.
+  cross_chunk_conflict_entailment_threshold: 0.42
   
   # spaCy model for NER and noun phrase extraction
   spacy_model: "en_core_web_sm"
