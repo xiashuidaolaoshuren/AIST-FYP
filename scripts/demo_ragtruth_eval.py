@@ -127,6 +127,12 @@ def main():
         help='Maximum number of samples per task type (overrides --max-samples when set)'
     )
     parser.add_argument(
+        '--max-saved-samples',
+        type=int,
+        default=None,
+        help='Maximum number of sample_results entries to persist (default: save all)'
+    )
+    parser.add_argument(
         '--batch-size',
         type=int,
         default=10,
@@ -180,6 +186,9 @@ def main():
     )
     
     args = parser.parse_args()
+
+    if args.max_saved_samples is not None and args.max_saved_samples <= 0:
+        raise ValueError('--max-saved-samples must be a positive integer when provided')
 
     # Build a runtime config so users can keep one canonical config file
     # and switch model/token settings via CLI overrides.
@@ -255,6 +264,7 @@ def main():
     logger.info(f"Split: {args.split}")
     logger.info(f"Max samples: {args.max_samples or 'all'}")
     logger.info(f"Samples per task: {args.samples_per_task or 'off'}")
+    logger.info(f"Max saved samples: {args.max_saved_samples or 'all'}")
     logger.info(f"Batch size: {args.batch_size}")
     logger.info(f"Data strategy: {args.strategy}")
     logger.info(f"Save results: {args.save_results}")
@@ -402,6 +412,7 @@ def main():
             split=args.split,
             max_samples=args.max_samples,
             samples_per_task=args.samples_per_task,
+            max_saved_samples=args.max_saved_samples,
             batch_size=args.batch_size,
             save_results=args.save_results,
             output_path=effective_output_path,

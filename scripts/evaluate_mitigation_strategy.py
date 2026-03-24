@@ -203,6 +203,7 @@ def _run_variant(
     split: str,
     max_samples: int | None,
     samples_per_task: int | None,
+    max_saved_samples: int | None,
     batch_size: int,
     strategy: str,
     ragtruth_eval_mode: str,
@@ -231,6 +232,8 @@ def _run_variant(
         command.extend(["--max-samples", str(max_samples)])
     if samples_per_task is not None:
         command.extend(["--samples-per-task", str(samples_per_task)])
+    if max_saved_samples is not None:
+        command.extend(["--max-saved-samples", str(max_saved_samples)])
     if resume:
         command.append("--resume")
 
@@ -486,6 +489,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Limit samples per task type (overrides --max-samples when set)",
     )
+    parser.add_argument(
+        "--max-saved-samples",
+        type=int,
+        default=None,
+        help="Limit persisted sample_results entries per variant JSON",
+    )
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--strategy", type=str, default="validation", choices=["development", "validation", "production"])
     parser.add_argument(
@@ -548,6 +557,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
 
+    if args.max_saved_samples is not None and args.max_saved_samples <= 0:
+        raise ValueError("--max-saved-samples must be a positive integer when provided")
+
     project_root = Path(__file__).resolve().parents[1]
     base_config_path = (project_root / args.config).resolve()
     if not base_config_path.exists():
@@ -609,6 +621,7 @@ def main() -> int:
             split=args.split,
             max_samples=args.max_samples,
             samples_per_task=args.samples_per_task,
+            max_saved_samples=args.max_saved_samples,
             batch_size=args.batch_size,
             strategy=args.strategy,
             ragtruth_eval_mode=args.ragtruth_eval_mode,
@@ -631,6 +644,7 @@ def main() -> int:
             "split": args.split,
             "max_samples": args.max_samples,
             "samples_per_task": args.samples_per_task,
+            "max_saved_samples": args.max_saved_samples,
             "batch_size": args.batch_size,
             "strategy": args.strategy,
             "ragtruth_eval_mode": args.ragtruth_eval_mode,

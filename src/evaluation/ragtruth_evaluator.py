@@ -292,6 +292,7 @@ class RAGTruthEvaluator:
         split: str = 'test',
         max_samples: Optional[int] = None,
         samples_per_task: Optional[int] = None,
+        max_saved_samples: Optional[int] = None,
         batch_size: int = 10,
         save_results: bool = True,
         output_path: Optional[str] = None,
@@ -317,6 +318,7 @@ class RAGTruthEvaluator:
             split: Dataset split to evaluate ('train' or 'test')
             max_samples: Maximum samples to evaluate (None = all)
             samples_per_task: Maximum samples per task type; when set, takes precedence over max_samples
+            max_saved_samples: Maximum sample results to persist in output JSON
             batch_size: Process samples in batches for memory efficiency
             save_results: Whether to save detailed results to file
             output_path: Path to save results JSON (auto-generated if None)
@@ -351,6 +353,7 @@ class RAGTruthEvaluator:
         self.logger.info(f"Split: {split}")
         self.logger.info(f"Max samples: {max_samples or 'all'}")
         self.logger.info(f"Samples per task: {samples_per_task or 'off'}")
+        self.logger.info(f"Max saved samples: {max_saved_samples or 'all'}")
         self.logger.info(f"Batch size: {batch_size}")
         self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
         self.logger.info(f"Teacher-forced intrinsic: {self.teacher_forced_intrinsic}")
@@ -488,7 +491,13 @@ class RAGTruthEvaluator:
                     all_results.append(result)
                     if save_results and output_path is not None:
                         interim_metrics = self._compute_metrics(all_results)
-                        self._save_results(interim_metrics, all_results, output_path, run_context=run_context)
+                        self._save_results(
+                            interim_metrics,
+                            all_results,
+                            output_path,
+                            run_context=run_context,
+                            max_saved_samples=max_saved_samples,
+                        )
                 sample_progress.update(len(batch))
         
         # Step 3: Compute metrics
@@ -502,7 +511,13 @@ class RAGTruthEvaluator:
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = output_dir / f'ragtruth_eval_{split}.json'
             
-            self._save_results(metrics, all_results, output_path, run_context=run_context)
+            self._save_results(
+                metrics,
+                all_results,
+                output_path,
+                run_context=run_context,
+                max_saved_samples=max_saved_samples,
+            )
             self.logger.info(f"Results saved to: {output_path}")
         
         # Print summary
@@ -1591,6 +1606,7 @@ class RAGTruthEvaluator:
         results: List[Dict[str, Any]],
         output_path: str,
         run_context: Optional[Dict[str, Any]] = None,
+        max_saved_samples: Optional[int] = None,
     ) -> None:
         """
         Save evaluation metrics and detailed results to JSON file.
@@ -1600,9 +1616,16 @@ class RAGTruthEvaluator:
             results: List of per-sample results
             output_path: Path to output JSON file
         """
+        if max_saved_samples is not None:
+            max_saved_samples = max(0, int(max_saved_samples))
+            saved_results = results[:max_saved_samples]
+        else:
+            saved_results = results
+        was_truncated = len(saved_results) < len(results)
+
         output = {
             'metrics': metrics,
-            'sample_results': results,
+            'sample_results': saved_results,
             'metadata': {
                 'evaluator': 'RAGTruthEvaluator',
                 'num_samples': len(results),
@@ -1611,6 +1634,9 @@ class RAGTruthEvaluator:
                 'unique_tasks': sorted({str(r.get('task_type', 'Unknown')) for r in results})
             }
         }
+        if max_saved_samples is not None:
+            output['metadata']['sample_results_truncated'] = was_truncated
+            output['metadata']['sample_results_limit'] = max_saved_samples
         if isinstance(run_context, dict):
             output['metadata']['selection_fingerprint'] = run_context.get('selection_fingerprint')
             output['metadata']['split'] = run_context.get('split')
