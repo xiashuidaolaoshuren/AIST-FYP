@@ -129,6 +129,8 @@ class VerifierHub:
             self.strict_logits = bool(
                 getattr(getattr(config.verification, 'intrinsic', None), 'strict_logits', False)
             )
+            nli_cfg = getattr(config.verification, 'nli', None)
+            self.bidirectional_nli = bool(getattr(nli_cfg, 'bidirectional', False))
         else:
             self.verify_all_evidence = False
             self.aggregation_method = 'max'
@@ -141,6 +143,7 @@ class VerifierHub:
             self.min_entailment_context_threshold = 0.0
             self.min_dense_score_for_contradiction = 0.0
             self.strict_logits = False
+            self.bidirectional_nli = False
 
         # Per-module enable flags (default: all enabled)
         self.module_flags = self._resolve_module_flags()
@@ -154,7 +157,7 @@ class VerifierHub:
         if not self.enabled:
             self.logger.warning("VerifierHub initialized but verification is disabled")
             return
-        
+
         # Initialize Month 3 detectors
         try:
             self.logger.info("Initializing verification detectors...")
@@ -208,6 +211,22 @@ class VerifierHub:
             self.logger.error(error_msg)
             self.logger.error(traceback.format_exc())
             raise RuntimeError(error_msg) from e
+
+    def detect_nli_batch(self, claim_texts: List[str], evidence_texts: List[str]) -> List[Dict[str, float]]:
+        """Run NLI batch inference using configured directionality policy."""
+        if self.nli_detector is None:
+            return []
+        if self.bidirectional_nli and hasattr(self.nli_detector, 'detect_batch_bidirectional'):
+            return self.nli_detector.detect_batch_bidirectional(claim_texts, evidence_texts)
+        return self.nli_detector.detect_batch(claim_texts, evidence_texts)
+
+    def _detect_nli_single(self, claim_text: str, evidence_text: str) -> Dict[str, float]:
+        """Run single-pair NLI using configured directionality policy."""
+        if self.nli_detector is None:
+            return {'entailment': 0.33, 'neutral': 0.34, 'contradiction': 0.33}
+        if self.bidirectional_nli and hasattr(self.nli_detector, 'detect_bidirectional'):
+            return self.nli_detector.detect_bidirectional(claim_text=claim_text, evidence_text=evidence_text)
+        return self.nli_detector.detect(claim_text=claim_text, evidence_text=evidence_text)
 
     def _resolve_module_flags(self) -> Dict[str, bool]:
         """Resolve per-detector enable flags from config with safe defaults."""
@@ -334,7 +353,7 @@ class VerifierHub:
         nli_scores: List[Dict[str, float]] = []
         if self.nli_detector is not None and prepared_state.nli_pending:
             try:
-                nli_scores = self.nli_detector.detect_batch(
+                nli_scores = self.detect_nli_batch(
                     [item[1] for item in prepared_state.nli_pending],
                     [item[2] for item in prepared_state.nli_pending],
                 )
@@ -625,9 +644,9 @@ class VerifierHub:
             nli_signal = None
             if self.nli_detector is not None:
                 try:
-                    nli_scores = self.nli_detector.detect(
+                    nli_scores = self._detect_nli_single(
                         claim_text=claim.text,
-                        evidence_text=evidence.text
+                        evidence_text=evidence.text,
                     )
                     nli_signal = nli_scores  # Dict with entailment, neutral, contradiction
                     self.logger.debug(
@@ -757,7 +776,7 @@ class VerifierHub:
                 try:
                     claim_texts = [claim.text] * len(evidence_list)
                     evidence_texts = [chunk.text for chunk in evidence_list]
-                    nli_batch_scores = self.nli_detector.detect_batch(claim_texts, evidence_texts)
+                    nli_batch_scores = self.detect_nli_batch(claim_texts, evidence_texts)
                 except Exception as e:
                     self.logger.warning(f"Batch NLI precompute failed, falling back to per-chunk NLI: {str(e)}")
                     nli_batch_scores = None
@@ -786,9 +805,9 @@ class VerifierHub:
                             if nli_batch_scores is not None and idx < len(nli_batch_scores):
                                 nli_signal = nli_batch_scores[idx]
                             else:
-                                nli_signal = self.nli_detector.detect(
+                                nli_signal = self._detect_nli_single(
                                     claim_text=claim.text,
-                                    evidence_text=chunk.text
+                                    evidence_text=chunk.text,
                                 )
                         except Exception as e:
                             self.logger.warning(f"NLI detection failed for chunk: {str(e)}")
@@ -932,7 +951,12 @@ class VerifierHub:
         if nli_available:
             entailments = [s.get('nli', {}).get('entailment', 0.33) for s in per_chunk_signals]
             neutrals = [s.get('nli', {}).get('neutral', 0.33) for s in per_chunk_signals]
-            contradictions = [s.get('nli', {}).get('contradiction', 0.33) for s in per_chunk_signals]
+            raw_contradictions = [s.get('nli', {}).get('contradiction', 0.33) for s in per_chunk_signals]
+            reverse_entailments = [s.get('nli', {}).get('reverse_entailment', 0.0) for s in per_chunk_signals]
+            contradictions = [
+                max(0.0, float(c) * (1.0 - float(rev_e)))
+                for c, rev_e in zip(raw_contradictions, reverse_entailments)
+            ]
         
         primary_chunk_idx = None
         primary_nli_mode = None
@@ -975,6 +999,7 @@ class VerifierHub:
 
                 contradiction_peak_neutral = neutrals[contradiction_chunk_idx]
                 contradiction_peak_entailment = entailments[contradiction_chunk_idx]
+                contradiction_peak_reverse_entailment = reverse_entailments[contradiction_chunk_idx]
 
                 max_entailment_chunk_idx = entailment_chunk_idx
                 max_contradiction_chunk_idx = contradiction_chunk_idx
@@ -1075,6 +1100,7 @@ class VerifierHub:
                     # used by downstream guards to judge contradiction quality.
                     'neutral_contradiction_peak': contradiction_peak_neutral,
                     'entailment_contradiction_peak': contradiction_peak_entailment,
+                    'reverse_entailment_contradiction_peak': contradiction_peak_reverse_entailment,
                     'contradiction': (
                         max_contradiction
                         if self.contradiction_first_fusion

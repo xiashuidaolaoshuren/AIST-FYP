@@ -272,6 +272,10 @@ verification:
     
     # Micro-batch size for batched NLI inference (auto-tuned down on OOM)
     batch_size: 32
+
+    # Enable bidirectional NLI scoring (evidence->claim and claim->evidence).
+    # This helps suppress paraphrase/coreference false positives.
+    bidirectional: true
   
   # Self-Agreement Detector Configuration (Month 4, Task 4)
   self_agreement:
@@ -333,7 +337,7 @@ verification:
     
     # NLI thresholds for claim classification
     # Contradiction threshold: Minimum NLI contradiction score to flag as contradictory
-    contradiction_threshold: 0.68
+    contradiction_threshold: 0.60
 
     # If entailment is very strong, suppress contradictory labels caused by
     # cross-chunk max aggregation conflicts.
@@ -511,7 +515,7 @@ evaluation:
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal | gold_context_generation
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
-      low_coverage_ratio_threshold: 0.20  # require stronger weak-evidence corroboration when escalating from Low Confidence
+      low_coverage_ratio_threshold: 0.25  # require stronger weak-evidence corroboration when escalating from Low Confidence
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default

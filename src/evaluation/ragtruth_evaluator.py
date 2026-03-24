@@ -790,7 +790,7 @@ class RAGTruthEvaluator:
 
         nli_scores: List[Dict[str, float]] = []
         if self.verifier_hub and self.verifier_hub.nli_detector is not None and all_pending_nli:
-            nli_scores = self.verifier_hub.nli_detector.detect_batch(
+            nli_scores = self.verifier_hub.detect_nli_batch(
                 [item[1] for item in all_pending_nli],
                 [item[2] for item in all_pending_nli],
             )

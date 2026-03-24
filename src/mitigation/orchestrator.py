@@ -175,7 +175,7 @@ class MitigationOrchestrator:
             and self.verifier_hub is not None
             and getattr(self.verifier_hub, "nli_detector", None) is not None
         ):
-            nli_scores = self.verifier_hub.nli_detector.detect_batch(
+            nli_scores = self.verifier_hub.detect_nli_batch(
                 [item[1] for item in pending_nli],
                 [item[2] for item in pending_nli],
             )

@@ -380,3 +380,74 @@ class NLIDetector:
                 scores = self.detect(claim, evidence)
                 results.append(scores)
             return results
+
+    def detect_bidirectional(
+        self,
+        claim_text: str,
+        evidence_text: str,
+    ) -> Dict[str, float]:
+        """
+        Run bidirectional NLI and return forward scores plus reverse entailment.
+
+        Forward direction uses (evidence -> claim), reverse uses (claim -> evidence).
+        The returned dict extends forward scores with:
+            - reverse_entailment: entailment probability in reverse direction
+            - reverse_neutral: neutral probability in reverse direction
+            - reverse_contradiction: contradiction probability in reverse direction
+        """
+        batch_scores = self.detect_batch_bidirectional([claim_text], [evidence_text])
+        return batch_scores[0] if batch_scores else {
+            'entailment': 0.33,
+            'neutral': 0.34,
+            'contradiction': 0.33,
+            'reverse_entailment': 0.0,
+            'reverse_neutral': 0.0,
+            'reverse_contradiction': 0.0,
+        }
+
+    def detect_batch_bidirectional(
+        self,
+        claim_texts: list[str],
+        evidence_texts: list[str],
+    ) -> list[Dict[str, float]]:
+        """
+        Run bidirectional NLI for multiple pairs efficiently using one doubled batch.
+
+        For each (claim, evidence) pair, we score:
+            1) forward  : (evidence -> claim)
+            2) reverse  : (claim -> evidence)
+        """
+        if len(claim_texts) != len(evidence_texts):
+            raise ValueError(
+                f"Length mismatch: {len(claim_texts)} claims vs {len(evidence_texts)} evidence"
+            )
+
+        if len(claim_texts) == 0:
+            return []
+
+        forward_claims = list(claim_texts)
+        forward_evidence = list(evidence_texts)
+
+        reverse_claims = list(evidence_texts)
+        reverse_evidence = list(claim_texts)
+
+        merged_claims = forward_claims + reverse_claims
+        merged_evidence = forward_evidence + reverse_evidence
+
+        merged_scores = self.detect_batch(merged_claims, merged_evidence)
+        n = len(claim_texts)
+        forward_scores = merged_scores[:n]
+        reverse_scores = merged_scores[n:]
+
+        bidirectional_scores: list[Dict[str, float]] = []
+        for forward, reverse in zip(forward_scores, reverse_scores):
+            bidirectional_scores.append({
+                'entailment': float(forward.get('entailment', 0.33)),
+                'neutral': float(forward.get('neutral', 0.34)),
+                'contradiction': float(forward.get('contradiction', 0.33)),
+                'reverse_entailment': float(reverse.get('entailment', 0.0)),
+                'reverse_neutral': float(reverse.get('neutral', 0.0)),
+                'reverse_contradiction': float(reverse.get('contradiction', 0.0)),
+            })
+
+        return bidirectional_scores
