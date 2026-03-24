@@ -345,8 +345,8 @@ verification:
 
     # If any evidence chunk gives moderate entailment support, require stronger
     # contradiction before assigning a contradictory label.
-    cross_chunk_entailment_guard_threshold: 0.30
-    cross_chunk_min_contradiction_when_supported: 0.95
+    cross_chunk_entailment_guard_threshold: 0.42
+    cross_chunk_min_contradiction_when_supported: 0.85
 
     # Suppress contradiction when NLI remains highly neutral/uncertain.
     max_neutral_for_contradiction: 0.25
@@ -511,14 +511,14 @@ evaluation:
       ragtruth_eval_mode: "ragtruth_eval"  # ragtruth_eval | normal | gold_context_generation
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
-      low_coverage_ratio_threshold: 0.12  # require weak-evidence corroboration when escalating from Low Confidence
+      low_coverage_ratio_threshold: 0.20  # require stronger weak-evidence corroboration when escalating from Low Confidence
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default
       per_task_min_contradictory:
         Data2txt: 1
         QA: 2         # require 2 contradictions; DeBERTa over-fires on QA meta-language & paraphrases
-        Summary: 2    # require 2 contradictions to reduce summary paraphrase/coreference false positives
+        Summary: 1    # revert to 1 to recover summary recall after large-model shift
     
     # Future benchmarks
     truthful_qa:
