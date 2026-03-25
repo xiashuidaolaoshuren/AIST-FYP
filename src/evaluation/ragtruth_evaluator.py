@@ -74,6 +74,22 @@ QA_EPISTEMIC_HEDGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+NON_FACTUAL_SUMMARY_PATTERN = re.compile(
+    r"\b(argues?|believes?|contends?|claims?|says?|states?)\s+that\b|"
+    r"\b(outdated|disqualifying|extreme|problematic|dangerous|wrong|right|"
+    r"important|notable)\b|"
+    r"\b(should|must|ought to|needs? to|deserves?)\b|"
+    r"\bthe\s+(best|worst|most|least)\b|"
+    r"^(this|it)\s+(is|was|remains)\s+(clear|obvious|evident|important)",
+    re.IGNORECASE,
+)
+
+NON_FACTUAL_DATA2TXT_PATTERN = re.compile(
+    r"\b(argues?|believes?|contends?|claims?|says?|states?)\s+that\b|"
+    r"\b(should|must|ought to|needs? to|deserves?)\b",
+    re.IGNORECASE,
+)
+
 
 class RAGTruthEvaluator:
     """
@@ -192,18 +208,25 @@ class RAGTruthEvaluator:
                     self.low_coverage_ratio_threshold = float(raw_low_coverage_ratio)
                 except (TypeError, ValueError):
                     self.low_coverage_ratio_threshold = 0.3
+                raw_lc_claim_floor = getattr(benchmark_config, 'min_claims_for_lc_escalation', 4)
+                try:
+                    self.min_claims_for_lc_escalation = int(raw_lc_claim_floor)
+                except (TypeError, ValueError):
+                    self.min_claims_for_lc_escalation = 4
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
                 self.teacher_forced_intrinsic = True
                 self.low_confidence_ratio_threshold = 0.5
                 self.low_coverage_ratio_threshold = 0.3
+                self.min_claims_for_lc_escalation = 4
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
             self.teacher_forced_intrinsic = True
             self.low_confidence_ratio_threshold = 0.5
             self.low_coverage_ratio_threshold = 0.3
+            self.min_claims_for_lc_escalation = 4
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
         try:
@@ -250,6 +273,7 @@ class RAGTruthEvaluator:
         self.low_coverage_ratio_threshold = float(
             np.clip(self.low_coverage_ratio_threshold, 0.0, 1.0)
         )
+        self.min_claims_for_lc_escalation = max(1, int(self.min_claims_for_lc_escalation))
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -259,12 +283,13 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f, min_claims_for_lc_escalation=%d)",
             self.benchmark_dir,
             self.ragtruth_eval_mode,
             self.teacher_forced_intrinsic,
             self.low_confidence_ratio_threshold,
-            self.low_coverage_ratio_threshold
+            self.low_coverage_ratio_threshold,
+            self.min_claims_for_lc_escalation,
         )
         self.logger.info(
             "Effective verification config: enabled=%s, modules=%s",
@@ -841,6 +866,22 @@ class RAGTruthEvaluator:
         """Return True for QA meta/hedge claims that are not factual assertions."""
         return bool(QA_EPISTEMIC_HEDGE_PATTERN.search((claim_text or '').strip()))
 
+    @staticmethod
+    def _is_non_factual_claim(claim_text: str, task_type: str) -> bool:
+        """Return True when a claim is opinion/evaluative instead of factual."""
+        task_type_normalized = (task_type or '').strip().lower()
+        if task_type_normalized not in {'summary', 'data2txt'}:
+            return False
+
+        text = (claim_text or '').strip()
+        if not text:
+            return False
+
+        if task_type_normalized == 'data2txt':
+            return bool(NON_FACTUAL_DATA2TXT_PATTERN.search(text))
+
+        return bool(NON_FACTUAL_SUMMARY_PATTERN.search(text))
+
     def _prepare_sample_for_verification(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare model outputs and claim-evidence pairs before verification."""
         sample_id = sample['id']
@@ -886,6 +927,20 @@ class RAGTruthEvaluator:
                     self.logger.debug(
                         "Filtered %d QA epistemic/meta claim(s) for sample %s",
                         filtered_count,
+                        sample_id,
+                    )
+            if task_type in ('Summary', 'Data2txt') and claims:
+                original_count = len(claims)
+                claims = [
+                    claim for claim in claims
+                    if not self._is_non_factual_claim(claim.text, task_type)
+                ]
+                filtered_count = original_count - len(claims)
+                if filtered_count > 0:
+                    self.logger.debug(
+                        "Filtered %d non-factual %s claim(s) for sample %s",
+                        filtered_count,
+                        task_type,
                         sample_id,
                     )
             metadata = {
@@ -1111,6 +1166,7 @@ class RAGTruthEvaluator:
             or (
                 low_confidence_ratio >= self.low_confidence_ratio_threshold
                 and low_coverage_ratio >= self.low_coverage_ratio_threshold
+                and len(claim_decisions) >= self.min_claims_for_lc_escalation
             )
         )
         

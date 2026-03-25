@@ -209,6 +209,10 @@ verification:
   # attribution-clause cases) without suppressing genuine contradictions.
   global_contradiction_entailment_floor: 0.003
 
+  # Only allow the global entailment-floor suppression when evidence grounding
+  # is also strong, indicating a likely paraphrase/artifact case.
+  artifact_coverage_floor: 0.50
+
   # If max entailment and max contradiction are both above this threshold on the
   # same evidence chunk, treat NLI as ambiguous and avoid forcing contradiction.
   nli_ambiguity_threshold: 0.85
@@ -535,6 +539,7 @@ evaluation:
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
       low_coverage_ratio_threshold: 0.28  # require stronger weak-evidence corroboration when escalating from Low Confidence
+      min_claims_for_lc_escalation: 4  # avoid short-answer false positives from high low-confidence ratios on tiny claim sets
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default

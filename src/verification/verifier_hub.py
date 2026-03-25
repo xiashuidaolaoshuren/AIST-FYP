@@ -123,6 +123,9 @@ class VerifierHub:
             self.global_contradiction_entailment_floor = float(
                 getattr(config.verification, 'global_contradiction_entailment_floor', 0.003)
             )
+            self.artifact_coverage_floor = float(
+                getattr(config.verification, 'artifact_coverage_floor', 0.5)
+            )
             self.nli_ambiguity_threshold = float(
                 getattr(config.verification, 'nli_ambiguity_threshold', 0.85)
             )
@@ -150,6 +153,7 @@ class VerifierHub:
             self.contradiction_dominance_factor = 1.5
             self.min_entailment_for_dominance = 0.0
             self.global_contradiction_entailment_floor = 0.003
+            self.artifact_coverage_floor = 0.5
             self.nli_ambiguity_threshold = 0.85
             self.min_entailment_context_threshold = 0.0
             self.cross_chunk_conflict_entailment_threshold = 0.42
@@ -954,6 +958,10 @@ class VerifierHub:
         entities = [s['coverage'].get('entities', 0.0) for s in per_chunk_signals]
         numbers = [s['coverage'].get('numbers', 0.0) for s in per_chunk_signals]
         tokens = [s['coverage'].get('tokens_overlap', 0.0) for s in per_chunk_signals]
+        coverage_scores = [
+            (float(entity) * 0.4) + (float(number) * 0.3) + (float(token) * 0.3)
+            for entity, number, token in zip(entities, numbers, tokens)
+        ]
         entropies = [s['uncertainty'].get('mean_entropy', 0.0) for s in per_chunk_signals]
         citations = [s['citation_span_match'] for s in per_chunk_signals]
         numeric_checks = [s['numeric_check'] for s in per_chunk_signals]
@@ -983,6 +991,7 @@ class VerifierHub:
             if nli_available:
                 max_entailment = max(entailments)
                 entailment_chunk_idx = entailments.index(max_entailment)
+                max_coverage_score = max(coverage_scores) if coverage_scores else 0.0
 
                 # Optional guard: ignore low-ranked dense retrieval evidence when
                 # selecting contradiction peaks to reduce noise-induced false positives.
@@ -1092,13 +1101,17 @@ class VerifierHub:
                     if (
                         primary_nli_mode == 'contradiction'
                         and max_entailment < self.global_contradiction_entailment_floor
+                        and max_coverage_score >= self.artifact_coverage_floor
                     ):
                         primary_chunk_idx = entailment_chunk_idx
                         primary_nli_mode = 'entailment'
                         self.logger.debug(
-                            "Global entailment floor: max_entailment=%.4f < %.4f "
-                            "— overriding contradiction to entailment",
-                            max_entailment, self.global_contradiction_entailment_floor,
+                            "Global entailment floor: max_entailment=%.4f < %.4f and "
+                            "max_coverage_score=%.4f >= %.4f — overriding contradiction to entailment",
+                            max_entailment,
+                            self.global_contradiction_entailment_floor,
+                            max_coverage_score,
+                            self.artifact_coverage_floor,
                         )
                 else:
                     primary_chunk_idx = entailment_chunk_idx
