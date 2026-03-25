@@ -76,9 +76,10 @@ def _flatten_context(passages: list[dict[str, str]]) -> str:
 
 
 def _build_row(row: dict[str, Any], include_flat_context: bool) -> dict[str, Any]:
-    sample_id = _safe_text(row.get("id"))
+    # Accept both system-eval format (id/pred) and metric-eval format (sample_idx/prediction)
+    sample_id = _safe_text(row.get("id") or row.get("sample_idx"))
     query = _safe_text(row.get("query"))
-    response = _strip_bracket_citations(_safe_text(row.get("pred")))
+    response = _strip_bracket_citations(_safe_text(row.get("pred") or row.get("prediction")))
     passages = _normalize_passages(row.get("passages"))
 
     output: dict[str, Any] = {
