@@ -1078,6 +1078,24 @@ class VerifierHub:
                             f"(entailment={max_entailment:.3f}) — "
                             "demoting to ambiguous"
                         )
+
+                    # Global entailment floor: when ALL evidence chunks give near-zero
+                    # entailment, any contradiction verdict (same_chunk, coherent, or
+                    # dominant path) is unreliable — the claim likely adds extra info
+                    # that DeBERTa cannot entail rather than containing a genuine error.
+                    # Override to 'entailment' to suppress FP verdicts (e.g. the Blue
+                    # Bell "third time ... which might be linked" pattern).
+                    if (
+                        primary_nli_mode == 'contradiction'
+                        and max_entailment < self.min_entailment_for_dominance
+                    ):
+                        primary_chunk_idx = entailment_chunk_idx
+                        primary_nli_mode = 'entailment'
+                        self.logger.debug(
+                            "Global entailment floor: max_entailment=%.4f < %.4f "
+                            "— overriding contradiction to entailment",
+                            max_entailment, self.min_entailment_for_dominance,
+                        )
                 else:
                     primary_chunk_idx = entailment_chunk_idx
                     primary_nli_mode = 'entailment'
