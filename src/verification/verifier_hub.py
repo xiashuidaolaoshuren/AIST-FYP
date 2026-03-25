@@ -120,6 +120,9 @@ class VerifierHub:
             self.min_entailment_for_dominance = float(
                 getattr(config.verification, 'min_entailment_for_dominance', 0.0)
             )
+            self.global_contradiction_entailment_floor = float(
+                getattr(config.verification, 'global_contradiction_entailment_floor', 0.003)
+            )
             self.nli_ambiguity_threshold = float(
                 getattr(config.verification, 'nli_ambiguity_threshold', 0.85)
             )
@@ -146,6 +149,7 @@ class VerifierHub:
             self.coherence_threshold = 0.6
             self.contradiction_dominance_factor = 1.5
             self.min_entailment_for_dominance = 0.0
+            self.global_contradiction_entailment_floor = 0.003
             self.nli_ambiguity_threshold = 0.85
             self.min_entailment_context_threshold = 0.0
             self.cross_chunk_conflict_entailment_threshold = 0.42
@@ -1087,14 +1091,14 @@ class VerifierHub:
                     # Bell "third time ... which might be linked" pattern).
                     if (
                         primary_nli_mode == 'contradiction'
-                        and max_entailment < self.min_entailment_for_dominance
+                        and max_entailment < self.global_contradiction_entailment_floor
                     ):
                         primary_chunk_idx = entailment_chunk_idx
                         primary_nli_mode = 'entailment'
                         self.logger.debug(
                             "Global entailment floor: max_entailment=%.4f < %.4f "
                             "— overriding contradiction to entailment",
-                            max_entailment, self.min_entailment_for_dominance,
+                            max_entailment, self.global_contradiction_entailment_floor,
                         )
                 else:
                     primary_chunk_idx = entailment_chunk_idx

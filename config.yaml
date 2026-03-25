@@ -204,6 +204,11 @@ verification:
   # Setting this > 0 blocks that false-positive path.
   min_entailment_for_dominance: 0.05
 
+  # Separate ultra-low floor for the global post-assignment override.
+  # This should only catch near-epsilon entailment artifacts (e.g., Blue Bell
+  # attribution-clause cases) without suppressing genuine contradictions.
+  global_contradiction_entailment_floor: 0.003
+
   # If max entailment and max contradiction are both above this threshold on the
   # same evidence chunk, treat NLI as ambiguous and avoid forcing contradiction.
   nli_ambiguity_threshold: 0.85
