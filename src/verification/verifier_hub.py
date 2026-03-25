@@ -117,6 +117,9 @@ class VerifierHub:
             self.contradiction_dominance_factor = float(
                 getattr(config.verification, 'contradiction_dominance_factor', 1.5)
             )
+            self.min_entailment_for_dominance = float(
+                getattr(config.verification, 'min_entailment_for_dominance', 0.0)
+            )
             self.nli_ambiguity_threshold = float(
                 getattr(config.verification, 'nli_ambiguity_threshold', 0.85)
             )
@@ -142,6 +145,7 @@ class VerifierHub:
             self.contradiction_priority_margin = 0.0
             self.coherence_threshold = 0.6
             self.contradiction_dominance_factor = 1.5
+            self.min_entailment_for_dominance = 0.0
             self.nli_ambiguity_threshold = 0.85
             self.min_entailment_context_threshold = 0.0
             self.cross_chunk_conflict_entailment_threshold = 0.42
@@ -1034,6 +1038,7 @@ class VerifierHub:
                     )
                     dominant_contradiction = (
                         max_contradiction >= (max_entailment * self.contradiction_dominance_factor)
+                        and max_entailment >= self.min_entailment_for_dominance
                     )
                     ambiguous_same_chunk = (
                         (same_chunk_signal or same_paragraph_signal)

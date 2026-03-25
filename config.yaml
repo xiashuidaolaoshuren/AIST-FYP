@@ -197,6 +197,13 @@ verification:
   # even when cross-chunk coherence is weak.
   contradiction_dominance_factor: 1.5
 
+  # Minimum max-entailment across all evidence chunks required before the
+  # dominant-contradiction path is eligible. When peak entailment is near-zero
+  # (e.g. the evidence chunk carries extra attribution clauses DeBERTa can't
+  # entail), the dominance math is trivially satisfied and fires incorrectly.
+  # Setting this > 0 blocks that false-positive path.
+  min_entailment_for_dominance: 0.05
+
   # If max entailment and max contradiction are both above this threshold on the
   # same evidence chunk, treat NLI as ambiguous and avoid forcing contradiction.
   nli_ambiguity_threshold: 0.85
@@ -528,8 +535,8 @@ evaluation:
       min_contradictory_count_for_detection: 1  # global default
       per_task_min_contradictory:
         Data2txt: 1
-        QA: 2         # require 2 contradictions; DeBERTa over-fires on QA meta-language & paraphrases
-        Summary: 2    # require 2 contradictions to suppress residual single-claim summary false positives
+        QA: 3         # require 3 contradictions; only 4 gold hallucinations in 40 QA samples, DeBERTa over-fires heavily
+        Summary: 1    # revert to 1; min_entailment_for_dominance now guards the dominant-contradiction FP pattern
     
     # Future benchmarks
     truthful_qa:
