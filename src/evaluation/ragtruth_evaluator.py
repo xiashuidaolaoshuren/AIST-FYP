@@ -208,6 +208,19 @@ class RAGTruthEvaluator:
                     self.low_coverage_ratio_threshold = float(raw_low_coverage_ratio)
                 except (TypeError, ValueError):
                     self.low_coverage_ratio_threshold = 0.3
+                _raw_per_task_low_cov = getattr(benchmark_config, 'per_task_low_coverage_ratio_threshold', None)
+                if isinstance(_raw_per_task_low_cov, dict):
+                    _per_task_low_cov = _raw_per_task_low_cov
+                elif hasattr(_raw_per_task_low_cov, 'to_dict'):
+                    _per_task_low_cov = _raw_per_task_low_cov.to_dict()
+                else:
+                    _per_task_low_cov = None
+                if isinstance(_per_task_low_cov, dict):
+                    self.per_task_low_coverage_ratio_threshold = {
+                        k: float(v) for k, v in _per_task_low_cov.items()
+                    }
+                else:
+                    self.per_task_low_coverage_ratio_threshold = {}
                 raw_lc_claim_floor = getattr(benchmark_config, 'min_claims_for_lc_escalation', 4)
                 try:
                     self.min_claims_for_lc_escalation = int(raw_lc_claim_floor)
@@ -219,6 +232,7 @@ class RAGTruthEvaluator:
                 self.teacher_forced_intrinsic = True
                 self.low_confidence_ratio_threshold = 0.5
                 self.low_coverage_ratio_threshold = 0.3
+                self.per_task_low_coverage_ratio_threshold = {}
                 self.min_claims_for_lc_escalation = 4
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
@@ -226,6 +240,7 @@ class RAGTruthEvaluator:
             self.teacher_forced_intrinsic = True
             self.low_confidence_ratio_threshold = 0.5
             self.low_coverage_ratio_threshold = 0.3
+            self.per_task_low_coverage_ratio_threshold = {}
             self.min_claims_for_lc_escalation = 4
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
@@ -273,6 +288,10 @@ class RAGTruthEvaluator:
         self.low_coverage_ratio_threshold = float(
             np.clip(self.low_coverage_ratio_threshold, 0.0, 1.0)
         )
+        self.per_task_low_coverage_ratio_threshold = {
+            k: float(np.clip(v, 0.0, 1.0))
+            for k, v in self.per_task_low_coverage_ratio_threshold.items()
+        }
         self.min_claims_for_lc_escalation = max(1, int(self.min_claims_for_lc_escalation))
             
         # Validate benchmark directory exists
@@ -1159,13 +1178,17 @@ class RAGTruthEvaluator:
             low_coverage_count / len(claim_decisions)
             if claim_decisions else 0.0
         )
+        task_low_coverage_ratio_threshold = self.per_task_low_coverage_ratio_threshold.get(
+            task_type,
+            self.low_coverage_ratio_threshold,
+        )
         detected_hallucination = (
             contradictory_count >= self.per_task_min_contradictory.get(
                 task_type, self.min_contradictory_count
             )
             or (
                 low_confidence_ratio >= self.low_confidence_ratio_threshold
-                and low_coverage_ratio >= self.low_coverage_ratio_threshold
+                and low_coverage_ratio >= task_low_coverage_ratio_threshold
                 and len(claim_decisions) >= self.min_claims_for_lc_escalation
             )
         )
