@@ -231,6 +231,15 @@ class RAGTruthEvaluator:
                     self.data2txt_min_lc_count = int(raw_data2txt_lc_count)
                 except (TypeError, ValueError):
                     self.data2txt_min_lc_count = 6
+                raw_qa_pure_lc_block_ratio = getattr(
+                    benchmark_config,
+                    'qa_pure_lc_block_ratio',
+                    0.95,
+                )
+                try:
+                    self.qa_pure_lc_block_ratio = float(raw_qa_pure_lc_block_ratio)
+                except (TypeError, ValueError):
+                    self.qa_pure_lc_block_ratio = 0.95
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -240,6 +249,7 @@ class RAGTruthEvaluator:
                 self.per_task_low_coverage_ratio_threshold = {}
                 self.min_claims_for_lc_escalation = 4
                 self.data2txt_min_lc_count = 6
+                self.qa_pure_lc_block_ratio = 0.95
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -249,6 +259,7 @@ class RAGTruthEvaluator:
             self.per_task_low_coverage_ratio_threshold = {}
             self.min_claims_for_lc_escalation = 4
             self.data2txt_min_lc_count = 6
+            self.qa_pure_lc_block_ratio = 0.95
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
         try:
@@ -301,6 +312,9 @@ class RAGTruthEvaluator:
         }
         self.min_claims_for_lc_escalation = max(1, int(self.min_claims_for_lc_escalation))
         self.data2txt_min_lc_count = max(1, int(self.data2txt_min_lc_count))
+        self.qa_pure_lc_block_ratio = float(
+            np.clip(self.qa_pure_lc_block_ratio, 0.0, 1.0)
+        )
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -310,7 +324,7 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f, min_claims_for_lc_escalation=%d, data2txt_min_lc_count=%d)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f, min_claims_for_lc_escalation=%d, data2txt_min_lc_count=%d, qa_pure_lc_block_ratio=%.2f)",
             self.benchmark_dir,
             self.ragtruth_eval_mode,
             self.teacher_forced_intrinsic,
@@ -318,6 +332,7 @@ class RAGTruthEvaluator:
             self.low_coverage_ratio_threshold,
             self.min_claims_for_lc_escalation,
             self.data2txt_min_lc_count,
+            self.qa_pure_lc_block_ratio,
         )
         self.logger.info(
             "Effective verification config: enabled=%s, modules=%s",
@@ -1188,6 +1203,38 @@ class RAGTruthEvaluator:
             low_coverage_count / len(claim_decisions)
             if claim_decisions else 0.0
         )
+        coverage_scores_all = [
+            float(d.confidence.get('coverage_score', 0.0))
+            for d in claim_decisions
+        ]
+        low_confidence_decisions = [
+            d for d in claim_decisions
+            if d.status == 'Low Confidence'
+        ]
+        coverage_scores_low_conf = [
+            float(d.confidence.get('coverage_score', 0.0))
+            for d in low_confidence_decisions
+        ]
+        support_probs_low_conf = [
+            float(d.confidence.get('support_prob', 0.0))
+            for d in low_confidence_decisions
+        ]
+        contradict_probs_low_conf = [
+            float(d.confidence.get('contradict_prob', 0.0))
+            for d in low_confidence_decisions
+        ]
+        avg_coverage_score_all = (
+            float(np.mean(coverage_scores_all)) if coverage_scores_all else 0.0
+        )
+        avg_coverage_score_low_conf = (
+            float(np.mean(coverage_scores_low_conf)) if coverage_scores_low_conf else 0.0
+        )
+        avg_support_prob_low_conf = (
+            float(np.mean(support_probs_low_conf)) if support_probs_low_conf else 0.0
+        )
+        avg_contradict_prob_low_conf = (
+            float(np.mean(contradict_probs_low_conf)) if contradict_probs_low_conf else 0.0
+        )
         task_low_coverage_ratio_threshold = self.per_task_low_coverage_ratio_threshold.get(
             task_type,
             self.low_coverage_ratio_threshold,
@@ -1197,6 +1244,12 @@ class RAGTruthEvaluator:
             and contradictory_count == 0
             and low_confidence_count >= self.data2txt_min_lc_count
             and low_confidence_ratio >= self.low_confidence_ratio_threshold
+        )
+        qa_pure_lc_block = (
+            task_type == 'QA'
+            and contradictory_count == 0
+            and len(claim_decisions) >= self.min_claims_for_lc_escalation
+            and low_confidence_ratio >= self.qa_pure_lc_block_ratio
         )
         detected_hallucination = (
             contradictory_count >= self.per_task_min_contradictory.get(
@@ -1208,7 +1261,7 @@ class RAGTruthEvaluator:
                 and len(claim_decisions) >= self.min_claims_for_lc_escalation
             )
             or data2txt_lc_escalation
-        )
+        ) and not qa_pure_lc_block
         
         # Detailed per-claim analysis
         claim_results = []
@@ -1252,6 +1305,11 @@ class RAGTruthEvaluator:
             'low_confidence_ratio': low_confidence_ratio,
             'low_coverage_count': low_coverage_count,
             'low_coverage_ratio': low_coverage_ratio,
+            'avg_coverage_score_all': avg_coverage_score_all,
+            'avg_coverage_score_low_conf': avg_coverage_score_low_conf,
+            'avg_support_prob_low_conf': avg_support_prob_low_conf,
+            'avg_contradict_prob_low_conf': avg_contradict_prob_low_conf,
+            'qa_pure_lc_block': qa_pure_lc_block,
             'mitigation_enabled': mitigation_runtime_enabled,
             'mitigation_applied': mitigation_applied,
             'mitigation_actions': mitigation_actions,
