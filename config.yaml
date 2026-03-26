@@ -539,9 +539,8 @@ evaluation:
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
       low_coverage_ratio_threshold: 0.28  # require stronger weak-evidence corroboration when escalating from Low Confidence
-      per_task_low_coverage_ratio_threshold:
-        Data2txt: 0.0  # Data2txt hallucinations often keep lexical/entity overlap, so weak-coverage ratio is not a reliable gate
       min_claims_for_lc_escalation: 3  # keep protection for 1-2 claim responses while recovering 3-claim QA misses
+      data2txt_min_lc_count: 6  # Data2txt-specific fallback: escalate only when many claims are Low Confidence and contradiction evidence is absent
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default

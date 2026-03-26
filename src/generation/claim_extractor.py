@@ -15,9 +15,74 @@ from src.utils.logger import setup_logger
 from src.utils.nlp_utils import get_spacy_model
 
 
+CLAUSE_SPLIT_PATTERN = re.compile(
+    r'\s*[,;]?\s*(?:however|but|while|although),?\s*',
+    re.IGNORECASE,
+)
+
+
+def _has_clause_verb(nlp, text: str) -> bool:
+    """Heuristic: fragment is claim-like only if it contains a verb/aux."""
+    if not text or not text.strip():
+        return False
+    doc = nlp(text)
+    return any(tok.pos_ in {'VERB', 'AUX'} for tok in doc)
+
+
+def _split_claim_text_with_spans(nlp, claim_text: str, claim_start: int) -> List[Tuple[str, int, int]]:
+    """Split compound claim text into clause-level segments with absolute spans."""
+    matches = list(CLAUSE_SPLIT_PATTERN.finditer(claim_text))
+    if not matches:
+        return [(claim_text, claim_start, claim_start + len(claim_text))]
+
+    parts: List[Tuple[str, int, int]] = []
+    cursor = 0
+    for match in matches:
+        raw = claim_text[cursor:match.start()]
+        raw_start = claim_start + cursor
+        raw_end = claim_start + match.start()
+        trimmed = raw.strip()
+        if trimmed:
+            left_ws = len(raw) - len(raw.lstrip())
+            right_ws = len(raw) - len(raw.rstrip())
+            part_start = raw_start + left_ws
+            part_end = raw_end - right_ws
+            parts.append((trimmed, part_start, part_end))
+        cursor = match.end()
+
+    tail_raw = claim_text[cursor:]
+    tail_start = claim_start + cursor
+    tail_end = claim_start + len(claim_text)
+    tail_trimmed = tail_raw.strip()
+    if tail_trimmed:
+        left_ws = len(tail_raw) - len(tail_raw.lstrip())
+        right_ws = len(tail_raw) - len(tail_raw.rstrip())
+        part_start = tail_start + left_ws
+        part_end = tail_end - right_ws
+        parts.append((tail_trimmed, part_start, part_end))
+
+    if len(parts) <= 1:
+        return [(claim_text, claim_start, claim_start + len(claim_text))]
+
+    # Keep only reasonably atomic, verbal clauses; otherwise keep original sentence.
+    valid_parts = []
+    for text, start, end in parts:
+        if len(text.split()) < 5:
+            continue
+        if not _has_clause_verb(nlp, text):
+            continue
+        valid_parts.append((text, start, end))
+
+    if len(valid_parts) < 2:
+        return [(claim_text, claim_start, claim_start + len(claim_text))]
+
+    return valid_parts
+
+
 def extract_claims_spacy(
     text: str,
-    answer_id: Optional[str] = None
+    answer_id: Optional[str] = None,
+    task_type: Optional[str] = None,
 ) -> List[Claim]:
     """
     Extract claims using spaCy sentence segmentation.
@@ -61,6 +126,8 @@ def extract_claims_spacy(
     # Process text with spaCy
     doc = nlp(text)
     
+    apply_clause_split = (task_type or '').strip().lower() == 'summary'
+
     # Extract sentences
     claims = []
     for sent in doc.sents:
@@ -74,16 +141,19 @@ def extract_claims_spacy(
         char_start = sent.start_char
         char_end = sent.end_char
         
-        # Create Claim object
-        claim = Claim(
-            claim_id=str(uuid.uuid4()),
-            answer_id=answer_id,
-            text=sent_text,
-            answer_char_span=[char_start, char_end],
-            extraction_method='spacy_sent_v1'
-        )
-        
-        claims.append(claim)
+        split_parts = _split_claim_text_with_spans(nlp, sent_text, char_start) if apply_clause_split else [
+            (sent_text, char_start, char_end)
+        ]
+        extraction_method = 'spacy_clause_split_v1' if apply_clause_split else 'spacy_sent_v1'
+        for part_text, part_start, part_end in split_parts:
+            claim = Claim(
+                claim_id=str(uuid.uuid4()),
+                answer_id=answer_id,
+                text=part_text,
+                answer_char_span=[part_start, part_end],
+                extraction_method=extraction_method
+            )
+            claims.append(claim)
     
     # Fallback: If no claims extracted but text is not empty, treat whole text as one claim
     if not claims and text.strip():
@@ -104,7 +174,8 @@ def extract_claims_spacy(
 
 def extract_claims_regex(
     text: str,
-    answer_id: Optional[str] = None
+    answer_id: Optional[str] = None,
+    task_type: Optional[str] = None,
 ) -> List[Claim]:
     """
     Extract claims using regex-based sentence splitting.
@@ -129,6 +200,8 @@ def extract_claims_regex(
     
     if not text or not text.strip():
         return []
+
+    _ = task_type
     
     # Generate answer_id if not provided
     if answer_id is None:
@@ -140,8 +213,6 @@ def extract_claims_regex(
     
     # Find all sentences with their positions
     claims = []
-    current_pos = 0
-    
     for match in re.finditer(sentence_pattern, text):
         sent_text = match.group(1).strip()
         
@@ -194,7 +265,8 @@ def extract_claims_regex(
 def extract_claims(
     text: str,
     answer_id: Optional[str] = None,
-    method: str = 'auto'
+    method: str = 'auto',
+    task_type: Optional[str] = None,
 ) -> List[Claim]:
     """
     Extract atomic claims from generated text.
@@ -224,16 +296,16 @@ def extract_claims(
     logger = setup_logger(__name__)
     
     if method == 'spacy':
-        return extract_claims_spacy(text, answer_id)
+        return extract_claims_spacy(text, answer_id, task_type=task_type)
     elif method == 'regex':
-        return extract_claims_regex(text, answer_id)
+        return extract_claims_regex(text, answer_id, task_type=task_type)
     elif method == 'auto':
         # Try spaCy first, fall back to regex
         try:
-            return extract_claims_spacy(text, answer_id)
+            return extract_claims_spacy(text, answer_id, task_type=task_type)
         except Exception as e:
             logger.warning(f"spaCy extraction failed: {e}, using regex fallback")
-            return extract_claims_regex(text, answer_id)
+            return extract_claims_regex(text, answer_id, task_type=task_type)
     else:
         raise ValueError(
             f"Unknown extraction method: {method}. "

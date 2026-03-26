@@ -226,6 +226,11 @@ class RAGTruthEvaluator:
                     self.min_claims_for_lc_escalation = int(raw_lc_claim_floor)
                 except (TypeError, ValueError):
                     self.min_claims_for_lc_escalation = 4
+                raw_data2txt_lc_count = getattr(benchmark_config, 'data2txt_min_lc_count', 6)
+                try:
+                    self.data2txt_min_lc_count = int(raw_data2txt_lc_count)
+                except (TypeError, ValueError):
+                    self.data2txt_min_lc_count = 6
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -234,6 +239,7 @@ class RAGTruthEvaluator:
                 self.low_coverage_ratio_threshold = 0.3
                 self.per_task_low_coverage_ratio_threshold = {}
                 self.min_claims_for_lc_escalation = 4
+                self.data2txt_min_lc_count = 6
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -242,6 +248,7 @@ class RAGTruthEvaluator:
             self.low_coverage_ratio_threshold = 0.3
             self.per_task_low_coverage_ratio_threshold = {}
             self.min_claims_for_lc_escalation = 4
+            self.data2txt_min_lc_count = 6
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
         try:
@@ -293,6 +300,7 @@ class RAGTruthEvaluator:
             for k, v in self.per_task_low_coverage_ratio_threshold.items()
         }
         self.min_claims_for_lc_escalation = max(1, int(self.min_claims_for_lc_escalation))
+        self.data2txt_min_lc_count = max(1, int(self.data2txt_min_lc_count))
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -302,13 +310,14 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f, min_claims_for_lc_escalation=%d)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f, min_claims_for_lc_escalation=%d, data2txt_min_lc_count=%d)",
             self.benchmark_dir,
             self.ragtruth_eval_mode,
             self.teacher_forced_intrinsic,
             self.low_confidence_ratio_threshold,
             self.low_coverage_ratio_threshold,
             self.min_claims_for_lc_escalation,
+            self.data2txt_min_lc_count,
         )
         self.logger.info(
             "Effective verification config: enabled=%s, modules=%s",
@@ -933,7 +942,8 @@ class RAGTruthEvaluator:
             claims = extract_claims(
                 text=generated_response,
                 answer_id=str(sample_id),
-                method='auto'
+                method='auto',
+                task_type=task_type,
             )
             if task_type == 'QA' and claims:
                 original_count = len(claims)
@@ -1182,6 +1192,12 @@ class RAGTruthEvaluator:
             task_type,
             self.low_coverage_ratio_threshold,
         )
+        data2txt_lc_escalation = (
+            task_type == 'Data2txt'
+            and contradictory_count == 0
+            and low_confidence_count >= self.data2txt_min_lc_count
+            and low_confidence_ratio >= self.low_confidence_ratio_threshold
+        )
         detected_hallucination = (
             contradictory_count >= self.per_task_min_contradictory.get(
                 task_type, self.min_contradictory_count
@@ -1191,6 +1207,7 @@ class RAGTruthEvaluator:
                 and low_coverage_ratio >= task_low_coverage_ratio_threshold
                 and len(claim_decisions) >= self.min_claims_for_lc_escalation
             )
+            or data2txt_lc_escalation
         )
         
         # Detailed per-claim analysis
@@ -1310,7 +1327,11 @@ class RAGTruthEvaluator:
             generation_output['original_query'] = sub_query_text
 
             generated_text = generation_output.get('text', '')
-            sub_claims = extract_claims(text=generated_text, method='auto')
+            sub_claims = extract_claims(
+                text=generated_text,
+                method='auto',
+                task_type=sample.get('task_type'),
+            )
 
             char_start = len(' '.join(combined_response_parts) + (' ' if combined_response_parts else ''))
             combined_response_parts.append(generated_text)
