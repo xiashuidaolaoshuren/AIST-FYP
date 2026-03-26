@@ -771,10 +771,15 @@ def _generate_system_input(
             verifier_hub = getattr(mitigation_orchestrator, "verifier_hub", None)
             nli_detector = getattr(verifier_hub, "nli_detector", None) if verifier_hub is not None else None
             if nli_detector is not None:
+                print(
+                    f"Running bulk NLI scoring for deferred oracle mitigation: {len(all_pending_nli)} pairs...",
+                    flush=True,
+                )
                 nli_scores = nli_detector.detect_batch(
                     [item[1] for item in all_pending_nli],
                     [item[2] for item in all_pending_nli],
                 )
+                print("Bulk NLI scoring finished.", flush=True)
 
         score_offset = 0
         for row_data in tqdm(pending_oracle_rows, desc="Finalizing oracle rows", unit="row"):
@@ -913,19 +918,34 @@ def _run_system_eval(
     if cited_only:
         command.append("--cited-only")
 
-    proc = subprocess.run(
+    print(
+        f"Running CiteBench system evaluation on {system_input.name} (provider={provider}, model={model_name}, track={track})...",
+        flush=True,
+    )
+    proc = subprocess.Popen(
         command,
         cwd=str(project_root),
         text=True,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
     )
+    output_lines: list[str] = []
+    if proc.stdout is not None:
+        for line in proc.stdout:
+            print(line, end="")
+            output_lines.append(line)
+    proc.wait()
+
     if proc.returncode != 0:
+        combined_output = "".join(output_lines)
         raise RuntimeError(
             "CiteBench system evaluation failed.\n"
             f"Command: {' '.join(command)}\n"
-            f"STDOUT:\n{proc.stdout}\n"
-            f"STDERR:\n{proc.stderr}"
+            f"Combined output:\n{combined_output}"
         )
+
+    print("CiteBench system evaluation completed.", flush=True)
 
 
 def _module_output_file(output_dir: Path, response_output_file: Path, version: str, module: str, model_name: str) -> Path:
@@ -1184,6 +1204,10 @@ def main() -> int:
             resume=args.resume,
         )
 
+        print(
+            f"Post-generation stage: running CiteEval system scoring for variant '{variant}' on {len(source_rows)} samples...",
+            flush=True,
+        )
         _run_system_eval(
             project_root=project_root,
             system_input=system_input_json,
