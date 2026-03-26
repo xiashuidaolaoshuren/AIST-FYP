@@ -48,7 +48,7 @@ import re
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tqdm.auto import tqdm
 import numpy as np
 from sklearn.metrics import (
@@ -1251,17 +1251,36 @@ class RAGTruthEvaluator:
             and len(claim_decisions) >= self.min_claims_for_lc_escalation
             and low_confidence_ratio >= self.qa_pure_lc_block_ratio
         )
-        detected_hallucination = (
+        contradictory_trigger = (
             contradictory_count >= self.per_task_min_contradictory.get(
                 task_type, self.min_contradictory_count
             )
-            or (
-                low_confidence_ratio >= self.low_confidence_ratio_threshold
-                and low_coverage_ratio >= task_low_coverage_ratio_threshold
-                and len(claim_decisions) >= self.min_claims_for_lc_escalation
-            )
+        )
+        low_confidence_coverage_trigger = (
+            low_confidence_ratio >= self.low_confidence_ratio_threshold
+            and low_coverage_ratio >= task_low_coverage_ratio_threshold
+            and len(claim_decisions) >= self.min_claims_for_lc_escalation
+        )
+        pre_block_detected_hallucination = (
+            contradictory_trigger
+            or low_confidence_coverage_trigger
             or data2txt_lc_escalation
-        ) and not qa_pure_lc_block
+        )
+        detected_hallucination = pre_block_detected_hallucination and not qa_pure_lc_block
+
+        trigger_paths: List[str] = []
+        if contradictory_trigger:
+            trigger_paths.append('contradictory')
+        if low_confidence_coverage_trigger:
+            trigger_paths.append('low_confidence_coverage')
+        if data2txt_lc_escalation:
+            trigger_paths.append('data2txt_low_confidence')
+        if not trigger_paths:
+            trigger_paths.append('none')
+
+        primary_trigger_path = (
+            trigger_paths[0] if trigger_paths else 'none'
+        )
         
         # Detailed per-claim analysis
         claim_results = []
@@ -1310,6 +1329,9 @@ class RAGTruthEvaluator:
             'avg_support_prob_low_conf': avg_support_prob_low_conf,
             'avg_contradict_prob_low_conf': avg_contradict_prob_low_conf,
             'qa_pure_lc_block': qa_pure_lc_block,
+            'detected_pre_qa_block': pre_block_detected_hallucination,
+            'detection_trigger_paths': trigger_paths,
+            'detection_trigger_path': primary_trigger_path,
             'mitigation_enabled': mitigation_runtime_enabled,
             'mitigation_applied': mitigation_applied,
             'mitigation_actions': mitigation_actions,
@@ -1669,6 +1691,15 @@ class RAGTruthEvaluator:
         total_claim_hallucinations = sum(int(r.get('contradictory_count', 0)) for r in results)
         total_low_confidence_claims = sum(int(r.get('low_confidence_count', 0)) for r in results)
 
+        trigger_path_counts = Counter(
+            str(r.get('detection_trigger_path', 'none')) for r in results
+        )
+        false_positive_trigger_path_counts = Counter(
+            str(r.get('detection_trigger_path', 'none'))
+            for r in results
+            if bool(r.get('detected_hallucination', False)) and not bool(r.get('gold_has_hallucination', False))
+        )
+
         per_task: Dict[str, Any] = {}
         task_types = sorted({str(r.get('task_type', 'Unknown')) for r in results})
         for task_type in task_types:
@@ -1696,6 +1727,14 @@ class RAGTruthEvaluator:
             task_detected_low_confidence_claims = sum(
                 int(r.get('low_confidence_count', 0)) for r in task_results
             )
+            task_trigger_path_counts = Counter(
+                str(r.get('detection_trigger_path', 'none')) for r in task_results
+            )
+            task_fp_trigger_path_counts = Counter(
+                str(r.get('detection_trigger_path', 'none'))
+                for r in task_results
+                if bool(r.get('detected_hallucination', False)) and not bool(r.get('gold_has_hallucination', False))
+            )
 
             per_task[task_type] = {
                 'accuracy': float(task_accuracy),
@@ -1722,7 +1761,9 @@ class RAGTruthEvaluator:
                     'avg_claims_per_sample': float(task_total_claims / len(task_results)) if task_results else 0.0,
                     'avg_claim_hallucinations_per_sample': (
                         float(task_detected_claim_hallucinations / len(task_results)) if task_results else 0.0
-                    )
+                    ),
+                    'detection_trigger_path_counts': dict(task_trigger_path_counts),
+                    'false_positive_trigger_path_counts': dict(task_fp_trigger_path_counts)
                 }
             }
 
@@ -1752,14 +1793,20 @@ class RAGTruthEvaluator:
                 'detected_claim_hallucinations': int(total_claim_hallucinations),
                 'detected_low_confidence_claims': int(total_low_confidence_claims),
                 'avg_claims_per_sample': float(total_claims / len(results)) if results else 0.0,
-                'avg_claim_hallucinations_per_sample': float(total_claim_hallucinations / len(results)) if results else 0.0
+                'avg_claim_hallucinations_per_sample': float(total_claim_hallucinations / len(results)) if results else 0.0,
+                'detection_trigger_path_counts': dict(trigger_path_counts),
+                'false_positive_trigger_path_counts': dict(false_positive_trigger_path_counts)
             },
             'definitions': {
                 'sample_hallucination': (
                     'Sample is hallucinated when at least one Contradictory claim exists, '
                     'or when low_confidence_ratio >= threshold and low_coverage_ratio >= threshold.'
                 ),
-                'claim_hallucination': 'Claim is counted as hallucinated when predicted status is Contradictory.'
+                'claim_hallucination': 'Claim is counted as hallucinated when predicted status is Contradictory.',
+                'detection_trigger_path': (
+                    "Primary path that first triggered sample-level detection: "
+                    "'contradictory', 'low_confidence_coverage', 'data2txt_low_confidence', or 'none'."
+                )
             }
         }
         
@@ -1885,5 +1932,16 @@ class RAGTruthEvaluator:
         self.logger.info(f"  False Positives: {cm['false_positives']}")
         self.logger.info(f"  False Negatives: {cm['false_negatives']}")
         self.logger.info(f"  True Positives:  {cm['true_positives']}")
+
+        trigger_counts = stats.get('detection_trigger_path_counts', {})
+        fp_trigger_counts = stats.get('false_positive_trigger_path_counts', {})
+        if trigger_counts:
+            self.logger.info("\n🧭 Detection Trigger Paths (all samples):")
+            for path, count in sorted(trigger_counts.items()):
+                self.logger.info(f"  {path}: {count}")
+        if fp_trigger_counts:
+            self.logger.info("\n🚨 Detection Trigger Paths (false positives):")
+            for path, count in sorted(fp_trigger_counts.items()):
+                self.logger.info(f"  {path}: {count}")
         
         self.logger.info("\n" + "=" * 70)
