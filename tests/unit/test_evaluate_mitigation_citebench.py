@@ -67,5 +67,8 @@ def test_write_summary_contains_delta_columns(tmp_path: Path):
     _write_summary(summary_file, metrics)
     content = summary_file.read_text(encoding="utf-8")
 
-    assert "ΔStatement vs Baseline" in content
-    assert "| mitigation_all | 0.7000 | 0.4500 | 3.20 | 0.2500 | +0.2000 | +0.0500 |" in content
+    assert "ΔStatement vs baseline" in content
+    assert "CE Mean Sentence" in content
+    assert "CA Retrieval Ratio" in content
+    assert "| mitigation_all | 0.7000 | 0.4500 | 3.20 | 0.2500 |" in content
+    assert "+0.2000 | +0.0500 |" in content

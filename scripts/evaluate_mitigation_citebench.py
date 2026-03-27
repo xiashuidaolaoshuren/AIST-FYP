@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from statistics import mean
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -1007,6 +1008,128 @@ def _evaluate_system_summary(
     return _parse_evaluate_system_stdout(proc.stdout)
 
 
+def _read_metric_rows(out_file: Path) -> list[dict[str, Any]]:
+    with out_file.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, list):
+        return []
+    return [row for row in payload if isinstance(row, dict)]
+
+
+def _extract_module_summary(out_file: Path) -> dict[str, Any]:
+    rows = _read_metric_rows(out_file)
+
+    stem_parts = out_file.stem.split(".")
+    module_name = stem_parts[-2] if len(stem_parts) >= 2 else ""
+
+    if module_name == "ca":
+        ca_type_labels = {"1": "Query", "2": "Retrieval", "3": "Response", "4": "Model"}
+        ca_type_counts: dict[str, int] = {}
+        num_classified_sentences = 0
+        for row in rows:
+            sent_id2type = row.get("sent_id2type")
+            if not isinstance(sent_id2type, dict):
+                continue
+            for sent_data in sent_id2type.values():
+                ca_pred = None
+                if isinstance(sent_data, dict):
+                    ca_pred = sent_data.get("ca_pred")
+                elif isinstance(sent_data, str):
+                    ca_pred = sent_data
+                if ca_pred is None:
+                    continue
+                label = ca_type_labels.get(str(ca_pred), str(ca_pred))
+                ca_type_counts[label] = ca_type_counts.get(label, 0) + 1
+                num_classified_sentences += 1
+
+        return {
+            "num_rows": len(rows),
+            "num_classified_sentences": num_classified_sentences,
+            "ca_type_distribution": ca_type_counts,
+        }
+
+    answer_ratings: list[float] = []
+    sentence_ratings: list[float] = []
+    for row in rows:
+        answer_rating = row.get("answer_rating")
+        if isinstance(answer_rating, (int, float)):
+            answer_ratings.append(float(answer_rating))
+
+        sent_map = row.get("sent_id2rating")
+        if isinstance(sent_map, dict):
+            for value in sent_map.values():
+                if isinstance(value, (int, float)):
+                    sentence_ratings.append(float(value))
+
+    result: dict[str, Any] = {
+        "num_rows": len(rows),
+        "num_answer_ratings": len(answer_ratings),
+        "num_sentence_ratings": len(sentence_ratings),
+    }
+    if answer_ratings:
+        result["mean_answer_rating"] = mean(answer_ratings)
+    if sentence_ratings:
+        result["mean_sentence_rating"] = mean(sentence_ratings)
+    if len(rows) > 0:
+        result["sentence_coverage"] = round(len(sentence_ratings) / len(rows), 4)
+    return result
+
+
+def _collect_module_metrics(
+    *,
+    output_dir: Path,
+    response_output_file: Path,
+    version: str,
+    modules: str,
+    model_name: str,
+) -> dict[str, dict[str, Any]]:
+    collected: dict[str, dict[str, Any]] = {}
+    for module in [m.strip() for m in modules.split(",") if m.strip()]:
+        out_path = _module_output_file(output_dir, response_output_file, version, module, model_name)
+        if out_path.exists():
+            collected[module] = {
+                "out_file": str(out_path),
+                "summary": _extract_module_summary(out_path),
+            }
+        else:
+            collected[module] = {
+                "out_file": str(out_path),
+                "summary": None,
+            }
+    return collected
+
+
+def _augment_with_module_summaries(row: dict[str, float], module_metrics: dict[str, dict[str, Any]]) -> None:
+    ca_summary = (module_metrics.get("ca") or {}).get("summary") or {}
+    if isinstance(ca_summary, dict):
+        dist = ca_summary.get("ca_type_distribution", {})
+        if isinstance(dist, dict):
+            retrieval_count = int(dist.get("Retrieval", 0) or 0)
+            classified = int(ca_summary.get("num_classified_sentences", 0) or 0)
+            row["ca_retrieval_ratio"] = (retrieval_count / classified) if classified else 0.0
+
+    ce_summary = (module_metrics.get("ce") or {}).get("summary") or {}
+    if isinstance(ce_summary, dict):
+        ce_sent = ce_summary.get("mean_sentence_rating")
+        ce_cov = ce_summary.get("sentence_coverage")
+        if isinstance(ce_sent, (int, float)):
+            row["ce_mean_sentence_rating"] = float(ce_sent)
+        if isinstance(ce_cov, (int, float)):
+            row["ce_sentence_coverage"] = float(ce_cov)
+
+    cr_iter_summary = (module_metrics.get("cr_itercoe") or {}).get("summary") or {}
+    if isinstance(cr_iter_summary, dict):
+        iter_ans = cr_iter_summary.get("mean_answer_rating")
+        if isinstance(iter_ans, (int, float)):
+            row["cr_itercoe_mean_answer_rating"] = float(iter_ans)
+
+    cr_edit_summary = (module_metrics.get("cr_editdist") or {}).get("summary") or {}
+    if isinstance(cr_edit_summary, dict):
+        edit_ans = cr_edit_summary.get("mean_answer_rating")
+        if isinstance(edit_ans, (int, float)):
+            row["cr_editdist_mean_answer_rating"] = float(edit_ans)
+
+
 def _format_citebench_deltas(
     *,
     baseline: dict[str, float] | None,
@@ -1037,20 +1160,31 @@ def _write_summary(
         f"Context source: `{context_source}`",
         f"Benchmark comparable: `{comparable}`",
         "",
-        f"| Variant | Statement Rating | Response Rating | Length | Density | Filtered Claims | Filter Rate | Avg NLI Entailment | Avg Entropy | Avg Token F1 | Avg Recall | ΔStatement vs {baseline_label} | ΔResponse vs {baseline_label} |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        f"| Variant | Statement Rating | Response Rating | Length | Density | CE Mean Sentence | CE Coverage | CR Iter (Ans) | CR Edit (Ans) | CA Retrieval Ratio | Filtered Claims | Filter Rate | Avg NLI Entailment | Avg Entropy | Avg Token F1 | Avg Recall | ΔStatement vs {baseline_label} | ΔResponse vs {baseline_label} |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, row in metrics.items():
         avg_f1 = row.get("avg_token_f1")
         avg_rec = row.get("avg_recall")
         f1_str = f"{avg_f1:.4f}" if avg_f1 is not None else "N/A"
         rec_str = f"{avg_rec:.4f}" if avg_rec is not None else "N/A"
+        ce_mean = row.get("ce_mean_sentence_rating")
+        ce_cov = row.get("ce_sentence_coverage")
+        cr_iter = row.get("cr_itercoe_mean_answer_rating")
+        cr_edit = row.get("cr_editdist_mean_answer_rating")
+        ca_ret_ratio = row.get("ca_retrieval_ratio")
+        ce_mean_str = f"{ce_mean:.4f}" if isinstance(ce_mean, (int, float)) else "N/A"
+        ce_cov_str = f"{ce_cov:.4f}" if isinstance(ce_cov, (int, float)) else "N/A"
+        cr_iter_str = f"{cr_iter:.4f}" if isinstance(cr_iter, (int, float)) else "N/A"
+        cr_edit_str = f"{cr_edit:.4f}" if isinstance(cr_edit, (int, float)) else "N/A"
+        ca_ret_ratio_str = f"{ca_ret_ratio:.4f}" if isinstance(ca_ret_ratio, (int, float)) else "N/A"
         delta_statement, delta_response = _format_citebench_deltas(
             baseline=baseline,
             row=row,
         )
         lines.append(
             f"| {name} | {row['statement_rating']:.4f} | {row['response_rating']:.4f} | {row['length']:.2f} | {row['density']:.4f} | "
+            f"{ce_mean_str} | {ce_cov_str} | {cr_iter_str} | {cr_edit_str} | {ca_ret_ratio_str} | "
             f"{row.get('filtered_claim_count', 0)} | {row.get('filter_rate', 0.0):.4f} | {row.get('avg_nli_entailment', 0.0):.4f} | {row.get('avg_entropy', 0.0):.4f} | "
             f"{f1_str} | {rec_str} | {delta_statement} | {delta_response} |"
         )
@@ -1179,6 +1313,7 @@ def main() -> int:
     base_config = _load_yaml(base_config_path)
     summary_metrics: dict[str, dict[str, float]] = {}
     generation_stats: dict[str, dict[str, int]] = {}
+    module_metrics_by_variant: dict[str, dict[str, dict[str, Any]]] = {}
 
     citeeval_output_root = project_root / "benchmark" / "CiteEval" / "data" / "system_eval_outputs"
     citeeval_root = project_root / "benchmark" / "CiteEval"
@@ -1245,6 +1380,13 @@ def main() -> int:
             cr_edit_out=cr_edit_out,
             cited_only=args.cited_only,
         )
+        module_metrics_by_variant[variant] = _collect_module_metrics(
+            output_dir=citeeval_output_root,
+            response_output_file=citeeval_input,
+            version=args.version,
+            modules=args.modules,
+            model_name=args.model_name,
+        )
         summary_metrics[variant].update(
             {
                 "filtered_claim_count": generation_stats[variant].get("filtered_claim_count", 0),
@@ -1255,6 +1397,7 @@ def main() -> int:
                 "avg_recall": generation_stats[variant].get("avg_recall"),
             }
         )
+        _augment_with_module_summaries(summary_metrics[variant], module_metrics_by_variant[variant])
 
     if args.generation_only:
         print("\nGeneration-only run completed.")
@@ -1287,6 +1430,7 @@ def main() -> int:
             "baseline_variant": baseline_variant,
         },
         "metrics": summary_metrics,
+        "module_metrics": module_metrics_by_variant,
         "generation_stats": generation_stats,
     }
 

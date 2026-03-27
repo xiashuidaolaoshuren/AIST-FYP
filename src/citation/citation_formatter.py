@@ -123,6 +123,13 @@ class CitationFormatter:
                 )
                 continue
             
+            # Rank evidence per-claim to keep the strongest support first.
+            evidence_chunks = sorted(
+                evidence_chunks,
+                key=lambda chunk: getattr(chunk, "score_dense", 0.0),
+                reverse=True,
+            )
+
             # Limit to max citations per claim
             evidence_chunks = evidence_chunks[:self.max_citations_per_claim]
             
@@ -142,6 +149,9 @@ class CitationFormatter:
                     f"No valid citations for claim {claim.claim_id}, skipping"
                 )
                 continue
+
+            # Deduplicate while preserving order so we do not emit repeated [i][i].
+            citation_indices = list(dict.fromkeys(citation_indices))
             
             # Format citation string: [1][2][3] (no spaces)
             citation_str = ''.join(f'[{idx}]' for idx in citation_indices)

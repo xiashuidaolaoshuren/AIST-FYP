@@ -372,10 +372,12 @@ class GeneratorWrapper:
         or gracefully degrades to raw concatenation for non-chat models.
         """
         system_instruction = (
-            "You are a factual assistant. If context is provided, use the provided passages to "
-            "answer the question. Answer directly and concisely in plain prose. "
-            "Do not include meta commentary, self-evaluation, note sections, or statements "
-            "about passage selection. Respond in English only."
+            "You are a factual assistant. If context is provided, answer using only supported facts "
+            "from the provided passages. Write short, atomic sentences with one factual claim per sentence. "
+            "Prefer concrete wording from the passages for entities, numbers, dates, and named facts. "
+            "Do not guess or add unsupported details; if support is insufficient, omit the claim. "
+            "Answer directly and concisely in plain prose. Do not include meta commentary, self-evaluation, "
+            "note sections, or statements about passage selection. Respond in English only."
         )
 
         user_content = ""
