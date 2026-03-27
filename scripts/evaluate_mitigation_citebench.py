@@ -1136,6 +1136,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also run CiteEval metric track in addition to system track (uses --track both).",
     )
+    parser.add_argument(
+        "--generation-only",
+        action="store_true",
+        help="Only generate system-input JSON files and skip CiteEval scoring/summaries.",
+    )
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--resume", action="store_true", help="Resume incomplete variant outputs in-place")
     return parser
@@ -1204,6 +1209,13 @@ def main() -> int:
             resume=args.resume,
         )
 
+        if args.generation_only:
+            print(
+                f"Generation-only mode: skipping CiteEval scoring for variant '{variant}'.",
+                flush=True,
+            )
+            continue
+
         print(
             f"Post-generation stage: running CiteEval system scoring for variant '{variant}' on {len(source_rows)} samples...",
             flush=True,
@@ -1243,6 +1255,11 @@ def main() -> int:
                 "avg_recall": generation_stats[variant].get("avg_recall"),
             }
         )
+
+    if args.generation_only:
+        print("\nGeneration-only run completed.")
+        print(f"Generated system inputs directory: {system_input_dir}")
+        return 0
 
     baseline_variant = None
     if "full_verifier" in summary_metrics:
