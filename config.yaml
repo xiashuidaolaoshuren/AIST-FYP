@@ -541,6 +541,8 @@ evaluation:
       low_coverage_ratio_threshold: 0.28  # require stronger weak-evidence corroboration when escalating from Low Confidence
       min_claims_for_lc_escalation: 3  # keep protection for 1-2 claim responses while recovering 3-claim QA misses
       data2txt_min_lc_count: 6  # Data2txt-specific fallback: escalate only when many claims are Low Confidence and contradiction evidence is absent
+      data2txt_contradictory_override_enabled: false  # optional safety gate for Data2txt contradictory trigger
+      data2txt_min_contradict_prob_for_contradictory: 0.5  # when override is enabled, require max contradict_prob among contradictory claims to exceed this threshold
       qa_pure_lc_block_ratio: 0.95  # QA guard: suppress all-LC/no-contradiction samples (e.g., lc_ratio=1.0) that over-trigger false alarms
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.

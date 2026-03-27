@@ -97,12 +97,7 @@ NON_FACTUAL_SUMMARY_PATTERN = re.compile(
 
 NON_FACTUAL_DATA2TXT_PATTERN = re.compile(
     r"\b(argues?|believes?|contends?|claims?|says?|states?)\s+that\b|"
-    r"\b(should|must|ought to|needs? to|deserves?)\b|"
-    r"\b(according to reviews?|customers?\s+(?:praise|complain|note|rave|"
-    r"appreciate|feel|report|mention)|hidden gem|must-visit|great place|"
-    r"worth it|overpriced|underpriced|top-notch|friendly service|"
-    r"excellent service|cozy atmosphere|nice ambiance|pleasant dining experience|"
-    r"popular spot)\b",
+    r"\b(should|must|ought to|needs? to|deserves?)\b",
     re.IGNORECASE,
 )
 
@@ -247,6 +242,20 @@ class RAGTruthEvaluator:
                     self.data2txt_min_lc_count = int(raw_data2txt_lc_count)
                 except (TypeError, ValueError):
                     self.data2txt_min_lc_count = 6
+                self.data2txt_contradictory_override_enabled = bool(
+                    getattr(benchmark_config, 'data2txt_contradictory_override_enabled', False)
+                )
+                raw_data2txt_contradict_prob = getattr(
+                    benchmark_config,
+                    'data2txt_min_contradict_prob_for_contradictory',
+                    0.0,
+                )
+                try:
+                    self.data2txt_min_contradict_prob_for_contradictory = float(
+                        raw_data2txt_contradict_prob
+                    )
+                except (TypeError, ValueError):
+                    self.data2txt_min_contradict_prob_for_contradictory = 0.0
                 raw_qa_pure_lc_block_ratio = getattr(
                     benchmark_config,
                     'qa_pure_lc_block_ratio',
@@ -265,6 +274,8 @@ class RAGTruthEvaluator:
                 self.per_task_low_coverage_ratio_threshold = {}
                 self.min_claims_for_lc_escalation = 4
                 self.data2txt_min_lc_count = 6
+                self.data2txt_contradictory_override_enabled = False
+                self.data2txt_min_contradict_prob_for_contradictory = 0.0
                 self.qa_pure_lc_block_ratio = 0.95
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
@@ -275,6 +286,8 @@ class RAGTruthEvaluator:
             self.per_task_low_coverage_ratio_threshold = {}
             self.min_claims_for_lc_escalation = 4
             self.data2txt_min_lc_count = 6
+            self.data2txt_contradictory_override_enabled = False
+            self.data2txt_min_contradict_prob_for_contradictory = 0.0
             self.qa_pure_lc_block_ratio = 0.95
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
@@ -328,6 +341,9 @@ class RAGTruthEvaluator:
         }
         self.min_claims_for_lc_escalation = max(1, int(self.min_claims_for_lc_escalation))
         self.data2txt_min_lc_count = max(1, int(self.data2txt_min_lc_count))
+        self.data2txt_min_contradict_prob_for_contradictory = float(
+            np.clip(self.data2txt_min_contradict_prob_for_contradictory, 0.0, 1.0)
+        )
         self.qa_pure_lc_block_ratio = float(
             np.clip(self.qa_pure_lc_block_ratio, 0.0, 1.0)
         )
@@ -340,7 +356,7 @@ class RAGTruthEvaluator:
             )
             
         self.logger.info(
-            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f, min_claims_for_lc_escalation=%d, data2txt_min_lc_count=%d, qa_pure_lc_block_ratio=%.2f)",
+            "Initialized RAGTruthEvaluator with benchmark: %s (ragtruth_eval_mode=%s, teacher_forced_intrinsic=%s, low_confidence_ratio_threshold=%.2f, low_coverage_ratio_threshold=%.2f, min_claims_for_lc_escalation=%d, data2txt_min_lc_count=%d, data2txt_contradictory_override_enabled=%s, data2txt_min_contradict_prob_for_contradictory=%.2f, qa_pure_lc_block_ratio=%.2f)",
             self.benchmark_dir,
             self.ragtruth_eval_mode,
             self.teacher_forced_intrinsic,
@@ -348,6 +364,8 @@ class RAGTruthEvaluator:
             self.low_coverage_ratio_threshold,
             self.min_claims_for_lc_escalation,
             self.data2txt_min_lc_count,
+            self.data2txt_contradictory_override_enabled,
+            self.data2txt_min_contradict_prob_for_contradictory,
             self.qa_pure_lc_block_ratio,
         )
         self.logger.info(
@@ -935,7 +953,7 @@ class RAGTruthEvaluator:
         """Normalize QA answers by removing passage labels and list numbering noise."""
         normalized_lines = []
         for raw_line in (text or '').splitlines():
-            line = re.sub(r'^\s*\d+[\.)]\s*', '', raw_line)
+            line = re.sub(r'^\s*\d+(?:[\.)]\s*|\s+)', '', raw_line)
             line = QA_PASSAGE_TAG_PATTERN.sub('', line)
             line = QA_PASSAGE_TOKEN_PATTERN.sub('', line)
             line = re.sub(r'\s{2,}', ' ', line).strip()
@@ -974,6 +992,7 @@ class RAGTruthEvaluator:
         generated_response = None
         context_source = 'rag_db'
         evaluation_track = 'mitigation'
+        pre_verification_filtered_claim_count = 0
 
         if self.ragtruth_eval_mode == 'ragtruth_eval':
             context_source = 'gold_context'
@@ -998,6 +1017,7 @@ class RAGTruthEvaluator:
                     and not self._is_qa_meta_reference_claim(claim.text)
                 ]
                 filtered_count = original_count - len(claims)
+                pre_verification_filtered_claim_count += filtered_count
                 if filtered_count > 0:
                     self.logger.debug(
                         "Filtered %d QA epistemic/meta claim(s) for sample %s",
@@ -1011,6 +1031,7 @@ class RAGTruthEvaluator:
                     if not self._is_non_factual_claim(claim.text, task_type)
                 ]
                 filtered_count = original_count - len(claims)
+                pre_verification_filtered_claim_count += filtered_count
                 if filtered_count > 0:
                     self.logger.debug(
                         "Filtered %d non-factual %s claim(s) for sample %s",
@@ -1165,6 +1186,7 @@ class RAGTruthEvaluator:
             'hallucination_gold_labels': hallucination_gold_labels,
             'context_source': context_source,
             'evaluation_track': evaluation_track,
+            'pre_verification_filtered_claim_count': pre_verification_filtered_claim_count,
             'resolved_pairs': resolved_pairs,
         }
 
@@ -1189,6 +1211,9 @@ class RAGTruthEvaluator:
         mitigation_actions = []
         filtered_response = generated_response
         removed_count = 0
+        pre_verification_filtered_claim_count = int(
+            prepared.get('pre_verification_filtered_claim_count', 0)
+        )
         mitigation_runtime_enabled = bool(
             self.mitigation_orchestrator and self.mitigation_orchestrator.enabled
         )
@@ -1218,6 +1243,15 @@ class RAGTruthEvaluator:
             d for d in claim_decisions
             if d.status == 'Contradictory'
         ])
+        contradictory_decisions = [
+            d for d in claim_decisions
+            if d.status == 'Contradictory'
+        ]
+        contradict_probs = [
+            float(d.confidence.get('contradict_prob', 0.0))
+            for d in contradictory_decisions
+        ]
+        max_contradict_prob = max(contradict_probs) if contradict_probs else 0.0
         low_confidence_count = len([
             d for d in claim_decisions
             if d.status == 'Low Confidence'
@@ -1287,6 +1321,15 @@ class RAGTruthEvaluator:
                 task_type, self.min_contradictory_count
             )
         )
+        data2txt_contradictory_override_block = False
+        if (
+            task_type == 'Data2txt'
+            and self.data2txt_contradictory_override_enabled
+            and contradictory_trigger
+            and max_contradict_prob < self.data2txt_min_contradict_prob_for_contradictory
+        ):
+            data2txt_contradictory_override_block = True
+            contradictory_trigger = False
         low_confidence_coverage_trigger = (
             low_confidence_ratio >= self.low_confidence_ratio_threshold
             and low_coverage_ratio >= task_low_coverage_ratio_threshold
@@ -1359,7 +1402,9 @@ class RAGTruthEvaluator:
             'avg_coverage_score_low_conf': avg_coverage_score_low_conf,
             'avg_support_prob_low_conf': avg_support_prob_low_conf,
             'avg_contradict_prob_low_conf': avg_contradict_prob_low_conf,
+            'max_contradict_prob': max_contradict_prob,
             'qa_pure_lc_block': qa_pure_lc_block,
+            'data2txt_contradictory_override_block': data2txt_contradictory_override_block,
             'detected_pre_qa_block': pre_block_detected_hallucination,
             'detection_trigger_paths': trigger_paths,
             'detection_trigger_path': primary_trigger_path,
@@ -1367,6 +1412,7 @@ class RAGTruthEvaluator:
             'mitigation_applied': mitigation_applied,
             'mitigation_actions': mitigation_actions,
             'filtered_claim_count': removed_count,
+            'pre_verification_filtered_claim_count': pre_verification_filtered_claim_count,
             'claim_results': claim_results
         }
 
