@@ -74,6 +74,17 @@ QA_EPISTEMIC_HEDGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+QA_META_REFERENCE_PATTERN = re.compile(
+    r"\b(?:according to|based on)\s+(?:the\s+)?(?:provided|given\s+)?passages?\b|"
+    r"\b(?:this|that|it)\s+is\s+mentioned\s+in\s+passage\s*\d+\b|"
+    r"\bpassage\s*\d+\s+(?:mentions?|states?|says?|discusses?|explains?)\b|"
+    r"\b(?:the\s+)?provided\s+passages?\s+(?:do|does)\s+not\s+(?:mention|provide|contain)\b",
+    re.IGNORECASE,
+)
+
+QA_PASSAGE_TAG_PATTERN = re.compile(r"\(\s*passage\s*\d+\s*\)", re.IGNORECASE)
+QA_PASSAGE_TOKEN_PATTERN = re.compile(r"\bpassage\s*\d+\b", re.IGNORECASE)
+
 NON_FACTUAL_SUMMARY_PATTERN = re.compile(
     r"\b(argues?|believes?|contends?|claims?|says?|states?)\s+that\b|"
     r"\b(outdated|disqualifying|extreme|problematic|dangerous|wrong|right|"
@@ -86,7 +97,12 @@ NON_FACTUAL_SUMMARY_PATTERN = re.compile(
 
 NON_FACTUAL_DATA2TXT_PATTERN = re.compile(
     r"\b(argues?|believes?|contends?|claims?|says?|states?)\s+that\b|"
-    r"\b(should|must|ought to|needs? to|deserves?)\b",
+    r"\b(should|must|ought to|needs? to|deserves?)\b|"
+    r"\b(according to reviews?|customers?\s+(?:praise|complain|note|rave|"
+    r"appreciate|feel|report|mention)|hidden gem|must-visit|great place|"
+    r"worth it|overpriced|underpriced|top-notch|friendly service|"
+    r"excellent service|cozy atmosphere|nice ambiance|pleasant dining experience|"
+    r"popular spot)\b",
     re.IGNORECASE,
 )
 
@@ -910,6 +926,23 @@ class RAGTruthEvaluator:
         return bool(QA_EPISTEMIC_HEDGE_PATTERN.search((claim_text or '').strip()))
 
     @staticmethod
+    def _is_qa_meta_reference_claim(claim_text: str) -> bool:
+        """Return True for QA claims that only reference passage provenance."""
+        return bool(QA_META_REFERENCE_PATTERN.search((claim_text or '').strip()))
+
+    @staticmethod
+    def _normalize_qa_response_for_claim_extraction(text: str) -> str:
+        """Normalize QA answers by removing passage labels and list numbering noise."""
+        normalized_lines = []
+        for raw_line in (text or '').splitlines():
+            line = re.sub(r'^\s*\d+[\.)]\s*', '', raw_line)
+            line = QA_PASSAGE_TAG_PATTERN.sub('', line)
+            line = QA_PASSAGE_TOKEN_PATTERN.sub('', line)
+            line = re.sub(r'\s{2,}', ' ', line).strip()
+            normalized_lines.append(line)
+        return '\n'.join(normalized_lines).strip()
+
+    @staticmethod
     def _is_non_factual_claim(claim_text: str, task_type: str) -> bool:
         """Return True when a claim is opinion/evaluative instead of factual."""
         task_type_normalized = (task_type or '').strip().lower()
@@ -947,12 +980,9 @@ class RAGTruthEvaluator:
             evaluation_track = 'verifier'
             generated_response = sample.get('gold_response', '')
             if task_type == 'QA':
-                # Strip leading ordinal step numbers (e.g. "1. ", "2) ") from each line
-                # so DeBERTa doesn't read the numbering as contradictory to evidence.
-                generated_response = '\n'.join(
-                    re.sub(r'^\s*\d+[\.\)]\s*', '', line)
-                    for line in generated_response.splitlines()
-                ).strip()
+                generated_response = self._normalize_qa_response_for_claim_extraction(
+                    generated_response
+                )
             evidence_chunks = self._build_evidence_from_contexts(sample.get('contexts', []))
             claims = extract_claims(
                 text=generated_response,
@@ -965,6 +995,7 @@ class RAGTruthEvaluator:
                 claims = [
                     claim for claim in claims
                     if not self._is_qa_epistemic_claim(claim.text)
+                    and not self._is_qa_meta_reference_claim(claim.text)
                 ]
                 filtered_count = original_count - len(claims)
                 if filtered_count > 0:
