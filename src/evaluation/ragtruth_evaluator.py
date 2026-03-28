@@ -78,12 +78,34 @@ QA_META_REFERENCE_PATTERN = re.compile(
     r"\b(?:according to|based on)\s+(?:the\s+)?(?:provided|given\s+)?passages?\b|"
     r"\b(?:this|that|it)\s+is\s+mentioned\s+in\s+passage\s*\d+\b|"
     r"\bpassage\s*\d+\s+(?:mentions?|states?|says?|discusses?|explains?)\b|"
-    r"\b(?:the\s+)?provided\s+passages?\s+(?:do|does)\s+not\s+(?:mention|provide|contain)\b",
+    r"\b(?:the\s+)?provided\s+passages?\s+(?:do|does)\s+not\s+(?:mention|provide|contain)\b|"
+    # Catch claims that reference the source passage itself (e.g. '12105 C4: This passage suggests...')
+    r"\b(?:this|the)\s+passage\s+(?:suggests?|says?|states?|indicates?|mentions?|addresses?|discusses?|provides?|does\s+not)\b|"
+    # Catch claims that locate the answer 'in the provided passages' (e.g. '12105 C5: no solution in the provided passages')
+    r"\bin\s+(?:the\s+)?provided\s+passages?\b",
     re.IGNORECASE,
 )
 
 QA_PASSAGE_TAG_PATTERN = re.compile(r"\(\s*passage\s*\d+\s*\)", re.IGNORECASE)
 QA_PASSAGE_TOKEN_PATTERN = re.compile(r"\bpassage\s*\d+\b", re.IGNORECASE)
+
+# Conditional continuation steps: 'If this doesn't work / If it won't lock / If that fails'.
+# NLI systematically fires 'Contradictory' on these because the condition implies failure
+# while the retrieved context shows the correct working state. They are valid how-to steps,
+# not factual hallucinations. Applied only to QA claims.
+QA_CONDITIONAL_STEP_PATTERN = re.compile(
+    r"^If\s+(?:this|it|that)\s+(?:doesn.t|won.t|can.t|does\s+not|will\s+not|cannot)\b",
+    re.IGNORECASE,
+)
+
+# Aggregate star-rating claims in Data2txt (e.g. 'overall rating of 3.5 stars').
+# DeBERTa NLI systematically misfires on these because the evidence is individual review
+# text, not the aggregate rating field. The numeric mismatch between a single review's
+# star rating and the aggregate produces spurious Contradictory signals.
+DATA2TXT_AGGREGATE_RATING_PATTERN = re.compile(
+    r"\b(?:overall|average|aggregate)\s+rating\s+of\s+[\d.]+\s+stars?\b",
+    re.IGNORECASE,
+)
 
 NON_FACTUAL_SUMMARY_PATTERN = re.compile(
     r"\b(argues?|believes?|contends?|claims?|says?|states?)\s+that\b|"
@@ -949,6 +971,11 @@ class RAGTruthEvaluator:
         return bool(QA_META_REFERENCE_PATTERN.search((claim_text or '').strip()))
 
     @staticmethod
+    def _is_qa_conditional_step_claim(claim_text: str) -> bool:
+        """Return True for conditional how-to continuation steps ('If this doesn\'t work...')."""
+        return bool(QA_CONDITIONAL_STEP_PATTERN.search((claim_text or '').strip()))
+
+    @staticmethod
     def _normalize_qa_response_for_claim_extraction(text: str) -> str:
         """Normalize QA answers by removing passage labels and list numbering noise."""
         normalized_lines = []
@@ -972,7 +999,10 @@ class RAGTruthEvaluator:
             return False
 
         if task_type_normalized == 'data2txt':
-            return bool(NON_FACTUAL_DATA2TXT_PATTERN.search(text))
+            return (
+                bool(NON_FACTUAL_DATA2TXT_PATTERN.search(text))
+                or bool(DATA2TXT_AGGREGATE_RATING_PATTERN.search(text))
+            )
 
         return bool(NON_FACTUAL_SUMMARY_PATTERN.search(text))
 
@@ -1015,12 +1045,15 @@ class RAGTruthEvaluator:
                     claim for claim in claims
                     if not self._is_qa_epistemic_claim(claim.text)
                     and not self._is_qa_meta_reference_claim(claim.text)
+                    and not self._is_qa_conditional_step_claim(claim.text)
+                    # Filter trivially empty claims (bare bullet/number artefacts)
+                    and sum(c.isalnum() for c in claim.text) >= 3
                 ]
                 filtered_count = original_count - len(claims)
                 pre_verification_filtered_claim_count += filtered_count
                 if filtered_count > 0:
                     self.logger.debug(
-                        "Filtered %d QA epistemic/meta claim(s) for sample %s",
+                        "Filtered %d QA epistemic/meta/trivial claim(s) for sample %s",
                         filtered_count,
                         sample_id,
                     )
