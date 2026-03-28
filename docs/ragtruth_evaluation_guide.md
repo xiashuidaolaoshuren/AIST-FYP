@@ -108,15 +108,15 @@ verification:
     self_agreement: true
 ```
 
-### Independent Module Evaluation (Verifier + Mitigation + Full Pipeline)
+### Independent Module Evaluation (Verifier Signals)
 
 Run all key variants in one command:
 
 ```bash
-python scripts/evaluate_mitigation_strategy.py \
+python scripts/evaluate_verifier_signals.py \
   --split test \
   --strategy validation \
-  --variants baseline full_pipeline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only
+  --variants baseline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only
 ```
 
 ## Baseline Training & Serving
@@ -163,10 +163,10 @@ For environments without Docker or high-VRAM local GPUs, use the specialized not
 Quick smoke test:
 
 ```bash
-python scripts/evaluate_mitigation_strategy.py --max-samples 20
+python scripts/evaluate_verifier_signals.py --max-samples 20
 ```
 
-Artifacts are saved under `outputs/mitigation_eval/<timestamp>/`:
+Artifacts are saved under `outputs/verifier_eval/<timestamp>/`:
 - `summary.json`: machine-readable aggregate metrics by variant
 - `summary.md`: human-readable comparison table with deltas vs baseline
 

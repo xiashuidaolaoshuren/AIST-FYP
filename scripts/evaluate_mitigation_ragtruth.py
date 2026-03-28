@@ -1,20 +1,19 @@
-"""
-Run module-level evaluation variants on RAGTruth.
+"""Run mitigation evaluation variants on RAGTruth using HRR/FRR metrics.
 
-This script automates a fair comparison by:
-1. Creating temporary config variants (verifier-only, mitigation-only, full pipeline)
+This script automates mitigation-centric comparison by:
+1. Creating temporary mitigation variants (verifier-only baseline + mitigation ablations)
 2. Running `scripts/demo_ragtruth_eval.py` with identical dataset settings
-3. Saving per-variant metrics and a delta summary report
+3. Summarizing HRR/FRR as primary outcomes plus F1/Recall/Precision references
 
 Usage examples:
-    # Quick paired check (full verifier vs full pipeline) in gold-context generation mode
-    python scripts/evaluate_mitigation_strategy.py --max-samples 30
+    # Quick check
+    python scripts/evaluate_mitigation_ragtruth.py --max-samples 30
 
-    # Full independent module matrix
-    python scripts/evaluate_mitigation_strategy.py --variants full_verifier full_pipeline verifier_intrinsic_only verifier_grounded_only verifier_nli_only verifier_self_agreement_only mitigation_filter_only mitigation_rerank_only mitigation_reprompt_only
+    # Full mitigation matrix
+    python scripts/evaluate_mitigation_ragtruth.py --variants verifier_only filter_only rerank_only reprompt_only mitigation_all
 
     # Save into custom output directory
-    python scripts/evaluate_mitigation_strategy.py --output-dir outputs/mitigation_eval/run_01
+    python scripts/evaluate_mitigation_ragtruth.py --output-dir outputs/mitigation_hrr_eval/run_01
 """
 
 from __future__ import annotations
@@ -72,69 +71,13 @@ def _variant_patch(name: str) -> dict[str, Any]:
         }
     }
 
-    if name in {"baseline", "full_verifier"}:
+    if name in {"baseline", "verifier_only", "full_verifier"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
 
     if name in {"full_pipeline", "mitigation_all"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_enabled))
 
-    if name == "verifier_intrinsic_only":
-        return {
-            "verification": {
-                "enabled": True,
-                "modules": {
-                    "intrinsic": True,
-                    "grounded": False,
-                    "nli": False,
-                    "self_agreement": False,
-                },
-            },
-            **deepcopy(all_mitigation_disabled),
-        }
-
-    if name == "verifier_grounded_only":
-        return {
-            "verification": {
-                "enabled": True,
-                "modules": {
-                    "intrinsic": False,
-                    "grounded": True,
-                    "nli": False,
-                    "self_agreement": False,
-                },
-            },
-            **deepcopy(all_mitigation_disabled),
-        }
-
-    if name == "verifier_nli_only":
-        return {
-            "verification": {
-                "enabled": True,
-                "modules": {
-                    "intrinsic": False,
-                    "grounded": False,
-                    "nli": True,
-                    "self_agreement": False,
-                },
-            },
-            **deepcopy(all_mitigation_disabled),
-        }
-
-    if name == "verifier_self_agreement_only":
-        return {
-            "verification": {
-                "enabled": True,
-                "modules": {
-                    "intrinsic": False,
-                    "grounded": False,
-                    "nli": False,
-                    "self_agreement": True,
-                },
-            },
-            **deepcopy(all_mitigation_disabled),
-        }
-
-    if name == "mitigation_filter_only":
+    if name in {"mitigation_filter_only", "filter_only"}:
         return {
             **deepcopy(all_verifiers_enabled),
             "mitigation": {
@@ -164,17 +107,6 @@ def _variant_patch(name: str) -> dict[str, Any]:
                 "reranker": {"enabled": False},
                 "filter": {"enabled": False},
                 "reprompt": {"enabled": True},
-            }
-        }
-
-    if name in {"mitigation_filter_only", "filter_only"}:
-        return {
-            **deepcopy(all_verifiers_enabled),
-            "mitigation": {
-                "enabled": True,
-                "reranker": {"enabled": False},
-                "filter": {"enabled": True},
-                "reprompt": {"enabled": False},
             }
         }
 
@@ -268,6 +200,7 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
     overall = metrics.get("overall", {})
     confusion = metrics.get("confusion_matrix", {})
     statistics = metrics.get("statistics", {})
+    hrr_metrics = statistics.get("hrr_metrics", {})
 
     return {
         "accuracy": float(overall.get("accuracy", 0.0)),
@@ -283,6 +216,13 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "claim_hallucinations": int(statistics.get("detected_claim_hallucinations", 0)),
         "total_claims": int(statistics.get("total_claims", 0)),
         "avg_claim_hallucinations_per_sample": float(statistics.get("avg_claim_hallucinations_per_sample", 0.0)),
+        "filter_active": bool(hrr_metrics.get("filter_active", False)),
+        "total_gold_claims": int(hrr_metrics.get("total_gold_claims", 0)),
+        "gold_claims_removed": int(hrr_metrics.get("gold_claims_removed", 0)),
+        "hrr": float(hrr_metrics.get("hrr", 0.0)),
+        "total_non_gold_claims": int(hrr_metrics.get("total_non_gold_claims", 0)),
+        "non_gold_claims_removed": int(hrr_metrics.get("non_gold_claims_removed", 0)),
+        "frr": float(hrr_metrics.get("frr", 0.0)),
     }
 
 
@@ -392,10 +332,14 @@ def _format_hallucination_deltas(
     if baseline is None:
         return ("N/A", "N/A", "N/A", "N/A")
 
-    sample_drop_abs = _drop_abs(baseline['sample_hallucinations'], metric['sample_hallucinations'])
-    claim_drop_abs = _drop_abs(baseline['claim_hallucinations'], metric['claim_hallucinations'])
-    sample_drop_pct = _drop_pct(baseline['sample_hallucinations'], metric['sample_hallucinations'])
-    claim_drop_pct = _drop_pct(baseline['claim_hallucinations'], metric['claim_hallucinations'])
+    sample_drop_abs = baseline['sample_hallucinations'] - metric['sample_hallucinations']
+    claim_drop_abs = baseline['claim_hallucinations'] - metric['claim_hallucinations']
+    sample_drop_pct = None
+    claim_drop_pct = None
+    if baseline['sample_hallucinations'] > 0:
+        sample_drop_pct = (sample_drop_abs / baseline['sample_hallucinations']) * 100.0
+    if baseline['claim_hallucinations'] > 0:
+        claim_drop_pct = (claim_drop_abs / baseline['claim_hallucinations']) * 100.0
     return (
         f"{sample_drop_abs:+d}",
         "N/A" if sample_drop_pct is None else f"{sample_drop_pct:+.2f}%",
@@ -415,13 +359,36 @@ def _write_summary(
     baseline_label = baseline_name if has_baseline else "N/A"
 
     lines = [
-        "# Module Evaluation Summary (RAGTruth)",
+        "# Mitigation Evaluation Summary (RAGTruth)",
         "",
-        "## Overall Metrics",
+        "## HRR / FRR (Primary Metrics)",
+        "",
+        f"| Variant | Filter Active | HRR (%) | FRR (%) | Gold Claims Removed | Non-Gold Claims Removed | Total Gold Claims | Total Non-Gold Claims | ΔHRR vs {baseline_label} | ΔFRR vs {baseline_label} |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+
+    for name, metric in variant_metrics.items():
+        if baseline is None:
+            hrr_delta = "N/A"
+            frr_delta = "N/A"
+        else:
+            hrr_delta = f"{((metric['hrr'] - baseline['hrr']) * 100.0):+.2f}%"
+            frr_delta = f"{((metric['frr'] - baseline['frr']) * 100.0):+.2f}%"
+
+        lines.append(
+            "| "
+            f"{name} | {str(metric['filter_active']).lower()} | {metric['hrr'] * 100.0:.2f}% | {metric['frr'] * 100.0:.2f}% | "
+            f"{metric['gold_claims_removed']} | {metric['non_gold_claims_removed']} | {metric['total_gold_claims']} | "
+            f"{metric['total_non_gold_claims']} | {hrr_delta} | {frr_delta} |"
+        )
+
+    lines.extend([
+        "",
+        "## Reference Detection Metrics",
         "",
         f"| Variant | Samples | Accuracy | Precision | Recall | F1 | ΔF1 vs {baseline_label} | ΔRecall vs {baseline_label} | ΔPrecision vs {baseline_label} |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
+    ])
 
     for name, metric in variant_metrics.items():
         f1_delta, recall_delta, precision_delta = _format_overall_deltas(
@@ -436,7 +403,7 @@ def _write_summary(
 
     lines.extend([
         "",
-        f"## Hallucination Reduction vs {baseline_label}",
+        f"## Hallucination Reduction (Reference) vs {baseline_label}",
         "",
         "| Variant | Hallucinated Samples | Sample Drop (Abs) | Sample Drop (%) | Hallucinated Claims | Claim Drop (Abs) | Claim Drop (%) | Avg Claim Hallucinations / Sample |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -478,7 +445,7 @@ def _write_summary(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run verifier/mitigation/full-pipeline RAGTruth evaluation variants and summarize deltas."
+        description="Run mitigation-focused RAGTruth evaluation variants and summarize HRR/FRR deltas."
     )
     parser.add_argument("--config", type=str, default="config.yaml", help="Base config file path")
     parser.add_argument("--split", type=str, default="test", choices=["train", "test"])
@@ -512,25 +479,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--variants",
         nargs="+",
         default=[
-            "full_verifier",
-            "full_pipeline",
-            "verifier_intrinsic_only",
-            "verifier_grounded_only",
-            "verifier_nli_only",
-            "verifier_self_agreement_only",
-            "mitigation_filter_only",
-            "mitigation_rerank_only",
-            "mitigation_reprompt_only",
+            "verifier_only",
+            "filter_only",
+            "rerank_only",
+            "reprompt_only",
+            "mitigation_all",
         ],
         choices=[
             "baseline",
+            "verifier_only",
             "full_verifier",
             "full_pipeline",
             "mitigation_all",
-            "verifier_intrinsic_only",
-            "verifier_grounded_only",
-            "verifier_nli_only",
-            "verifier_self_agreement_only",
             "mitigation_filter_only",
             "mitigation_rerank_only",
             "mitigation_reprompt_only",
@@ -544,7 +504,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=str,
         default=None,
-        help="Output directory (default: outputs/mitigation_eval/<timestamp>)"
+        help="Output directory (default: outputs/mitigation_hrr_eval/<timestamp>)"
     )
     parser.add_argument(
         "--resume",
@@ -566,7 +526,7 @@ def main() -> int:
         raise FileNotFoundError(f"Base config not found: {base_config_path}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(args.output_dir) if args.output_dir else (project_root / "outputs" / "mitigation_eval" / timestamp)
+    output_dir = Path(args.output_dir) if args.output_dir else (project_root / "outputs" / "mitigation_hrr_eval" / timestamp)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config_dir = output_dir / "configs"
@@ -633,7 +593,9 @@ def main() -> int:
         variant_bar.set_postfix_str(f"{variant} ✓")
 
     baseline_variant = None
-    if "full_verifier" in variant_metrics:
+    if "verifier_only" in variant_metrics:
+        baseline_variant = "verifier_only"
+    elif "full_verifier" in variant_metrics:
         baseline_variant = "full_verifier"
     elif "baseline" in variant_metrics:
         baseline_variant = "baseline"
@@ -649,6 +611,9 @@ def main() -> int:
             "strategy": args.strategy,
             "ragtruth_eval_mode": args.ragtruth_eval_mode,
             "variants": args.variants,
+            "primary_metrics": ["hrr", "frr"],
+            "hrr_definition": "gold_claims_removed / total_gold_claims",
+            "frr_definition": "non_gold_claims_removed / total_non_gold_claims",
             "hallucination_drop_definition": {
                 "sample": "baseline_detected_hallucinated_samples - variant_detected_hallucinated_samples",
                 "claim": "baseline_detected_contradictory_claims - variant_detected_contradictory_claims",
@@ -667,6 +632,8 @@ def main() -> int:
                 "f1_delta": _delta(baseline_metrics["f1"], metric["f1"]),
                 "recall_delta": _delta(baseline_metrics["recall"], metric["recall"]),
                 "precision_delta": _delta(baseline_metrics["precision"], metric["precision"]),
+                "hrr_delta": metric["hrr"] - baseline_metrics["hrr"],
+                "frr_delta": metric["frr"] - baseline_metrics["frr"],
                 "sample_hallucination_drop_abs": _drop_abs(
                     baseline_metrics["sample_hallucinations"], metric["sample_hallucinations"]
                 ),
@@ -687,11 +654,11 @@ def main() -> int:
     summary_md = output_dir / "summary.md"
     _write_summary(
         summary_md,
-        baseline_name=baseline_variant or "full_verifier",
+        baseline_name=baseline_variant or "verifier_only",
         variant_metrics=variant_metrics,
     )
 
-    print("\nMitigation evaluation completed.")
+    print("\nMitigation HRR/FRR evaluation completed.")
     print(f"Summary JSON: {summary_json}")
     print(f"Summary Markdown: {summary_md}")
     return 0

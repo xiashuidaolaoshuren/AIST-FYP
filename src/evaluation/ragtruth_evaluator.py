@@ -1741,6 +1741,40 @@ class RAGTruthEvaluator:
         Returns:
             Metrics dictionary with overall and per-class statistics
         """
+        filter_active = bool(self.mitigation_module_flags.get('filter', False))
+
+        def _compute_hrr_counts(rows: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
+            total_gold_claims = 0
+            gold_claims_removed = 0
+            total_non_gold_claims = 0
+            non_gold_claims_removed = 0
+
+            for row in rows:
+                claim_results = row.get('claim_results', [])
+                if not isinstance(claim_results, list):
+                    continue
+                for claim_result in claim_results:
+                    if not isinstance(claim_result, dict):
+                        continue
+                    overlaps_gold = bool(claim_result.get('overlaps_gold_hallucination', False))
+                    predicted_status = str(claim_result.get('predicted_status', ''))
+
+                    if overlaps_gold:
+                        total_gold_claims += 1
+                        if filter_active and predicted_status == 'Contradictory':
+                            gold_claims_removed += 1
+                    else:
+                        total_non_gold_claims += 1
+                        if filter_active and predicted_status == 'Contradictory':
+                            non_gold_claims_removed += 1
+
+            return (
+                total_gold_claims,
+                gold_claims_removed,
+                total_non_gold_claims,
+                non_gold_claims_removed,
+            )
+
         # Extract predictions and ground truth
         y_true = [r['gold_has_hallucination'] for r in results]
         y_pred = [r['detected_hallucination'] for r in results]
@@ -1767,6 +1801,20 @@ class RAGTruthEvaluator:
         total_claims = sum(int(r.get('num_claims', 0)) for r in results)
         total_claim_hallucinations = sum(int(r.get('contradictory_count', 0)) for r in results)
         total_low_confidence_claims = sum(int(r.get('low_confidence_count', 0)) for r in results)
+        (
+            total_gold_claims,
+            gold_claims_removed,
+            total_non_gold_claims,
+            non_gold_claims_removed,
+        ) = _compute_hrr_counts(results)
+        overall_hrr = (
+            float(gold_claims_removed / total_gold_claims)
+            if total_gold_claims > 0 else 0.0
+        )
+        overall_frr = (
+            float(non_gold_claims_removed / total_non_gold_claims)
+            if total_non_gold_claims > 0 else 0.0
+        )
 
         trigger_path_counts = Counter(
             str(r.get('detection_trigger_path', 'none')) for r in results
@@ -1804,6 +1852,20 @@ class RAGTruthEvaluator:
             task_detected_low_confidence_claims = sum(
                 int(r.get('low_confidence_count', 0)) for r in task_results
             )
+            (
+                task_total_gold_claims,
+                task_gold_claims_removed,
+                task_total_non_gold_claims,
+                task_non_gold_claims_removed,
+            ) = _compute_hrr_counts(task_results)
+            task_hrr = (
+                float(task_gold_claims_removed / task_total_gold_claims)
+                if task_total_gold_claims > 0 else 0.0
+            )
+            task_frr = (
+                float(task_non_gold_claims_removed / task_total_non_gold_claims)
+                if task_total_non_gold_claims > 0 else 0.0
+            )
             task_trigger_path_counts = Counter(
                 str(r.get('detection_trigger_path', 'none')) for r in task_results
             )
@@ -1839,6 +1901,15 @@ class RAGTruthEvaluator:
                     'avg_claim_hallucinations_per_sample': (
                         float(task_detected_claim_hallucinations / len(task_results)) if task_results else 0.0
                     ),
+                    'hrr_metrics': {
+                        'filter_active': filter_active,
+                        'total_gold_claims': int(task_total_gold_claims),
+                        'gold_claims_removed': int(task_gold_claims_removed),
+                        'hrr': float(task_hrr),
+                        'total_non_gold_claims': int(task_total_non_gold_claims),
+                        'non_gold_claims_removed': int(task_non_gold_claims_removed),
+                        'frr': float(task_frr),
+                    },
                     'detection_trigger_path_counts': dict(task_trigger_path_counts),
                     'false_positive_trigger_path_counts': dict(task_fp_trigger_path_counts)
                 }
@@ -1871,6 +1942,15 @@ class RAGTruthEvaluator:
                 'detected_low_confidence_claims': int(total_low_confidence_claims),
                 'avg_claims_per_sample': float(total_claims / len(results)) if results else 0.0,
                 'avg_claim_hallucinations_per_sample': float(total_claim_hallucinations / len(results)) if results else 0.0,
+                'hrr_metrics': {
+                    'filter_active': filter_active,
+                    'total_gold_claims': int(total_gold_claims),
+                    'gold_claims_removed': int(gold_claims_removed),
+                    'hrr': float(overall_hrr),
+                    'total_non_gold_claims': int(total_non_gold_claims),
+                    'non_gold_claims_removed': int(non_gold_claims_removed),
+                    'frr': float(overall_frr),
+                },
                 'detection_trigger_path_counts': dict(trigger_path_counts),
                 'false_positive_trigger_path_counts': dict(false_positive_trigger_path_counts)
             },
