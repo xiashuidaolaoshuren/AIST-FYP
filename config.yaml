@@ -344,10 +344,13 @@ verification:
 
   # Citation Formatter Configuration (Month 5)
   citation:
-    # Maximum number of citations to add per claim
-    # Limits citation density to avoid cluttering the output
-    # Default: 3 (recommended for readability)
-    max_citations_per_claim: 3
+    # Maximum number of citations to add per claim.
+    # Lower values reduce over-citation and improve citation precision on CiteBench.
+    max_citations_per_claim: 1
+
+    # Minimum dense retrieval score required before attaching citations to a claim.
+    # Claims with weaker evidence are left uncited to avoid forcing low-quality retrieval citations.
+    min_score_dense_for_citation: 0.70
   
   # Rule-Based Aggregator Configuration (Month 5)
   aggregator:

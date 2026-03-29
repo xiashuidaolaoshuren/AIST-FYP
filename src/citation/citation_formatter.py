@@ -27,6 +27,7 @@ class CitationFormatter:
     Attributes:
         config: Configuration object
         max_citations_per_claim: Maximum number of citations to add per claim (default: 3)
+        min_score_dense_for_citation: Minimum dense score required to attach citations
         logger: Logger instance
     
     Example:
@@ -50,19 +51,32 @@ class CitationFormatter:
         """
         self.config = config
         self.logger = setup_logger(__name__)
+
+        citation_cfg = getattr(config, 'citation', None)
+        if citation_cfg is None and hasattr(config, 'verification'):
+            citation_cfg = getattr(config.verification, 'citation', None)
         
         # Load max citations per claim from config
-        if (hasattr(config, 'citation') and 
-            hasattr(config.citation, 'max_citations_per_claim')):
-            self.max_citations_per_claim = config.citation.max_citations_per_claim
+        if citation_cfg is not None and hasattr(citation_cfg, 'max_citations_per_claim'):
+            self.max_citations_per_claim = citation_cfg.max_citations_per_claim
         else:
             self.max_citations_per_claim = 3
             self.logger.info(
                 f"No citation.max_citations_per_claim in config, using default: 3"
             )
+
+        if citation_cfg is not None and hasattr(citation_cfg, 'min_score_dense_for_citation'):
+            self.min_score_dense_for_citation = float(citation_cfg.min_score_dense_for_citation)
+        else:
+            self.min_score_dense_for_citation = 0.0
+            self.logger.info(
+                "No citation.min_score_dense_for_citation in config, using default: 0.0"
+            )
         
         self.logger.info(
-            f"CitationFormatter initialized with max_citations_per_claim={self.max_citations_per_claim}"
+            "CitationFormatter initialized with "
+            f"max_citations_per_claim={self.max_citations_per_claim}, "
+            f"min_score_dense_for_citation={self.min_score_dense_for_citation:.3f}"
         )
     
     def format_with_citations(
@@ -129,6 +143,16 @@ class CitationFormatter:
                 key=lambda chunk: getattr(chunk, "score_dense", 0.0),
                 reverse=True,
             )
+
+            best_dense_score = float(getattr(evidence_chunks[0], "score_dense", 0.0)) if evidence_chunks else 0.0
+            if best_dense_score < self.min_score_dense_for_citation:
+                self.logger.debug(
+                    "Skipping citations for claim %s because best dense score %.4f is below threshold %.4f",
+                    claim.claim_id,
+                    best_dense_score,
+                    self.min_score_dense_for_citation,
+                )
+                continue
 
             # Limit to max citations per claim
             evidence_chunks = evidence_chunks[:self.max_citations_per_claim]

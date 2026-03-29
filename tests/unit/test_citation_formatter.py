@@ -118,8 +118,19 @@ class TestCitationFormatterInit:
         config_path = Path(__file__).parent.parent.parent / "config.yaml"
         config = Config(str(config_path))
         formatter = CitationFormatter(config)
-        # Should use default value of 3 since config.yaml doesn't have citation section
-        assert formatter.max_citations_per_claim == 3
+        assert formatter.max_citations_per_claim == 1
+        assert formatter.min_score_dense_for_citation == pytest.approx(0.7)
+
+    def test_init_sets_default_dense_threshold_when_missing(self, mock_config):
+        """When threshold is missing in config, formatter should default to 0.0."""
+        if not hasattr(mock_config, 'citation'):
+            mock_config.citation = type('CitationConfig', (), {})()
+        if hasattr(mock_config.citation, 'min_score_dense_for_citation'):
+            delattr(mock_config.citation, 'min_score_dense_for_citation')
+        mock_config.citation.max_citations_per_claim = 2
+
+        formatter = CitationFormatter(mock_config)
+        assert formatter.min_score_dense_for_citation == pytest.approx(0.0)
 
 
 class TestFormatWithCitations:
@@ -172,11 +183,11 @@ class TestFormatWithCitations:
         assert 'c1' in result['citation_map']
         assert 'c2' in result['citation_map']
         
-        # Check that each claim has exactly 3 and 2 citations respectively
-        assert len(result['citation_map']['c1']) == 3
-        assert len(result['citation_map']['c2']) == 2
+        # max_citations_per_claim comes from config and is currently 1.
+        assert len(result['citation_map']['c1']) == 1
+        assert len(result['citation_map']['c2']) == 1
         
-        # Check passage list has all unique evidence
+        # Passage list still includes all unique evidence used to build CiteEval passages.
         assert len(result['passage_list']) == 5  # 3 + 2 evidence chunks
     
     def test_citation_format_no_spaces(self, formatter):
@@ -200,9 +211,38 @@ class TestFormatWithCitations:
         
         result = formatter.format_with_citations(answer_text, claims, evidence_map)
         
-        # Check format is [1][2][3] with NO spaces
-        assert result['formatted_text'] == "Test sentence[1][2][3]."
+        # Check format has no spaces inside citation tags.
+        assert result['formatted_text'] == "Test sentence[1]."
         assert '[1] [2]' not in result['formatted_text']
+
+    def test_skip_citation_when_dense_score_below_threshold(self, mock_config):
+        """Claims should remain uncited when the best dense score is below threshold."""
+        if not hasattr(mock_config, 'citation'):
+            mock_config.citation = type('CitationConfig', (), {})()
+        mock_config.citation.max_citations_per_claim = 1
+        mock_config.citation.min_score_dense_for_citation = 0.95
+
+        formatter = CitationFormatter(mock_config)
+
+        answer_text = "Cats are mammals."
+        claims = [
+            Claim(
+                claim_id='c1',
+                answer_id='ans1',
+                text='Cats are mammals.',
+                answer_char_span=(0, 17)
+            )
+        ]
+        evidence_map = {
+            'c1': [
+                EvidenceChunk(doc_id='doc1', sent_id=1, text='E1', char_start=0, char_end=2, score_dense=0.9, rank=1)
+            ]
+        }
+
+        result = formatter.format_with_citations(answer_text, claims, evidence_map)
+
+        assert result['formatted_text'] == answer_text
+        assert result['citation_map'] == {}
     
     def test_punctuation_handling_period(self, formatter):
         """Test citation insertion before period."""
