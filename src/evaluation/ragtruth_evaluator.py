@@ -113,7 +113,9 @@ NON_FACTUAL_SUMMARY_PATTERN = re.compile(
     r"important|notable)\b|"
     r"\b(should|must|ought to|needs? to|deserves?)\b|"
     r"\bthe\s+(best|worst|most|least)\b|"
-    r"^(this|it)\s+(is|was|remains)\s+(clear|obvious|evident|important)",
+    r"^(this|it)\s+(is|was|remains)\s+(clear|obvious|evident|important)|"
+    r"^here\s+is\s+(a\s+)?(summary|overview|breakdown)\b|"
+    r"^in\s+summary[,:]",
     re.IGNORECASE,
 )
 
@@ -287,6 +289,28 @@ class RAGTruthEvaluator:
                     self.qa_pure_lc_block_ratio = float(raw_qa_pure_lc_block_ratio)
                 except (TypeError, ValueError):
                     self.qa_pure_lc_block_ratio = 0.95
+                raw_summary_single_contra_min_cp = getattr(
+                    benchmark_config,
+                    'summary_single_contra_min_contradict_prob',
+                    0.0,
+                )
+                try:
+                    self.summary_single_contra_min_contradict_prob = float(
+                        raw_summary_single_contra_min_cp
+                    )
+                except (TypeError, ValueError):
+                    self.summary_single_contra_min_contradict_prob = 0.0
+                raw_summary_single_contra_min_cov = getattr(
+                    benchmark_config,
+                    'summary_single_contra_min_coverage',
+                    0.0,
+                )
+                try:
+                    self.summary_single_contra_min_coverage = float(
+                        raw_summary_single_contra_min_cov
+                    )
+                except (TypeError, ValueError):
+                    self.summary_single_contra_min_coverage = 0.0
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -299,6 +323,8 @@ class RAGTruthEvaluator:
                 self.data2txt_contradictory_override_enabled = False
                 self.data2txt_min_contradict_prob_for_contradictory = 0.0
                 self.qa_pure_lc_block_ratio = 0.95
+                self.summary_single_contra_min_contradict_prob = 0.0
+                self.summary_single_contra_min_coverage = 0.0
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -311,6 +337,8 @@ class RAGTruthEvaluator:
             self.data2txt_contradictory_override_enabled = False
             self.data2txt_min_contradict_prob_for_contradictory = 0.0
             self.qa_pure_lc_block_ratio = 0.95
+            self.summary_single_contra_min_contradict_prob = 0.0
+            self.summary_single_contra_min_coverage = 0.0
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
         try:
@@ -368,6 +396,12 @@ class RAGTruthEvaluator:
         )
         self.qa_pure_lc_block_ratio = float(
             np.clip(self.qa_pure_lc_block_ratio, 0.0, 1.0)
+        )
+        self.summary_single_contra_min_contradict_prob = float(
+            np.clip(self.summary_single_contra_min_contradict_prob, 0.0, 1.0)
+        )
+        self.summary_single_contra_min_coverage = float(
+            np.clip(self.summary_single_contra_min_coverage, 0.0, 1.0)
         )
             
         # Validate benchmark directory exists
@@ -1371,6 +1405,28 @@ class RAGTruthEvaluator:
         ):
             data2txt_contradictory_override_block = True
             contradictory_trigger = False
+        # Summary single-contradiction guard: suppress weak single-contra triggers.
+        # Fires when Summary has exactly 1 contradictory claim but that claim's
+        # contradict_prob or coverage_score falls below calibrated safe thresholds.
+        # Thresholds derived from Eval-13 analysis (min TP cp=0.738, min TP cov=0.465).
+        summary_single_contra_block = False
+        if (
+            task_type == 'Summary'
+            and contradictory_trigger
+            and contradictory_count == 1
+            and (
+                self.summary_single_contra_min_contradict_prob > 0.0
+                or self.summary_single_contra_min_coverage > 0.0
+            )
+        ):
+            sole_cp = contradictory_decisions[0].confidence.get('contradict_prob', 1.0)
+            sole_cov = contradictory_decisions[0].confidence.get('coverage_score', 1.0)
+            if (
+                sole_cp < self.summary_single_contra_min_contradict_prob
+                or sole_cov < self.summary_single_contra_min_coverage
+            ):
+                summary_single_contra_block = True
+                contradictory_trigger = False
         low_confidence_coverage_trigger = (
             low_confidence_ratio >= self.low_confidence_ratio_threshold
             and low_coverage_ratio >= task_low_coverage_ratio_threshold
