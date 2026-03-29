@@ -127,6 +127,11 @@ def main():
         help='Maximum number of samples per task type (overrides --max-samples when set)'
     )
     parser.add_argument(
+        '--hallucinated-only',
+        action='store_true',
+        help='Evaluate only samples that have non-empty gold hallucination labels'
+    )
+    parser.add_argument(
         '--max-saved-samples',
         type=int,
         default=None,
@@ -264,6 +269,7 @@ def main():
     logger.info(f"Split: {args.split}")
     logger.info(f"Max samples: {args.max_samples or 'all'}")
     logger.info(f"Samples per task: {args.samples_per_task or 'off'}")
+    logger.info(f"Hallucinated only: {args.hallucinated_only}")
     logger.info(f"Max saved samples: {args.max_saved_samples or 'all'}")
     logger.info(f"Batch size: {args.batch_size}")
     logger.info(f"Data strategy: {args.strategy}")
@@ -412,6 +418,7 @@ def main():
             split=args.split,
             max_samples=args.max_samples,
             samples_per_task=args.samples_per_task,
+            hallucinated_only=args.hallucinated_only,
             max_saved_samples=args.max_saved_samples,
             batch_size=args.batch_size,
             save_results=args.save_results,

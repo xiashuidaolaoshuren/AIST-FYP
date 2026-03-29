@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from copy import deepcopy
@@ -139,6 +140,7 @@ def _run_variant(
     batch_size: int,
     strategy: str,
     ragtruth_eval_mode: str,
+    hallucinated_only: bool,
     output_path: Path,
     resume: bool,
 ) -> None:
@@ -166,6 +168,8 @@ def _run_variant(
         command.extend(["--samples-per-task", str(samples_per_task)])
     if max_saved_samples is not None:
         command.extend(["--max-saved-samples", str(max_saved_samples)])
+    if hallucinated_only:
+        command.append("--hallucinated-only")
     if resume:
         command.append("--resume")
 
@@ -180,10 +184,36 @@ def _run_variant(
     )
     assert process.stdout is not None
     out_lines: list[str] = []
+    batch_progress_pattern = re.compile(r"Processing batch (\d+)/(\d+)")
+    batch_progress: tqdm | None = None
     for line in process.stdout:
-        print(line, end="", flush=True)
         out_lines.append(line)
+
+        match = batch_progress_pattern.search(line)
+        if match:
+            batch_idx = int(match.group(1))
+            total_batches = int(match.group(2))
+            if batch_progress is None:
+                batch_progress = tqdm(
+                    total=total_batches,
+                    desc=f"{variant} batches",
+                    unit="batch",
+                    leave=False,
+                    position=1,
+                )
+            elif batch_progress.total != total_batches:
+                batch_progress.total = total_batches
+                batch_progress.refresh()
+
+            pending = batch_idx - batch_progress.n
+            if pending > 0:
+                batch_progress.update(pending)
+            continue
+
+        print(line, end="", flush=True)
     process.wait()
+    if batch_progress is not None:
+        batch_progress.close()
 
     if process.returncode != 0:
         raise RuntimeError(
@@ -201,6 +231,12 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
     confusion = metrics.get("confusion_matrix", {})
     statistics = metrics.get("statistics", {})
     hrr_metrics = statistics.get("hrr_metrics", {})
+    sample_results = payload.get("sample_results", [])
+    sample_ids: list[str] = []
+    if isinstance(sample_results, list):
+        for item in sample_results:
+            if isinstance(item, dict) and item.get("sample_id") is not None:
+                sample_ids.append(str(item["sample_id"]))
 
     return {
         "accuracy": float(overall.get("accuracy", 0.0)),
@@ -223,6 +259,8 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "total_non_gold_claims": int(hrr_metrics.get("total_non_gold_claims", 0)),
         "non_gold_claims_removed": int(hrr_metrics.get("non_gold_claims_removed", 0)),
         "frr": float(hrr_metrics.get("frr", 0.0)),
+        "num_samples_evaluated": len(sample_ids),
+        "sample_ids": sample_ids,
     }
 
 
@@ -255,6 +293,7 @@ def _build_expected_resume_fingerprint(
     max_samples: int | None,
     samples_per_task: int | None,
     ragtruth_eval_mode: str,
+    hallucinated_only: bool,
     dataset_path: str,
 ) -> dict[str, Any]:
     verification_cfg = config_payload.get("verification", {})
@@ -279,6 +318,7 @@ def _build_expected_resume_fingerprint(
         "max_samples": max_samples,
         "samples_per_task": samples_per_task,
         "ragtruth_eval_mode": ragtruth_eval_mode,
+        "hallucinated_only": hallucinated_only,
         "dataset_path": dataset_path,
         "verification_enabled": bool(verification_cfg.get("enabled", True)),
         "verification_modules": {
@@ -511,6 +551,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Resume incomplete variant outputs in-place"
     )
+    parser.add_argument(
+        "--hallucinated-only",
+        action="store_true",
+        help="Evaluate only samples with non-empty gold hallucination labels",
+    )
     return parser
 
 
@@ -565,6 +610,7 @@ def main() -> int:
                 max_samples=args.max_samples,
                 samples_per_task=args.samples_per_task,
                 ragtruth_eval_mode=args.ragtruth_eval_mode,
+                hallucinated_only=args.hallucinated_only,
                 dataset_path=resolved_dataset_path,
             )
             if not isinstance(existing_fingerprint, dict) or existing_fingerprint != expected_fingerprint:
@@ -585,6 +631,7 @@ def main() -> int:
             batch_size=args.batch_size,
             strategy=args.strategy,
             ragtruth_eval_mode=args.ragtruth_eval_mode,
+            hallucinated_only=args.hallucinated_only,
             output_path=result_path,
             resume=args.resume,
         )
@@ -608,6 +655,7 @@ def main() -> int:
             "samples_per_task": args.samples_per_task,
             "max_saved_samples": args.max_saved_samples,
             "batch_size": args.batch_size,
+            "hallucinated_only": args.hallucinated_only,
             "strategy": args.strategy,
             "ragtruth_eval_mode": args.ragtruth_eval_mode,
             "variants": args.variants,
