@@ -7,7 +7,7 @@ claim character spans, with support for deduplication and proper punctuation han
 """
 
 from typing import List, Dict, Tuple, Optional, Any
-from src.utils.data_structures import Claim, EvidenceChunk
+from src.utils.data_structures import Claim, EvidenceChunk, VerifierSignal
 from src.utils.config import Config
 from src.utils.logger import setup_logger
 
@@ -62,7 +62,7 @@ class CitationFormatter:
         else:
             self.max_citations_per_claim = 3
             self.logger.info(
-                f"No citation.max_citations_per_claim in config, using default: 3"
+                "No citation.max_citations_per_claim in config, using default: 3"
             )
 
         if citation_cfg is not None and hasattr(citation_cfg, 'min_score_dense_for_citation'):
@@ -72,18 +72,28 @@ class CitationFormatter:
             self.logger.info(
                 "No citation.min_score_dense_for_citation in config, using default: 0.0"
             )
+
+        if citation_cfg is not None and hasattr(citation_cfg, 'min_nli_entailment_for_citation'):
+            self.min_nli_entailment_for_citation = float(citation_cfg.min_nli_entailment_for_citation)
+        else:
+            self.min_nli_entailment_for_citation = 0.0
+            self.logger.info(
+                "No citation.min_nli_entailment_for_citation in config, using default: 0.0"
+            )
         
         self.logger.info(
             "CitationFormatter initialized with "
             f"max_citations_per_claim={self.max_citations_per_claim}, "
-            f"min_score_dense_for_citation={self.min_score_dense_for_citation:.3f}"
+            f"min_score_dense_for_citation={self.min_score_dense_for_citation:.3f}, "
+            f"min_nli_entailment_for_citation={self.min_nli_entailment_for_citation:.3f}"
         )
     
     def format_with_citations(
         self,
         answer_text: str,
         claims: List[Claim],
-        evidence_map: Dict[str, List[EvidenceChunk]]
+        evidence_map: Dict[str, List[EvidenceChunk]],
+        verifier_signals: Optional[List[VerifierSignal]] = None,
     ) -> Dict[str, Any]:
         """
         Inject bracketed citations into answer text aligned to claim positions.
@@ -126,26 +136,58 @@ class CitationFormatter:
         # Step 4: Build citation map and insert citations
         citation_map = {}
         formatted_text = answer_text
+        nli_lookup: Dict[Tuple[str, str, int], float] = {}
+
+        if verifier_signals:
+            for signal in verifier_signals:
+                nli_scores = getattr(signal, "nli", {}) or {}
+                entailment_score = nli_scores.get("entailment", nli_scores.get("entail", 0.0))
+                nli_lookup[(signal.claim_id, signal.doc_id, signal.sent_id)] = float(entailment_score)
         
         for claim in sorted_claims:
+            claim_id = claim.claim_id
+
             # Get top-N evidence for this claim
-            evidence_chunks = evidence_map.get(claim.claim_id, [])
+            evidence_chunks = evidence_map.get(claim_id, [])
             
             if not evidence_chunks:
                 self.logger.warning(
                     f"No evidence found for claim {claim.claim_id}, skipping citation"
                 )
                 continue
+
+            def _evidence_sort_key(chunk: EvidenceChunk, current_claim_id: str = claim_id) -> Tuple[float, float]:
+                return (
+                    nli_lookup.get(
+                        (current_claim_id, chunk.doc_id, chunk.sent_id),
+                        -1.0 if nli_lookup else 0.0,
+                    ),
+                    float(getattr(chunk, "score_dense", 0.0)),
+                )
             
             # Rank evidence per-claim to keep the strongest support first.
             evidence_chunks = sorted(
                 evidence_chunks,
-                key=lambda chunk: getattr(chunk, "score_dense", 0.0),
+                key=_evidence_sort_key,
                 reverse=True,
             )
 
             best_dense_score = float(getattr(evidence_chunks[0], "score_dense", 0.0)) if evidence_chunks else 0.0
-            if best_dense_score < self.min_score_dense_for_citation:
+            best_nli_entailment = nli_lookup.get(
+                (claim.claim_id, evidence_chunks[0].doc_id, evidence_chunks[0].sent_id),
+                None,
+            ) if evidence_chunks else None
+
+            if best_nli_entailment is not None:
+                if best_nli_entailment < self.min_nli_entailment_for_citation:
+                    self.logger.debug(
+                        "Skipping citations for claim %s because best NLI entailment %.4f is below threshold %.4f",
+                        claim.claim_id,
+                        best_nli_entailment,
+                        self.min_nli_entailment_for_citation,
+                    )
+                    continue
+            elif best_dense_score < self.min_score_dense_for_citation:
                 self.logger.debug(
                     "Skipping citations for claim %s because best dense score %.4f is below threshold %.4f",
                     claim.claim_id,

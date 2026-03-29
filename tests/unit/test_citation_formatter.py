@@ -7,6 +7,7 @@ and edge case handling for the CitationFormatter class.
 
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 from src.citation.citation_formatter import CitationFormatter
 from src.utils.data_structures import Claim, EvidenceChunk
 from src.utils.config import Config
@@ -120,6 +121,7 @@ class TestCitationFormatterInit:
         formatter = CitationFormatter(config)
         assert formatter.max_citations_per_claim == 1
         assert formatter.min_score_dense_for_citation == pytest.approx(0.7)
+        assert formatter.min_nli_entailment_for_citation == pytest.approx(0.5)
 
     def test_init_sets_default_dense_threshold_when_missing(self, mock_config):
         """When threshold is missing in config, formatter should default to 0.0."""
@@ -127,10 +129,24 @@ class TestCitationFormatterInit:
             mock_config.citation = type('CitationConfig', (), {})()
         if hasattr(mock_config.citation, 'min_score_dense_for_citation'):
             delattr(mock_config.citation, 'min_score_dense_for_citation')
+        if hasattr(mock_config.citation, 'min_nli_entailment_for_citation'):
+            delattr(mock_config.citation, 'min_nli_entailment_for_citation')
         mock_config.citation.max_citations_per_claim = 2
 
         formatter = CitationFormatter(mock_config)
         assert formatter.min_score_dense_for_citation == pytest.approx(0.0)
+        assert formatter.min_nli_entailment_for_citation == pytest.approx(0.0)
+
+    def test_init_sets_nli_threshold_from_config(self, mock_config):
+        """Formatter should read NLI entailment threshold from config when present."""
+        if not hasattr(mock_config, 'citation'):
+            mock_config.citation = type('CitationConfig', (), {})()
+        mock_config.citation.max_citations_per_claim = 1
+        mock_config.citation.min_score_dense_for_citation = 0.7
+        mock_config.citation.min_nli_entailment_for_citation = 0.6
+
+        formatter = CitationFormatter(mock_config)
+        assert formatter.min_nli_entailment_for_citation == pytest.approx(0.6)
 
 
 class TestFormatWithCitations:
@@ -240,6 +256,72 @@ class TestFormatWithCitations:
         }
 
         result = formatter.format_with_citations(answer_text, claims, evidence_map)
+
+        assert result['formatted_text'] == answer_text
+        assert result['citation_map'] == {}
+
+    def test_nli_ranking_prefers_high_entailment_evidence(self, mock_config):
+        """When verifier signals are available, ranking should prioritize higher entailment."""
+        if not hasattr(mock_config, 'citation'):
+            mock_config.citation = type('CitationConfig', (), {})()
+        mock_config.citation.max_citations_per_claim = 1
+        mock_config.citation.min_score_dense_for_citation = 0.0
+        mock_config.citation.min_nli_entailment_for_citation = 0.5
+
+        formatter = CitationFormatter(mock_config)
+        answer_text = "Cats are mammals."
+        claims = [
+            Claim(
+                claim_id='c1',
+                answer_id='ans1',
+                text='Cats are mammals.',
+                answer_char_span=(0, 17),
+            )
+        ]
+        evidence_map = {
+            'c1': [
+                EvidenceChunk(doc_id='doc_dense', sent_id=1, text='E1', char_start=0, char_end=2, score_dense=0.99, rank=1),
+                EvidenceChunk(doc_id='doc_entail', sent_id=1, text='E2', char_start=0, char_end=2, score_dense=0.70, rank=2),
+            ]
+        }
+        verifier_signals = [
+            SimpleNamespace(claim_id='c1', doc_id='doc_dense', sent_id=1, nli={'entailment': 0.2}),
+            SimpleNamespace(claim_id='c1', doc_id='doc_entail', sent_id=1, nli={'entailment': 0.9}),
+        ]
+
+        result = formatter.format_with_citations(answer_text, claims, evidence_map, verifier_signals=verifier_signals)
+
+        assert result['citation_map'] == {'c1': [2]}
+        assert result['formatted_text'] == "Cats are mammals[2]."
+
+    def test_skip_citation_when_nli_below_threshold(self, mock_config):
+        """Claims should remain uncited when best NLI entailment is below threshold."""
+        if not hasattr(mock_config, 'citation'):
+            mock_config.citation = type('CitationConfig', (), {})()
+        mock_config.citation.max_citations_per_claim = 1
+        mock_config.citation.min_score_dense_for_citation = 0.0
+        mock_config.citation.min_nli_entailment_for_citation = 0.8
+
+        formatter = CitationFormatter(mock_config)
+        answer_text = "Cats are mammals."
+        claims = [
+            Claim(
+                claim_id='c1',
+                answer_id='ans1',
+                text='Cats are mammals.',
+                answer_char_span=(0, 17),
+            )
+        ]
+        evidence_map = {
+            'c1': [
+                EvidenceChunk(doc_id='doc1', sent_id=1, text='E1', char_start=0, char_end=2, score_dense=0.99, rank=1)
+            ]
+        }
+        verifier_signals = [
+            SimpleNamespace(claim_id='c1', doc_id='doc1', sent_id=1, nli={'entailment': 0.3})
+        ]
+
+        result = formatter.format_with_citations(answer_text, claims, evidence_map, verifier_signals=verifier_signals)
 
         assert result['formatted_text'] == answer_text
         assert result['citation_map'] == {}

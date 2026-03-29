@@ -744,6 +744,7 @@ def _generate_system_input(
             answer_text=answer_text,
             claims=claims,
             evidence_map=evidence_map,
+            verifier_signals=pipeline_output.get("verifier_signals", []),
         )
         citeeval_sample = runtime.citation_formatter.export_citeeval_format(
             query=query,
@@ -829,6 +830,7 @@ def _generate_system_input(
                 answer_text=answer_text,
                 claims=claims,
                 evidence_map=evidence_map,
+                verifier_signals=pipeline_output.get("verifier_signals", []),
             )
             citeeval_sample = runtime.citation_formatter.export_citeeval_format(
                 query=row_data["query"],
