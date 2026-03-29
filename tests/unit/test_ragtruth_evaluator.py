@@ -43,6 +43,8 @@ class TestRAGTruthEvaluator(unittest.TestCase):
         self.config.evaluation.benchmarks.ragtruth.ragtruth_eval_mode = 'normal'
         self.config.evaluation.benchmarks.ragtruth.teacher_forced_intrinsic = False
         self.config.evaluation.benchmarks.ragtruth.low_confidence_ratio_threshold = 0.5
+        self.config.evaluation.benchmarks.ragtruth.min_contradictory_count_for_detection = 1
+        self.config.evaluation.benchmarks.ragtruth.per_task_min_contradictory = {}
         
         # Create mock components
         self.rag_pipeline = Mock()
@@ -552,6 +554,127 @@ class TestRAGTruthEvaluator(unittest.TestCase):
             with self.assertRaises(RuntimeError) as exc:
                 evaluator._prepare_sample_for_verification(sample)
         self.assertIn('Strict index-only policy', str(exc.exception))
+
+    def test_evaluate_batch_batches_post_rerank_nli(self):
+        """Post-rerank NLI pairs should be executed in one cross-sample batch."""
+        self.config.evaluation.benchmarks.ragtruth.min_contradictory_count_for_detection = 1
+        self.config.evaluation.benchmarks.ragtruth.per_task_min_contradictory = {}
+        evaluator = RAGTruthEvaluator(
+            self.config,
+            self.rag_pipeline,
+            self.verifier_hub,
+            self.aggregator,
+        )
+
+        claim_1 = Claim(
+            claim_id='c1',
+            answer_id='a1',
+            text='Claim one.',
+            answer_char_span=[0, 9],
+            extraction_method='auto',
+        )
+        claim_2 = Claim(
+            claim_id='c2',
+            answer_id='a2',
+            text='Claim two.',
+            answer_char_span=[0, 9],
+            extraction_method='auto',
+        )
+
+        evidence = [
+            EvidenceChunk(
+                doc_id='d1',
+                sent_id=0,
+                text='Evidence text.',
+                char_start=0,
+                char_end=13,
+                score_dense=1.0,
+                rank=1,
+                source='gold_context',
+                version='sentence_v1',
+            )
+        ]
+
+        prepared_1 = {
+            'sample': {'id': 's1'},
+            'sample_id': 's1',
+            'task_type': 'Summary',
+            'task_id': 'src_1',
+            'question': 'Q1',
+            'generated_response': 'R1',
+            'hallucination_gold_labels': [],
+            'context_source': 'gold_context',
+            'evaluation_track': 'mitigation',
+            'pre_verification_filtered_claim_count': 0,
+            'resolved_pairs': [
+                {'claim': claim_1, 'evidence': evidence, 'metadata': {}}
+            ],
+        }
+        prepared_2 = {
+            'sample': {'id': 's2'},
+            'sample_id': 's2',
+            'task_type': 'Summary',
+            'task_id': 'src_2',
+            'question': 'Q2',
+            'generated_response': 'R2',
+            'hallucination_gold_labels': [],
+            'context_source': 'gold_context',
+            'evaluation_track': 'mitigation',
+            'pre_verification_filtered_claim_count': 0,
+            'resolved_pairs': [
+                {'claim': claim_2, 'evidence': evidence, 'metadata': {}}
+            ],
+        }
+
+        state_1 = Mock()
+        state_1.nli_pending = [(0, 'c1', 'e1')]
+        state_2 = Mock()
+        state_2.nli_pending = [(0, 'c2', 'e2')]
+        self.verifier_hub.prepare_verification_collect_nli.side_effect = [state_1, state_2]
+        self.verifier_hub.finalize_from_nli_scores.side_effect = [[Mock()], [Mock()]]
+
+        decision_1 = Mock()
+        decision_1.status = 'Supported'
+        decision_2 = Mock()
+        decision_2.status = 'Supported'
+        self.aggregator.aggregate.side_effect = [decision_1, decision_2]
+
+        self.verifier_hub.nli_detector = Mock()
+        self.verifier_hub.detect_nli_batch = Mock(
+            side_effect=[
+                [{'entailment': 0.8}, {'entailment': 0.75}],
+                [{'entailment': 0.7}, {'entailment': 0.65}],
+            ]
+        )
+
+        mock_mitigation = Mock()
+        mock_mitigation.enabled = True
+        mock_mitigation.apply_rerank_collect_nli.side_effect = [
+            ({'rerank_executed': True}, [(0, 'rc1', 're1')]),
+            ({'rerank_executed': True}, [(0, 'rc2', 're2')]),
+        ]
+        evaluator.mitigation_orchestrator = mock_mitigation
+
+        with patch.object(
+            evaluator,
+            '_prepare_sample_for_verification',
+            side_effect=[prepared_1, prepared_2],
+        ), patch.object(
+            evaluator,
+            '_finalize_sample_result',
+            side_effect=[{'sample_id': 's1'}, {'sample_id': 's2'}],
+        ) as mock_finalize:
+            results = evaluator._evaluate_batch([{'id': 's1'}, {'id': 's2'}])
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(self.verifier_hub.detect_nli_batch.call_count, 2)
+        rerank_call = self.verifier_hub.detect_nli_batch.call_args_list[1]
+        self.assertEqual(rerank_call.args[0], ['rc1', 'rc2'])
+        self.assertEqual(rerank_call.args[1], ['re1', 're2'])
+        self.assertEqual(mock_mitigation.apply_rerank_collect_nli.call_count, 2)
+        for call in mock_finalize.call_args_list:
+            self.assertIn('mitigation_rerank_state', call.kwargs)
+            self.assertIn('mitigation_rerank_nli_scores', call.kwargs)
 
     def test_compute_metrics_includes_per_task(self):
         """Per-task metrics should be present and numerically consistent."""

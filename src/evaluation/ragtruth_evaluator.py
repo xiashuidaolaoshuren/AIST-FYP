@@ -994,12 +994,62 @@ class RAGTruthEvaluator:
             else:
                 verified_pairs = resolved_pairs
 
+            prepared['_base_claim_decisions'] = claim_decisions
+            prepared['_base_claim_signals'] = claim_signals
+            prepared['_base_verified_pairs'] = verified_pairs
+            prepared['_mitigation_rerank_state'] = None
+            prepared['_mitigation_rerank_pending_count'] = 0
+
+        all_mitigation_rerank_pending: List[Tuple[int, str, str]] = []
+        if (
+            self.mitigation_orchestrator
+            and self.mitigation_orchestrator.enabled
+            and hasattr(self.mitigation_orchestrator, 'apply_rerank_collect_nli')
+        ):
+            for prepared in prepared_samples:
+                resolved_pairs = prepared['resolved_pairs']
+                if not resolved_pairs:
+                    continue
+                rerank_state, pending_nli = self.mitigation_orchestrator.apply_rerank_collect_nli(
+                    query=prepared['question'],
+                    answer_text=prepared['generated_response'],
+                    claim_records=resolved_pairs,
+                    objective_override='ragtruth',
+                    precomputed_verification=(
+                        prepared.get('_base_claim_signals', []),
+                        prepared.get('_base_claim_decisions', []),
+                    ),
+                )
+                prepared['_mitigation_rerank_state'] = rerank_state
+                prepared['_mitigation_rerank_pending_count'] = len(pending_nli)
+                all_mitigation_rerank_pending.extend(pending_nli)
+
+        mitigation_rerank_nli_scores: List[Dict[str, float]] = []
+        if (
+            self.verifier_hub
+            and self.verifier_hub.nli_detector is not None
+            and all_mitigation_rerank_pending
+        ):
+            mitigation_rerank_nli_scores = self.verifier_hub.detect_nli_batch(
+                [item[1] for item in all_mitigation_rerank_pending],
+                [item[2] for item in all_mitigation_rerank_pending],
+            )
+
+        rerank_score_offset = 0
+        for prepared in prepared_samples:
+            pending_count = int(prepared.get('_mitigation_rerank_pending_count', 0))
+            sample_rerank_scores = mitigation_rerank_nli_scores[
+                rerank_score_offset:rerank_score_offset + pending_count
+            ]
+            rerank_score_offset += pending_count
             results.append(
                 self._finalize_sample_result(
                     prepared,
-                    claim_decisions,
-                    claim_signals,
-                    verified_pairs,
+                    prepared.get('_base_claim_decisions', []),
+                    prepared.get('_base_claim_signals', []),
+                    prepared.get('_base_verified_pairs', []),
+                    mitigation_rerank_state=prepared.get('_mitigation_rerank_state'),
+                    mitigation_rerank_nli_scores=sample_rerank_scores,
                 )
             )
 
@@ -1271,6 +1321,8 @@ class RAGTruthEvaluator:
         claim_decisions: List[ClaimDecision],
         claim_signals: List[Any],
         verified_pairs: List[Dict[str, Any]],
+        mitigation_rerank_state: Optional[Dict[str, Any]] = None,
+        mitigation_rerank_nli_scores: Optional[List[Dict[str, float]]] = None,
     ) -> Dict[str, Any]:
         """Finalize sample outputs and metric labels after verification."""
         sample_id = prepared['sample_id']
@@ -1294,13 +1346,22 @@ class RAGTruthEvaluator:
         )
         mitigation_applied = False
         if mitigation_runtime_enabled and resolved_pairs:
-            mitigation_result = self.mitigation_orchestrator.apply(
-                query=question,
-                answer_text=generated_response,
-                claim_records=resolved_pairs,
-                objective_override='ragtruth',
-                precomputed_verification=(claim_signals, claim_decisions),
-            )
+            if (
+                mitigation_rerank_state is not None
+                and hasattr(self.mitigation_orchestrator, 'apply_finalize_after_rerank')
+            ):
+                mitigation_result = self.mitigation_orchestrator.apply_finalize_after_rerank(
+                    rerank_state=mitigation_rerank_state,
+                    nli_scores=mitigation_rerank_nli_scores or [],
+                )
+            else:
+                mitigation_result = self.mitigation_orchestrator.apply(
+                    query=question,
+                    answer_text=generated_response,
+                    claim_records=resolved_pairs,
+                    objective_override='ragtruth',
+                    precomputed_verification=(claim_signals, claim_decisions),
+                )
             mitigation_actions = mitigation_result.get('actions', [])
             filtered_response = mitigation_result.get('final_answer', generated_response)
             removed_count = mitigation_result.get('filtered_claim_count', 0)
