@@ -75,7 +75,7 @@ def _variant_patch(name: str) -> dict[str, Any]:
     if name in {"baseline", "verifier_only", "full_verifier"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
 
-    if name in {"full_pipeline", "mitigation_all"}:
+    if name == "mitigation_all":
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_enabled))
 
     if name in {"mitigation_filter_only", "filter_only"}:
@@ -529,7 +529,6 @@ def build_parser() -> argparse.ArgumentParser:
             "baseline",
             "verifier_only",
             "full_verifier",
-            "full_pipeline",
             "mitigation_all",
             "mitigation_filter_only",
             "mitigation_rerank_only",
