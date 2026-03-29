@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from copy import deepcopy
@@ -142,7 +141,6 @@ def _run_variant(
     ragtruth_eval_mode: str,
     output_path: Path,
     resume: bool,
-    hallucinated_only: bool,
 ) -> None:
     command = [
         sys.executable,
@@ -170,8 +168,6 @@ def _run_variant(
         command.extend(["--max-saved-samples", str(max_saved_samples)])
     if resume:
         command.append("--resume")
-    if hallucinated_only:
-        command.append("--hallucinated-only")
 
     print(f"\n[run:{variant}] {' '.join(command)}")
 
@@ -184,29 +180,9 @@ def _run_variant(
     )
     assert process.stdout is not None
     out_lines: list[str] = []
-    batch_pattern = re.compile(r"Processing batch\s+(\d+)/(\d+)")
-    with tqdm(
-        total=None,
-        desc=f"{variant} batches",
-        unit="batch",
-        position=1,
-        leave=False,
-    ) as batch_bar:
-        last_batch_seen = 0
-        for line in process.stdout:
-            out_lines.append(line)
-            batch_match = batch_pattern.search(line)
-            if batch_match:
-                current_batch = int(batch_match.group(1))
-                total_batches = int(batch_match.group(2))
-                if batch_bar.total is None:
-                    batch_bar.total = total_batches
-                if current_batch > last_batch_seen:
-                    batch_bar.update(current_batch - last_batch_seen)
-                    last_batch_seen = current_batch
-                continue
-
-            print(line, end="", flush=True)
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        out_lines.append(line)
     process.wait()
 
     if process.returncode != 0:
@@ -225,15 +201,6 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
     confusion = metrics.get("confusion_matrix", {})
     statistics = metrics.get("statistics", {})
     hrr_metrics = statistics.get("hrr_metrics", {})
-    sample_results = payload.get("sample_results", [])
-    sample_ids: list[str] = []
-    if isinstance(sample_results, list):
-        for sample in sample_results:
-            if not isinstance(sample, dict):
-                continue
-            sample_id = sample.get("sample_id", sample.get("id"))
-            if sample_id is not None:
-                sample_ids.append(str(sample_id))
 
     return {
         "accuracy": float(overall.get("accuracy", 0.0)),
@@ -256,8 +223,6 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "total_non_gold_claims": int(hrr_metrics.get("total_non_gold_claims", 0)),
         "non_gold_claims_removed": int(hrr_metrics.get("non_gold_claims_removed", 0)),
         "frr": float(hrr_metrics.get("frr", 0.0)),
-        "num_evaluated_samples": len(sample_ids),
-        "evaluated_sample_ids": sample_ids,
     }
 
 
@@ -291,7 +256,6 @@ def _build_expected_resume_fingerprint(
     samples_per_task: int | None,
     ragtruth_eval_mode: str,
     dataset_path: str,
-    hallucinated_only: bool,
 ) -> dict[str, Any]:
     verification_cfg = config_payload.get("verification", {})
     if not isinstance(verification_cfg, dict):
@@ -316,7 +280,6 @@ def _build_expected_resume_fingerprint(
         "samples_per_task": samples_per_task,
         "ragtruth_eval_mode": ragtruth_eval_mode,
         "dataset_path": dataset_path,
-        "hallucinated_only": hallucinated_only,
         "verification_enabled": bool(verification_cfg.get("enabled", True)),
         "verification_modules": {
             "intrinsic": module_flag(verification_modules.get("intrinsic", False)),
@@ -499,11 +462,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Limit persisted sample_results entries per variant JSON",
     )
-    parser.add_argument(
-        "--hallucinated-only",
-        action="store_true",
-        help="Evaluate only samples with gold hallucination labels",
-    )
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--strategy", type=str, default="validation", choices=["development", "validation", "production"])
     parser.add_argument(
@@ -608,7 +566,6 @@ def main() -> int:
                 samples_per_task=args.samples_per_task,
                 ragtruth_eval_mode=args.ragtruth_eval_mode,
                 dataset_path=resolved_dataset_path,
-                hallucinated_only=args.hallucinated_only,
             )
             if not isinstance(existing_fingerprint, dict) or existing_fingerprint != expected_fingerprint:
                 raise ValueError(
@@ -630,7 +587,6 @@ def main() -> int:
             ragtruth_eval_mode=args.ragtruth_eval_mode,
             output_path=result_path,
             resume=args.resume,
-            hallucinated_only=args.hallucinated_only,
         )
 
         variant_metrics[variant] = _load_metrics(result_path)
@@ -651,7 +607,6 @@ def main() -> int:
             "max_samples": args.max_samples,
             "samples_per_task": args.samples_per_task,
             "max_saved_samples": args.max_saved_samples,
-            "hallucinated_only": args.hallucinated_only,
             "batch_size": args.batch_size,
             "strategy": args.strategy,
             "ragtruth_eval_mode": args.ragtruth_eval_mode,

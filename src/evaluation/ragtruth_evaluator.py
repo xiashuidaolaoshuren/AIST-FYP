@@ -423,7 +423,6 @@ class RAGTruthEvaluator:
         split: str = 'test',
         max_samples: Optional[int] = None,
         samples_per_task: Optional[int] = None,
-        hallucinated_only: bool = False,
         max_saved_samples: Optional[int] = None,
         batch_size: int = 10,
         save_results: bool = True,
@@ -450,7 +449,6 @@ class RAGTruthEvaluator:
             split: Dataset split to evaluate ('train' or 'test')
             max_samples: Maximum samples to evaluate (None = all)
             samples_per_task: Maximum samples per task type; when set, takes precedence over max_samples
-            hallucinated_only: Evaluate only samples with non-empty gold hallucination labels
             max_saved_samples: Maximum sample results to persist in output JSON
             batch_size: Process samples in batches for memory efficiency
             save_results: Whether to save detailed results to file
@@ -486,7 +484,6 @@ class RAGTruthEvaluator:
         self.logger.info(f"Split: {split}")
         self.logger.info(f"Max samples: {max_samples or 'all'}")
         self.logger.info(f"Samples per task: {samples_per_task or 'off'}")
-        self.logger.info(f"Hallucinated-only: {hallucinated_only}")
         self.logger.info(f"Max saved samples: {max_saved_samples or 'all'}")
         self.logger.info(f"Batch size: {batch_size}")
         self.logger.info(f"RAGTruth eval mode: {self.ragtruth_eval_mode}")
@@ -507,14 +504,12 @@ class RAGTruthEvaluator:
             'split': split,
             'max_samples': max_samples,
             'samples_per_task': samples_per_task,
-            'hallucinated_only': hallucinated_only,
             'ragtruth_eval_mode': self.ragtruth_eval_mode,
             'dataset_path': str(self.benchmark_dir.resolve()),
             'selection_fingerprint': self._build_selection_fingerprint(
                 split=split,
                 max_samples=max_samples,
                 samples_per_task=samples_per_task,
-                hallucinated_only=hallucinated_only,
             ),
         }
         
@@ -524,7 +519,6 @@ class RAGTruthEvaluator:
             split=split,
             max_samples=max_samples,
             samples_per_task=samples_per_task,
-            hallucinated_only=hallucinated_only,
         )
         self.logger.info(f"Loaded {len(samples)} samples from RAGTruth {split} split")
         
@@ -667,7 +661,6 @@ class RAGTruthEvaluator:
         split: str = 'test',
         max_samples: Optional[int] = None,
         samples_per_task: Optional[int] = None,
-        hallucinated_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Load RAGTruth dataset samples with source info and gold labels.
@@ -679,7 +672,6 @@ class RAGTruthEvaluator:
             split: Dataset split ('train' or 'test')
             max_samples: Maximum number of samples to load (None = all)
             samples_per_task: Maximum samples per task type; when set, takes precedence over max_samples
-            hallucinated_only: Keep only samples with non-empty gold labels
             
         Returns:
             List of sample dictionaries containing:
@@ -758,9 +750,6 @@ class RAGTruthEvaluator:
                     'split': split,
                     'gold_response': response['response']  # For reference
                 }
-
-                if hallucinated_only and not sample['gold_labels']:
-                    continue
                 
                 samples.append(sample)
                 task_counts[task_type] += 1
@@ -2052,7 +2041,6 @@ class RAGTruthEvaluator:
             output['metadata']['split'] = run_context.get('split')
             output['metadata']['max_samples'] = run_context.get('max_samples')
             output['metadata']['samples_per_task'] = run_context.get('samples_per_task')
-            output['metadata']['hallucinated_only'] = run_context.get('hallucinated_only')
             output['metadata']['dataset_path'] = run_context.get('dataset_path')
         
         output_path = Path(output_path)
@@ -2068,14 +2056,12 @@ class RAGTruthEvaluator:
         split: str,
         max_samples: Optional[int],
         samples_per_task: Optional[int],
-        hallucinated_only: bool,
     ) -> Dict[str, Any]:
         """Build a deterministic selection fingerprint for resume compatibility checks."""
         return {
             'split': split,
             'max_samples': max_samples,
             'samples_per_task': samples_per_task,
-            'hallucinated_only': hallucinated_only,
             'ragtruth_eval_mode': self.ragtruth_eval_mode,
             'dataset_path': str(self.benchmark_dir.resolve()),
             'verification_enabled': self.verification_enabled,
