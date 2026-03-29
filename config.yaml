@@ -353,8 +353,10 @@ verification:
     min_score_dense_for_citation: 0.70
 
     # Minimum NLI entailment score required before attaching citations to a claim.
-    # Used when verifier_signals are available to prioritize and gate claim-supporting evidence.
-    min_nli_entailment_for_citation: 0.50
+    # Set to 0.0 to disable the gate while keeping NLI-based evidence ranking active.
+    # The gate removed high-CR citations (those with paraphrase-level NLI) in testing, so
+    # ranking alone (not gating) is the effective policy.
+    min_nli_entailment_for_citation: 0.0
   
   # Rule-Based Aggregator Configuration (Month 5)
   aggregator:

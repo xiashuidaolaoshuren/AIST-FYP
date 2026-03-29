@@ -121,7 +121,7 @@ class TestCitationFormatterInit:
         formatter = CitationFormatter(config)
         assert formatter.max_citations_per_claim == 1
         assert formatter.min_score_dense_for_citation == pytest.approx(0.7)
-        assert formatter.min_nli_entailment_for_citation == pytest.approx(0.5)
+        assert formatter.min_nli_entailment_for_citation == pytest.approx(0.0)
 
     def test_init_sets_default_dense_threshold_when_missing(self, mock_config):
         """When threshold is missing in config, formatter should default to 0.0."""
