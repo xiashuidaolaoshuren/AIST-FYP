@@ -999,10 +999,7 @@ class RAGTruthEvaluator:
             return False
 
         if task_type_normalized == 'data2txt':
-            return (
-                bool(NON_FACTUAL_DATA2TXT_PATTERN.search(text))
-                or bool(DATA2TXT_AGGREGATE_RATING_PATTERN.search(text))
-            )
+            return bool(NON_FACTUAL_DATA2TXT_PATTERN.search(text))
 
         return bool(NON_FACTUAL_SUMMARY_PATTERN.search(text))
 
