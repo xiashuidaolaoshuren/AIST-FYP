@@ -660,15 +660,15 @@ class RAGTruthEvaluator:
                 batch_results = self._evaluate_batch(batch)
                 for result in batch_results:
                     all_results.append(result)
-                    if save_results and output_path is not None:
-                        interim_metrics = self._compute_metrics(all_results)
-                        self._save_results(
-                            interim_metrics,
-                            all_results,
-                            output_path,
-                            run_context=run_context,
-                            max_saved_samples=max_saved_samples,
-                        )
+                if save_results and output_path is not None:
+                    interim_metrics = self._compute_metrics(all_results)
+                    self._save_results(
+                        interim_metrics,
+                        all_results,
+                        output_path,
+                        run_context=run_context,
+                        max_saved_samples=max_saved_samples,
+                    )
                 sample_progress.update(len(batch))
         
         # Step 3: Compute metrics
@@ -1035,23 +1035,88 @@ class RAGTruthEvaluator:
                 [item[2] for item in all_mitigation_rerank_pending],
             )
 
-        rerank_score_offset = 0
-        for prepared in prepared_samples:
-            pending_count = int(prepared.get('_mitigation_rerank_pending_count', 0))
-            sample_rerank_scores = mitigation_rerank_nli_scores[
-                rerank_score_offset:rerank_score_offset + pending_count
-            ]
-            rerank_score_offset += pending_count
-            results.append(
-                self._finalize_sample_result(
-                    prepared,
-                    prepared.get('_base_claim_decisions', []),
-                    prepared.get('_base_claim_signals', []),
-                    prepared.get('_base_verified_pairs', []),
-                    mitigation_rerank_state=prepared.get('_mitigation_rerank_state'),
-                    mitigation_rerank_nli_scores=sample_rerank_scores,
+        # Phase 5: Collect post-reprompt NLI pairs cross-sample.
+        # When the new reprompt-batching API is available, we consume the rerank NLI scores
+        # per sample here (running the LLM reprompter), then aggregate all pending NLI pairs
+        # into a single cross-sample detect_nli_batch call in phase 5.5.
+        use_reprompt_batching = bool(
+            self.mitigation_orchestrator
+            and self.mitigation_orchestrator.enabled
+            and hasattr(self.mitigation_orchestrator, 'apply_run_reprompt_collect_nli')
+        )
+        all_mitigation_reprompt_pending: List[Tuple[int, str, str]] = []
+        if use_reprompt_batching:
+            rerank_score_offset = 0
+            for prepared in prepared_samples:
+                pending_count = int(prepared.get('_mitigation_rerank_pending_count', 0))
+                sample_rerank_scores = mitigation_rerank_nli_scores[
+                    rerank_score_offset:rerank_score_offset + pending_count
+                ]
+                rerank_score_offset += pending_count
+                rerank_state = prepared.get('_mitigation_rerank_state')
+                if rerank_state is None:
+                    prepared['_mitigation_reprompt_state'] = None
+                    prepared['_mitigation_reprompt_pending_count'] = 0
+                    continue
+                reprompt_state, pending_nli = self.mitigation_orchestrator.apply_run_reprompt_collect_nli(
+                    rerank_state=rerank_state,
+                    rerank_nli_scores=sample_rerank_scores,
                 )
+                prepared['_mitigation_reprompt_state'] = reprompt_state
+                prepared['_mitigation_reprompt_pending_count'] = len(pending_nli)
+                all_mitigation_reprompt_pending.extend(pending_nli)
+
+        # Phase 5.5: One cross-sample NLI batch for all post-reprompt verification pairs.
+        mitigation_reprompt_nli_scores: List[Dict[str, float]] = []
+        if (
+            use_reprompt_batching
+            and self.verifier_hub
+            and self.verifier_hub.nli_detector is not None
+            and all_mitigation_reprompt_pending
+        ):
+            mitigation_reprompt_nli_scores = self.verifier_hub.detect_nli_batch(
+                [item[1] for item in all_mitigation_reprompt_pending],
+                [item[2] for item in all_mitigation_reprompt_pending],
             )
+
+        # Phase 6: Finalise all sample results.
+        # When reprompt batching is active the per-sample reprompt state and scores are used
+        # (rerank finalization was already consumed in phase 5). When the new API is absent,
+        # fall back to the existing rerank-state path for backward compatibility.
+        score_offset_p6 = 0
+        for prepared in prepared_samples:
+            if use_reprompt_batching:
+                pending_count = int(prepared.get('_mitigation_reprompt_pending_count', 0))
+                sample_reprompt_scores = mitigation_reprompt_nli_scores[
+                    score_offset_p6:score_offset_p6 + pending_count
+                ]
+                score_offset_p6 += pending_count
+                results.append(
+                    self._finalize_sample_result(
+                        prepared,
+                        prepared.get('_base_claim_decisions', []),
+                        prepared.get('_base_claim_signals', []),
+                        prepared.get('_base_verified_pairs', []),
+                        mitigation_reprompt_state=prepared.get('_mitigation_reprompt_state'),
+                        mitigation_reprompt_nli_scores=sample_reprompt_scores,
+                    )
+                )
+            else:
+                pending_count = int(prepared.get('_mitigation_rerank_pending_count', 0))
+                sample_rerank_scores = mitigation_rerank_nli_scores[
+                    score_offset_p6:score_offset_p6 + pending_count
+                ]
+                score_offset_p6 += pending_count
+                results.append(
+                    self._finalize_sample_result(
+                        prepared,
+                        prepared.get('_base_claim_decisions', []),
+                        prepared.get('_base_claim_signals', []),
+                        prepared.get('_base_verified_pairs', []),
+                        mitigation_rerank_state=prepared.get('_mitigation_rerank_state'),
+                        mitigation_rerank_nli_scores=sample_rerank_scores,
+                    )
+                )
 
         return results
 
@@ -1323,6 +1388,8 @@ class RAGTruthEvaluator:
         verified_pairs: List[Dict[str, Any]],
         mitigation_rerank_state: Optional[Dict[str, Any]] = None,
         mitigation_rerank_nli_scores: Optional[List[Dict[str, float]]] = None,
+        mitigation_reprompt_state: Optional[Dict[str, Any]] = None,
+        mitigation_reprompt_nli_scores: Optional[List[Dict[str, float]]] = None,
     ) -> Dict[str, Any]:
         """Finalize sample outputs and metric labels after verification."""
         sample_id = prepared['sample_id']
@@ -1347,6 +1414,14 @@ class RAGTruthEvaluator:
         mitigation_applied = False
         if mitigation_runtime_enabled and resolved_pairs:
             if (
+                mitigation_reprompt_state is not None
+                and hasattr(self.mitigation_orchestrator, 'apply_finalize_after_reprompt')
+            ):
+                mitigation_result = self.mitigation_orchestrator.apply_finalize_after_reprompt(
+                    reprompt_state=mitigation_reprompt_state,
+                    reprompt_nli_scores=mitigation_reprompt_nli_scores or [],
+                )
+            elif (
                 mitigation_rerank_state is not None
                 and hasattr(self.mitigation_orchestrator, 'apply_finalize_after_rerank')
             ):

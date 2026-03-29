@@ -352,6 +352,147 @@ class MitigationOrchestrator:
             "filtered_claim_count": filtered_claim_count,
         }
 
+    def apply_run_reprompt_collect_nli(
+        self,
+        *,
+        rerank_state: Dict[str, Any],
+        rerank_nli_scores: List[Dict[str, float]],
+    ) -> Tuple[Dict[str, Any], List[Tuple[int, str, str]]]:
+        """Run LLM reprompt and collect pending NLI pairs without executing NLI inference.
+
+        Consumes the rerank-phase NLI scores, executes the LLM reprompter if the routing
+        decision indicates it, and returns a state dict plus pending NLI pairs so the caller
+        can batch the post-reprompt NLI across multiple samples in one detect_nli_batch call.
+        NLI inference on the reprompted claims is deferred to apply_finalize_after_reprompt.
+        """
+        query = rerank_state.get("query", "")
+        answer_text = rerank_state.get("answer_text", "")
+        claim_records = rerank_state.get("claim_records") or []
+        actions = list(rerank_state.get("actions") or [])
+        objective_override = rerank_state.get("objective_override")
+
+        # Finalise rerank NLI if rerank was executed; otherwise use stored signals/decisions.
+        if rerank_state.get("rerank_executed", False):
+            signals, decisions = self.finalize_from_nli_scores(
+                rerank_state.get("rerank_prepared") or {},
+                rerank_state.get("rerank_pending") or [],
+                rerank_nli_scores,
+            )
+        else:
+            signals = rerank_state.get("signals") or []
+            decisions = rerank_state.get("decisions") or []
+
+        planned_actions = self.router.resolve_actions(decisions, objective_override)
+
+        reprompt_executed = False
+        reprompted_answer_text = answer_text
+        reprompt_prepared: Dict[str, Any] = {}
+        reprompt_pending: List[Tuple[int, str, str]] = []
+
+        if (
+            "reprompt" in planned_actions
+            and self.reprompter
+            and self.reprompter.enabled
+            and decisions
+        ):
+            pooled_evidence = self._pool_evidence(claim_records)
+            reprompt_result = self.reprompter.reprompt(
+                query=query,
+                answer=answer_text,
+                decisions=decisions,
+                evidence=pooled_evidence,
+                claims=[r["claim"] for r in claim_records],
+            )
+            if reprompt_result.get("improved", False):
+                reprompted_answer_text = reprompt_result.get("final_answer", answer_text)
+                corrected_claims = extract_claims(text=reprompted_answer_text, method="auto")
+                shared_metadata = claim_records[0].get("metadata") if claim_records else {}
+                default_evidence = pooled_evidence[:5]
+                new_claim_records = [
+                    {
+                        "claim": claim,
+                        "evidence": default_evidence,
+                        "metadata": shared_metadata or {},
+                    }
+                    for claim in corrected_claims
+                    if default_evidence
+                ]
+                if new_claim_records:
+                    reprompt_prepared, pending_tuples = self.collect_nli_phase(new_claim_records)
+                    reprompt_pending = list(pending_tuples)
+                    claim_records = new_claim_records
+                    actions.append("reprompt")
+                    reprompt_executed = True
+
+        state = {
+            "query": query,
+            "answer_text": answer_text,
+            "reprompted_answer_text": reprompted_answer_text,
+            "claim_records": claim_records,
+            "signals": signals,
+            "decisions": decisions,
+            "planned_actions": planned_actions,
+            "actions": actions,
+            "objective_override": objective_override,
+            "reprompt_executed": reprompt_executed,
+            "reprompt_prepared": reprompt_prepared,
+            "reprompt_pending": reprompt_pending,
+        }
+        return state, reprompt_pending
+
+    def apply_finalize_after_reprompt(
+        self,
+        *,
+        reprompt_state: Dict[str, Any],
+        reprompt_nli_scores: List[Dict[str, float]],
+    ) -> Dict[str, Any]:
+        """Finalize mitigation flow after reprompt NLI scores are provided."""
+        query = reprompt_state.get("query", "")
+        answer_text = reprompt_state.get("answer_text", "")
+        claim_records = reprompt_state.get("claim_records") or []
+        actions = list(reprompt_state.get("actions") or [])
+        objective_override = reprompt_state.get("objective_override")
+
+        if reprompt_state.get("reprompt_executed", False):
+            answer_text = reprompt_state.get("reprompted_answer_text", answer_text)
+            signals, decisions = self.finalize_from_nli_scores(
+                reprompt_state.get("reprompt_prepared") or {},
+                reprompt_state.get("reprompt_pending") or [],
+                reprompt_nli_scores,
+            )
+            planned_actions = self.router.resolve_actions(decisions, objective_override)
+        else:
+            signals = reprompt_state.get("signals") or []
+            decisions = reprompt_state.get("decisions") or []
+            planned_actions = reprompt_state.get("planned_actions") or self.router.resolve_actions(
+                decisions, objective_override
+            )
+
+        filtered_claim_count = 0
+        if (
+            "filter" in planned_actions
+            and self.claim_filter
+            and self.claim_filter.enabled
+            and decisions
+            and claim_records
+        ):
+            answer_text, filtered_claim_count = self.claim_filter.filter_answer(
+                answer_text=answer_text,
+                claims=[r["claim"] for r in claim_records],
+                decisions=decisions,
+            )
+            if filtered_claim_count > 0:
+                actions.append("filter")
+
+        return {
+            "final_answer": answer_text,
+            "claim_records": claim_records,
+            "decisions": decisions,
+            "signals": signals,
+            "actions": actions,
+            "filtered_claim_count": filtered_claim_count,
+        }
+
     def collect_nli_phase(self, claim_records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[Tuple[int, str, str]]]:
         """Prepare verification signals excluding NLI inference and collect NLI pairs."""
         prepared = {
