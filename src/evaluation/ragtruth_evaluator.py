@@ -75,7 +75,10 @@ QA_EPISTEMIC_HEDGE_PATTERN = re.compile(
 )
 
 QA_META_REFERENCE_PATTERN = re.compile(
-    r"\b(?:according to|based on)\s+(?:the\s+)?(?:provided|given\s+)?passages?\b|"
+    # 'based on the given passages' / 'according to the provided passages'
+    # The inner group uses (?:provided|given)\s+ (with trailing \s+) so the
+    # space between "provided/given" and "passages" is consumed properly.
+    r"\b(?:according to|based on)\s+(?:the\s+)?(?:(?:provided|given)\s+)?passages?\b|"
     r"\b(?:this|that|it)\s+is\s+mentioned\s+in\s+passage\s*\d+\b|"
     r"\bpassage\s*\d+\s+(?:mentions?|states?|says?|discusses?|explains?)\b|"
     r"\b(?:the\s+)?provided\s+passages?\s+(?:do|does)\s+not\s+(?:mention|provide|contain)\b|"
@@ -1137,7 +1140,13 @@ class RAGTruthEvaluator:
 
     @staticmethod
     def _normalize_qa_response_for_claim_extraction(text: str) -> str:
-        """Normalize QA answers by removing passage labels and list numbering noise."""
+        """Normalize QA answers by removing passage labels and list numbering noise.
+
+        Also strips leading meta-reference preamble lines (e.g. "Based on the
+        given passages, the benefits of X include:") when they precede a bullet
+        list.  Without this, spaCy treats the whole response as a single claim
+        and the preamble match causes the entire response to be filtered.
+        """
         normalized_lines = []
         for raw_line in (text or '').splitlines():
             line = re.sub(r'^\s*\d+(?:[\.)]\s*|\s+)', '', raw_line)
@@ -1145,7 +1154,39 @@ class RAGTruthEvaluator:
             line = QA_PASSAGE_TOKEN_PATTERN.sub('', line)
             line = re.sub(r'\s{2,}', ' ', line).strip()
             normalized_lines.append(line)
-        return '\n'.join(normalized_lines).strip()
+        normalized = '\n'.join(normalized_lines).strip()
+
+        # Strip a leading meta-reference preamble that introduces a bullet list.
+        # Pattern: one or two non-bullet lines matching QA_META_REFERENCE_PATTERN
+        # followed by content starting with a bullet marker (* or -).
+        # We strip only the preamble so the factual bullet items are preserved.
+        lines = normalized.splitlines()
+        first_bullet_idx = next(
+            (i for i, ln in enumerate(lines) if re.match(r'^\s*[*\-]\s', ln)),
+            None,
+        )
+        if first_bullet_idx is not None and first_bullet_idx <= 2:
+            preamble = ' '.join(lines[:first_bullet_idx]).strip()
+            if preamble and QA_META_REFERENCE_PATTERN.search(preamble):
+                lines = lines[first_bullet_idx:]
+                normalized = '\n'.join(lines).strip()
+
+        # Convert bullet-list lines into plain sentences so the sentence
+        # splitter (spaCy/regex) produces one claim per bullet item.
+        # Only applies when the text is purely a bullet list (≥ 2 bullets).
+        non_empty_lines = [ln for ln in normalized.splitlines() if ln.strip()]
+        bullet_lines = [ln for ln in non_empty_lines if re.match(r'^\s*[*\-]\s', ln)]
+        if len(bullet_lines) >= 2 and len(bullet_lines) == len(non_empty_lines):
+            sentence_parts = []
+            for ln in non_empty_lines:
+                content = re.sub(r'^\s*[*\-]\s+', '', ln).strip()
+                if content and not content.endswith(('.', '!', '?')):
+                    content += '.'
+                if content:
+                    sentence_parts.append(content)
+            normalized = ' '.join(sentence_parts)
+
+        return normalized
 
     @staticmethod
     def _is_non_factual_claim(claim_text: str, task_type: str) -> bool:
