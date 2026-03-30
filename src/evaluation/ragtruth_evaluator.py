@@ -891,7 +891,10 @@ class RAGTruthEvaluator:
                     'gold_response': response['response']  # For reference
                 }
 
-                if hallucinated_only and not sample['gold_labels']:
+                if hallucinated_only and not any(
+                    self._is_hallucination_label(label)
+                    for label in sample['gold_labels']
+                ):
                     continue
                 
                 samples.append(sample)
@@ -1687,6 +1690,10 @@ class RAGTruthEvaluator:
         avg_contradict_prob_low_conf = (
             float(np.mean(contradict_probs_low_conf)) if contradict_probs_low_conf else 0.0
         )
+        effective_min_contradictory = self.per_task_min_contradictory.get(
+            task_type,
+            self.min_contradictory_count,
+        )
         task_low_coverage_ratio_threshold = self.per_task_low_coverage_ratio_threshold.get(
             task_type,
             self.low_coverage_ratio_threshold,
@@ -1698,7 +1705,7 @@ class RAGTruthEvaluator:
             and low_confidence_ratio >= self.low_confidence_ratio_threshold
         )
         lc_avg_contradict_trigger = (
-            contradictory_count == 0
+            contradictory_count < effective_min_contradictory
             and low_confidence_ratio >= self.lc_avg_contradict_ratio_threshold
             and avg_contradict_prob_low_conf >= self.lc_avg_contradict_prob_threshold
             and len(claim_decisions) >= self.min_claims_for_lc_escalation
@@ -1709,11 +1716,7 @@ class RAGTruthEvaluator:
             and len(claim_decisions) >= self.min_claims_for_lc_escalation
             and low_confidence_ratio >= self.qa_pure_lc_block_ratio
         )
-        contradictory_trigger = (
-            contradictory_count >= self.per_task_min_contradictory.get(
-                task_type, self.min_contradictory_count
-            )
-        )
+        contradictory_trigger = contradictory_count >= effective_min_contradictory
         data2txt_contradictory_override_block = False
         if (
             task_type == 'Data2txt'
@@ -2205,6 +2208,11 @@ class RAGTruthEvaluator:
             Metrics dictionary with overall and per-class statistics
         """
         filter_active = bool(self.mitigation_module_flags.get('filter', False))
+        lc_soft_filter_threshold = 0.0
+        if self.mitigation_orchestrator and getattr(self.mitigation_orchestrator, 'claim_filter', None):
+            lc_soft_filter_threshold = float(
+                getattr(self.mitigation_orchestrator.claim_filter, 'lc_soft_filter_prob_threshold', 0.0)
+            )
 
         def _compute_hrr_counts(rows: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
             total_gold_claims = 0
@@ -2221,14 +2229,30 @@ class RAGTruthEvaluator:
                         continue
                     overlaps_gold = bool(claim_result.get('overlaps_gold_hallucination', False))
                     predicted_status = str(claim_result.get('predicted_status', ''))
+                    confidence = claim_result.get('confidence', {})
+                    if not isinstance(confidence, dict):
+                        confidence = {}
+                    contradict_prob = float(confidence.get('contradict_prob', 0.0))
+
+                    removed_by_filter = (
+                        filter_active
+                        and (
+                            predicted_status == 'Contradictory'
+                            or (
+                                lc_soft_filter_threshold > 0.0
+                                and predicted_status == 'Low Confidence'
+                                and contradict_prob >= lc_soft_filter_threshold
+                            )
+                        )
+                    )
 
                     if overlaps_gold:
                         total_gold_claims += 1
-                        if filter_active and predicted_status == 'Contradictory':
+                        if removed_by_filter:
                             gold_claims_removed += 1
                     else:
                         total_non_gold_claims += 1
-                        if filter_active and predicted_status == 'Contradictory':
+                        if removed_by_filter:
                             non_gold_claims_removed += 1
 
             return (
@@ -2257,9 +2281,21 @@ class RAGTruthEvaluator:
                     for claim_result in claim_results:
                         if not isinstance(claim_result, dict):
                             continue
+                        confidence = claim_result.get('confidence', {})
+                        if not isinstance(confidence, dict):
+                            confidence = {}
+                        contradict_prob = float(confidence.get('contradict_prob', 0.0))
+                        removed_by_filter = (
+                            str(claim_result.get('predicted_status', '')) == 'Contradictory'
+                            or (
+                                lc_soft_filter_threshold > 0.0
+                                and str(claim_result.get('predicted_status', '')) == 'Low Confidence'
+                                and contradict_prob >= lc_soft_filter_threshold
+                            )
+                        )
                         if (
                             bool(claim_result.get('overlaps_gold_hallucination', False))
-                            and str(claim_result.get('predicted_status', '')) == 'Contradictory'
+                            and removed_by_filter
                         ):
                             removed_gold_hallucinated_claim = True
                             break
@@ -2291,13 +2327,18 @@ class RAGTruthEvaluator:
                 float(tp_non_gold_claims_removed / tp_total_non_gold_claims)
                 if tp_total_non_gold_claims > 0 else 0.0
             )
-            tp_samples_with_response_changed = sum(
+            tp_samples_with_modified_response = sum(
                 1
                 for row in tp_rows
                 if str(row.get('response_after_mitigation', '')) != str(row.get('generated_response', ''))
             )
             tp_response_change_rate = (
-                float(tp_samples_with_response_changed / tp_count)
+                float(tp_samples_with_modified_response / tp_count)
+                if tp_count > 0 else 0.0
+            )
+            _, tp_samples_fixed = _compute_sample_fix_counts(tp_rows)
+            tp_sample_fix_rate = (
+                float(tp_samples_fixed / tp_count)
                 if tp_count > 0 else 0.0
             )
 
@@ -2309,8 +2350,10 @@ class RAGTruthEvaluator:
                 'tp_total_non_gold_claims': int(tp_total_non_gold_claims),
                 'tp_non_gold_claims_removed': int(tp_non_gold_claims_removed),
                 'tp_frr': float(tp_frr),
-                'tp_samples_with_response_changed': int(tp_samples_with_response_changed),
+                'tp_samples_with_modified_response': int(tp_samples_with_modified_response),
                 'tp_response_change_rate': float(tp_response_change_rate),
+                'tp_samples_fixed': int(tp_samples_fixed),
+                'tp_sample_fix_rate': float(tp_sample_fix_rate),
             }
 
         # Extract predictions and ground truth
@@ -2526,7 +2569,8 @@ class RAGTruthEvaluator:
                 'claim_hallucination': 'Claim is counted as hallucinated when predicted status is Contradictory.',
                 'sample_fix_rate': (
                     'Rate of gold-hallucinated samples where mitigation changed the final response and '
-                    'at least one gold-overlapping claim was predicted as Contradictory.'
+                    'at least one gold-overlapping claim was removed by filter '
+                    '(Contradictory or LC soft-filter above threshold).'
                 ),
                 'detection_trigger_path': (
                     "Primary path that first triggered sample-level detection: "

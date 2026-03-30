@@ -270,8 +270,15 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "tp_total_non_gold_claims": int(tp_mitigation_metrics.get("tp_total_non_gold_claims", 0)),
         "tp_non_gold_claims_removed": int(tp_mitigation_metrics.get("tp_non_gold_claims_removed", 0)),
         "tp_frr": float(tp_mitigation_metrics.get("tp_frr", 0.0)),
-        "tp_samples_with_response_changed": int(tp_mitigation_metrics.get("tp_samples_with_response_changed", 0)),
+        "tp_samples_with_modified_response": int(
+            tp_mitigation_metrics.get(
+                "tp_samples_with_modified_response",
+                tp_mitigation_metrics.get("tp_samples_with_response_changed", 0),
+            )
+        ),
         "tp_response_change_rate": float(tp_mitigation_metrics.get("tp_response_change_rate", 0.0)),
+        "tp_samples_fixed": int(tp_mitigation_metrics.get("tp_samples_fixed", 0)),
+        "tp_sample_fix_rate": float(tp_mitigation_metrics.get("tp_sample_fix_rate", 0.0)),
         "num_samples_evaluated": len(sample_ids),
         "sample_ids": sample_ids,
     }
@@ -439,8 +446,8 @@ def _write_summary(
         "",
         "## TP-Conditioned Mitigation Metrics",
         "",
-        "| Variant | TP Samples | TP HRR (%) | TP FRR (%) | TP Gold Claims Removed | TP Non-Gold Claims Removed | TP Response Changed | TP Response Change Rate (%) | Sample Fix Rate (%) | Samples Fixed / Gold-Hallucinated Samples |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Variant | TP Samples | TP HRR (%) | TP FRR (%) | TP Gold Claims Removed | TP Non-Gold Claims Removed | TP Modified Response | TP Response Change Rate (%) | TP Samples Fixed | TP Sample Fix Rate (%) | Sample Fix Rate (%) | Samples Fixed / Gold-Hallucinated Samples |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ])
 
     for name, metric in variant_metrics.items():
@@ -449,7 +456,8 @@ def _write_summary(
             f"{name} | {metric['tp_count']} | {metric['tp_hrr'] * 100.0:.2f}% | {metric['tp_frr'] * 100.0:.2f}% | "
             f"{metric['tp_gold_claims_removed']} / {metric['tp_total_gold_claims']} | "
             f"{metric['tp_non_gold_claims_removed']} / {metric['tp_total_non_gold_claims']} | "
-            f"{metric['tp_samples_with_response_changed']} | {metric['tp_response_change_rate'] * 100.0:.2f}% | "
+            f"{metric['tp_samples_with_modified_response']} | {metric['tp_response_change_rate'] * 100.0:.2f}% | "
+            f"{metric['tp_samples_fixed']} | {metric['tp_sample_fix_rate'] * 100.0:.2f}% | "
             f"{metric['sample_fix_rate'] * 100.0:.2f}% | "
             f"{metric['samples_fixed']} / {metric['samples_with_gold_hallucination']} |"
         )
