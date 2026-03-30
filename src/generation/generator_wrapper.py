@@ -53,6 +53,7 @@ class GeneratorWrapper:
         dtype: Union[str, torch.dtype, None] = 'bf16',
         max_input_tokens: Optional[int] = None,
         enable_thinking: bool = True,
+        attn_implementation: Optional[str] = None,
     ):
         """
         Initialize the generator wrapper.
@@ -123,6 +124,9 @@ class GeneratorWrapper:
             model_cls = AutoModelForSeq2SeqLM if self.model_family == 'seq2seq' else AutoModelForCausalLM
 
             quantization_kwargs: Dict[str, Any] = {}
+            attention_kwargs: Dict[str, Any] = {}
+            if self.model_family == 'causal' and attn_implementation:
+                attention_kwargs['attn_implementation'] = str(attn_implementation)
             if is_8bit_mode:
                 try:
                     from transformers import BitsAndBytesConfig
@@ -143,6 +147,7 @@ class GeneratorWrapper:
                         output_loading_info=True,
                         device_map='auto',
                         **quantization_kwargs,
+                        **attention_kwargs,
                         **safe_tensor_kwargs
                     )
                 except Exception as load_err:
@@ -162,6 +167,7 @@ class GeneratorWrapper:
                     model_kwargs = {'device_map': 'auto', **safe_tensor_kwargs}
                     if selected_torch_dtype is not None:
                         model_kwargs['torch_dtype'] = selected_torch_dtype
+                    model_kwargs.update(attention_kwargs)
                     try:
                         self.model, loading_info = model_cls.from_pretrained(
                             model_name,
@@ -184,6 +190,7 @@ class GeneratorWrapper:
                     cpu_kwargs = {**safe_tensor_kwargs}
                     if selected_torch_dtype is not None and not is_cuda_device:
                         cpu_kwargs['torch_dtype'] = selected_torch_dtype
+                    cpu_kwargs.update(attention_kwargs)
                     try:
                         cpu_model, loading_info = model_cls.from_pretrained(
                             model_name,
@@ -746,6 +753,120 @@ class GeneratorWrapper:
             self.model_name
         )
         return samples
+
+    def generate_batch_n_samples(
+        self,
+        prompts: List[str],
+        evidence_chunks_list: Optional[List[List[EvidenceChunk]]] = None,
+        num_samples: int = 1,
+        max_new_tokens: int = 256,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        do_sample: bool = True,
+        repetition_penalty: Optional[float] = None,
+        no_repeat_ngram_size: Optional[int] = None,
+        sanitize_meta_text: bool = False,
+        max_batch_size: int = 16,
+    ) -> List[List[str]]:
+        """Generate multiple samples for multiple prompts with batched model calls.
+
+        Returns a list aligned with prompts where each entry contains `num_samples`
+        generated texts for the corresponding prompt.
+        """
+        if num_samples <= 0:
+            raise ValueError("num_samples must be > 0")
+        if max_batch_size <= 0:
+            raise ValueError("max_batch_size must be > 0")
+        if not prompts:
+            return []
+
+        if evidence_chunks_list is None:
+            evidence_chunks_list = [[] for _ in prompts]
+        if len(evidence_chunks_list) != len(prompts):
+            raise ValueError("prompts and evidence_chunks_list must have the same length")
+
+        formatted_prompts = [
+            self._format_prompt(prompt, evidence_chunks or [])
+            for prompt, evidence_chunks in zip(prompts, evidence_chunks_list)
+        ]
+        max_input_tokens = self._resolve_max_input_tokens()
+
+        all_samples: List[List[str]] = []
+        original_padding_side = getattr(self.tokenizer, 'padding_side', 'right')
+
+        try:
+            if self.model_family == 'causal':
+                # Left padding keeps right edge aligned for causal generation in batches.
+                self.tokenizer.padding_side = 'left'
+
+            for start_idx in range(0, len(formatted_prompts), int(max_batch_size)):
+                end_idx = min(start_idx + int(max_batch_size), len(formatted_prompts))
+                batch_prompts = formatted_prompts[start_idx:end_idx]
+
+                inputs = self.tokenizer(
+                    batch_prompts,
+                    return_tensors='pt',
+                    padding=True,
+                    truncation=True,
+                    max_length=max_input_tokens,
+                ).to(self.model.device)
+
+                generate_kwargs = {
+                    'max_new_tokens': max_new_tokens,
+                    'temperature': temperature,
+                    'top_p': top_p,
+                    'do_sample': do_sample,
+                    'num_return_sequences': int(num_samples),
+                    'pad_token_id': self.tokenizer.pad_token_id,
+                }
+
+                if repetition_penalty is not None and repetition_penalty > 0:
+                    generate_kwargs['repetition_penalty'] = repetition_penalty
+                if no_repeat_ngram_size is not None and no_repeat_ngram_size > 0:
+                    generate_kwargs['no_repeat_ngram_size'] = int(no_repeat_ngram_size)
+
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        **generate_kwargs,
+                    )
+
+                sequences = outputs if isinstance(outputs, torch.Tensor) else outputs.sequences
+                if self.model_family == 'seq2seq':
+                    generated_sequences = sequences
+                else:
+                    prompt_len = int(inputs['input_ids'].shape[1])
+                    generated_sequences = sequences[:, prompt_len:]
+
+                decoded_texts: List[str] = []
+                for seq in generated_sequences:
+                    text = self.tokenizer.decode(seq, skip_special_tokens=True)
+                    if sanitize_meta_text:
+                        text = self._sanitize_generated_text(text)
+                    decoded_texts.append(text)
+
+                batch_size = end_idx - start_idx
+                expected_count = batch_size * int(num_samples)
+                if len(decoded_texts) != expected_count:
+                    raise RuntimeError(
+                        f"Unexpected decode count: got {len(decoded_texts)}, expected {expected_count}"
+                    )
+
+                for row in range(batch_size):
+                    row_start = row * int(num_samples)
+                    row_end = row_start + int(num_samples)
+                    all_samples.append(decoded_texts[row_start:row_end])
+        finally:
+            if hasattr(self.tokenizer, 'padding_side'):
+                self.tokenizer.padding_side = original_padding_side
+
+        self.logger.debug(
+            "Generated batched samples for %d prompts (k=%d, model=%s)",
+            len(prompts),
+            int(num_samples),
+            self.model_name,
+        )
+        return all_samples
 
     def score_target_with_metadata(
         self,

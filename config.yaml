@@ -156,6 +156,10 @@ generation:
   # Generator precision mode: bf16 | fp16 | fp32 | 8bit
   torch_dtype: "bf16"
 
+  # Optional attention backend for causal models.
+  # Set to "flash_attention_2" on supported GPUs for faster decode.
+  attn_implementation: null
+
 # Verification Configuration (Month 3)
 verification:
   # Enable/disable verification module (default: false for backward compatibility)

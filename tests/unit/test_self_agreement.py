@@ -309,3 +309,59 @@ class TestSelfAgreementDetector:
         assert result['variance'] is None
         assert result['score'] is None
         assert result['samples_generated'] == 0
+
+    def test_detect_batch_uses_batched_generation(self, sample_config, sample_evidence):
+        """detect_batch should call generator.generate_batch_n_samples once for misses."""
+        generator = Mock()
+        generator.generate_batch_n_samples = Mock(
+            return_value=[
+                ["a1", "a2", "a3"],
+                ["b1", "b2", "b3"],
+            ]
+        )
+        detector = SelfAgreementDetector(sample_config, generator)
+
+        with patch.object(
+            detector,
+            'measure_consistency',
+            side_effect=[
+                {'consistency_score': 0.8, 'variance': 0.01},
+                {'consistency_score': 0.6, 'variance': 0.03},
+            ],
+        ):
+            results = detector.detect_batch(
+                claim_texts=["claim 1", "claim 2"],
+                queries=["q1", "q2"],
+                evidence_chunks_list=[[sample_evidence[0]], [sample_evidence[1]]],
+            )
+
+        generator.generate_batch_n_samples.assert_called_once()
+        assert len(results) == 2
+        assert results[0]['samples_generated'] == 3
+        assert results[1]['samples_generated'] == 3
+
+    def test_detect_batch_cache_hit_skips_generation(self, sample_config, sample_evidence):
+        """detect_batch should reuse cached samples and avoid generator calls."""
+        generator = Mock()
+        generator.generate_batch_n_samples = Mock(return_value=[])
+        detector = SelfAgreementDetector(sample_config, generator)
+
+        query = "cached query"
+        evidence = [sample_evidence[0]]
+        cache_key = detector._cache_key(query, evidence)
+        detector._sample_cache[cache_key] = ["s1", "s2", "s3"]
+
+        with patch.object(
+            detector,
+            'measure_consistency',
+            return_value={'consistency_score': 0.9, 'variance': 0.0},
+        ):
+            results = detector.detect_batch(
+                claim_texts=["claim"],
+                queries=[query],
+                evidence_chunks_list=[evidence],
+            )
+
+        generator.generate_batch_n_samples.assert_not_called()
+        assert len(results) == 1
+        assert results[0]['samples_generated'] == 3

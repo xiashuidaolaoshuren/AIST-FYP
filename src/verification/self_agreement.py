@@ -402,3 +402,100 @@ class SelfAgreementDetector:
                 'score': None,
                 'samples_generated': 0
             }
+
+    def detect_batch(
+        self,
+        claim_texts: List[str],
+        queries: List[str],
+        evidence_chunks_list: Optional[List[Optional[List[EvidenceChunk]]]] = None,
+    ) -> List[Dict[str, float]]:
+        """Batch self-agreement detection for multiple claim/query pairs.
+
+        This method preserves per-query sample caching and batches stochastic
+        generation for cache misses when the generator supports
+        `generate_batch_n_samples`.
+        """
+        if len(claim_texts) != len(queries):
+            raise ValueError("claim_texts and queries must have the same length")
+        if evidence_chunks_list is None:
+            evidence_chunks_list = [None] * len(claim_texts)
+        if len(evidence_chunks_list) != len(claim_texts):
+            raise ValueError("evidence_chunks_list must have the same length as claim_texts")
+
+        if not claim_texts:
+            return []
+
+        results: List[Dict[str, float]] = [
+            {'variance': None, 'score': None, 'samples_generated': 0}
+            for _ in claim_texts
+        ]
+
+        misses: List[int] = []
+        miss_queries: List[str] = []
+        miss_evidence: List[List[EvidenceChunk]] = []
+        cached_samples_by_index: Dict[int, List[str]] = {}
+
+        for idx, (claim_text, query, evidence_chunks) in enumerate(
+            zip(claim_texts, queries, evidence_chunks_list)
+        ):
+            if not claim_text or not str(claim_text).strip():
+                continue
+            if not query or not str(query).strip():
+                continue
+
+            normalized_evidence = evidence_chunks or []
+            cache_key = self._cache_key(query, normalized_evidence)
+            cached = self._sample_cache.get(cache_key)
+            if cached is not None:
+                cached_samples_by_index[idx] = list(cached)
+            else:
+                misses.append(idx)
+                miss_queries.append(query)
+                miss_evidence.append(normalized_evidence)
+
+        if misses:
+            generated_batches: List[List[str]] = []
+            try:
+                if hasattr(self.generator, 'generate_batch_n_samples'):
+                    generated_batches = self.generator.generate_batch_n_samples(
+                        prompts=miss_queries,
+                        evidence_chunks_list=miss_evidence,
+                        num_samples=int(self.k_samples),
+                        max_new_tokens=256,
+                        temperature=self.temperature,
+                        top_p=0.95,
+                        do_sample=True,
+                        sanitize_meta_text=True,
+                    )
+                else:
+                    raise AttributeError("Generator does not implement generate_batch_n_samples")
+            except Exception as e:
+                self.logger.warning(
+                    "Batch self-agreement generation unavailable, falling back to per-item mode: %s",
+                    e,
+                )
+                generated_batches = [
+                    self.generate_samples(query=query, evidence_chunks=evidence, k=int(self.k_samples))
+                    for query, evidence in zip(miss_queries, miss_evidence)
+                ]
+
+            for idx, query, evidence, samples in zip(misses, miss_queries, miss_evidence, generated_batches):
+                cache_key = self._cache_key(query, evidence)
+                self._sample_cache[cache_key] = list(samples)
+                cached_samples_by_index[idx] = list(samples)
+
+        for idx, claim_text in enumerate(claim_texts):
+            samples = cached_samples_by_index.get(idx)
+            if samples is None:
+                continue
+            try:
+                consistency_result = self.measure_consistency(claim_text, samples)
+                results[idx] = {
+                    'variance': consistency_result['variance'],
+                    'score': consistency_result['consistency_score'],
+                    'samples_generated': len(samples),
+                }
+            except Exception as e:
+                self.logger.error("Self-agreement batch detect failed for item %d: %s", idx, e)
+
+        return results

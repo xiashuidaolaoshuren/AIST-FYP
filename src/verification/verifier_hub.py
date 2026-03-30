@@ -448,6 +448,13 @@ class VerifierHub:
         prepared_items: List[Dict[str, Any]] = []
         nli_pending: List[Tuple[int, str, str]] = []
 
+        # Pass 1: Prepare non-SA signals and collect SA batch payload.
+        precomputed_single: List[Dict[str, Any]] = []
+        sa_claim_texts: List[str] = []
+        sa_queries: List[str] = []
+        sa_evidence_list: List[List[EvidenceChunk]] = []
+        sa_pending_indices: List[int] = []
+
         for item in single_items:
             claim = item['claim']
             evidence = item['evidence']
@@ -485,32 +492,23 @@ class VerifierHub:
                             'tokens_overlap': 0.0,
                         }
 
-                consistency_signal = {'variance': None}
-                if self.self_agreement_detector is not None:
-                    try:
-                        query = metadata.get('original_query', None)
-                        if query:
-                            consistency_signal = self.self_agreement_detector.detect(
-                                claim_text=claim.text,
-                                query=query,
-                                evidence_chunks=[evidence],
-                            )
-                    except Exception:
-                        consistency_signal = {'variance': None}
+                precomputed_single.append(
+                    {
+                        'index': item['index'],
+                        'claim': claim,
+                        'evidence': evidence,
+                        'metadata': metadata,
+                        'uncertainty': uncertainty_signal,
+                        'grounded': grounded_signal,
+                    }
+                )
 
-                prepared_item = {
-                    'index': item['index'],
-                    'claim': claim,
-                    'evidence': evidence,
-                    'uncertainty': uncertainty_signal,
-                    'grounded': grounded_signal,
-                    'consistency': consistency_signal,
-                    'needs_nli': self.nli_detector is not None,
-                }
-                prepared_items.append(prepared_item)
-
-                if prepared_item['needs_nli']:
-                    nli_pending.append((item['index'], claim.text, evidence.text))
+                query = metadata.get('original_query', None)
+                if self.self_agreement_detector is not None and query:
+                    sa_pending_indices.append(item['index'])
+                    sa_claim_texts.append(claim.text)
+                    sa_queries.append(query)
+                    sa_evidence_list.append([evidence])
             except Exception as e:
                 self.logger.error(
                     "Batch verify prepare failed for claim %s: %s",
@@ -518,6 +516,54 @@ class VerifierHub:
                     str(e),
                 )
                 self.logger.debug(traceback.format_exc())
+
+        # Pass 1.5: Batch self-agreement detection for single-evidence claims.
+        sa_results_by_index: Dict[int, Dict[str, float]] = {}
+        if self.self_agreement_detector is not None and sa_pending_indices:
+            try:
+                if hasattr(self.self_agreement_detector, 'detect_batch'):
+                    batch_consistency = self.self_agreement_detector.detect_batch(
+                        claim_texts=sa_claim_texts,
+                        queries=sa_queries,
+                        evidence_chunks_list=sa_evidence_list,
+                    )
+                    for idx, result in zip(sa_pending_indices, batch_consistency):
+                        sa_results_by_index[idx] = result
+                else:
+                    for idx, claim_text, query, evidence_chunks in zip(
+                        sa_pending_indices,
+                        sa_claim_texts,
+                        sa_queries,
+                        sa_evidence_list,
+                    ):
+                        sa_results_by_index[idx] = self.self_agreement_detector.detect(
+                            claim_text=claim_text,
+                            query=query,
+                            evidence_chunks=evidence_chunks,
+                        )
+            except Exception:
+                for idx in sa_pending_indices:
+                    sa_results_by_index[idx] = {'variance': None}
+
+        # Pass 2: Build prepared items and NLI pending tuples.
+        for item in precomputed_single:
+            claim = item['claim']
+            evidence = item['evidence']
+            consistency_signal = sa_results_by_index.get(item['index'], {'variance': None})
+
+            prepared_item = {
+                'index': item['index'],
+                'claim': claim,
+                'evidence': evidence,
+                'uncertainty': item['uncertainty'],
+                'grounded': item['grounded'],
+                'consistency': consistency_signal,
+                'needs_nli': self.nli_detector is not None,
+            }
+            prepared_items.append(prepared_item)
+
+            if prepared_item['needs_nli']:
+                nli_pending.append((item['index'], claim.text, evidence.text))
 
         return _BatchPreparedState(
             results=results,

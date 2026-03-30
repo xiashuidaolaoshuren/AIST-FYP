@@ -1049,6 +1049,7 @@ class BaselineRAGPipeline:
             dtype=config.generation.get('torch_dtype', 'bf16'),
             max_input_tokens=config.generation.get('max_input_tokens', None),
             enable_thinking=config.generation.get('enable_thinking', False),
+            attn_implementation=config.generation.get('attn_implementation', None),
         )
         
         logger.info("Pipeline initialization complete")
