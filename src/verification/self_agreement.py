@@ -75,13 +75,17 @@ class SelfAgreementDetector:
         self.model_name = sa_config.get('model_name', 'sentence-transformers/all-MiniLM-L6-v2')
         self.k_samples = sa_config.get('k_samples', 5)
         self.temperature = sa_config.get('temperature', 1.5)
+        self.max_batch_size = int(sa_config.get('max_batch_size', 16))
         self.device = sa_config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         self.deterministic = sa_config.get('deterministic', False)
         self.random_seed = sa_config.get('random_seed', 42)
         
         self.logger.info(f"Initializing SelfAgreementDetector...")
         self.logger.info(f"Model: {self.model_name}")
-        self.logger.info(f"k_samples: {self.k_samples}, temperature: {self.temperature}")
+        self.logger.info(
+            f"k_samples: {self.k_samples}, temperature: {self.temperature}, "
+            f"max_batch_size: {self.max_batch_size}"
+        )
         self.logger.info(f"Device: {self.device}")
         self.logger.info(f"Deterministic mode: {self.deterministic} (seed={self.random_seed})")
         
@@ -466,6 +470,7 @@ class SelfAgreementDetector:
                         top_p=0.95,
                         do_sample=True,
                         sanitize_meta_text=True,
+                        max_batch_size=int(self.max_batch_size),
                     )
                 else:
                     raise AttributeError("Generator does not implement generate_batch_n_samples")

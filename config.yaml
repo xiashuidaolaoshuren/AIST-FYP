@@ -311,6 +311,10 @@ verification:
     
     # Number of stochastic samples to generate for consistency check
     k_samples: 5
+
+    # Max claim/query items per self-agreement generation sub-batch.
+    # Lower if you encounter CUDA OOM; increase on larger GPUs.
+    max_batch_size: 16
     
     # Temperature for stochastic sampling (higher = more diversity)
     temperature: 1.5

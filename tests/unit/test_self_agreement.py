@@ -20,6 +20,7 @@ def sample_config():
                 'model_name': 'sentence-transformers/all-MiniLM-L6-v2',
                 'k_samples': 3,  # Use 3 for faster tests
                 'temperature': 1.5,
+                'max_batch_size': 8,
                 'device': 'cpu'  # Use CPU for tests
             }
         }
@@ -91,6 +92,7 @@ class TestSelfAgreementDetector:
         assert detector.generator == mock_generator
         assert detector.k_samples == 3
         assert detector.temperature == 1.5
+        assert detector.max_batch_size == 8
         assert detector.model_name == 'sentence-transformers/all-MiniLM-L6-v2'
         assert detector.similarity_model is not None
         assert detector.device == 'cpu'
@@ -103,6 +105,7 @@ class TestSelfAgreementDetector:
         # Should use defaults
         assert detector.k_samples == 5
         assert detector.temperature == 1.5
+        assert detector.max_batch_size == 16
         assert 'all-MiniLM-L6-v2' in detector.model_name
     
     def test_generate_samples(self, sample_config, mock_generator, sample_evidence):
@@ -336,6 +339,8 @@ class TestSelfAgreementDetector:
             )
 
         generator.generate_batch_n_samples.assert_called_once()
+        call_kwargs = generator.generate_batch_n_samples.call_args.kwargs
+        assert call_kwargs['max_batch_size'] == 8
         assert len(results) == 2
         assert results[0]['samples_generated'] == 3
         assert results[1]['samples_generated'] == 3
