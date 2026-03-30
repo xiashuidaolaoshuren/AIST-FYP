@@ -207,6 +207,28 @@ class RAGTruthEvaluator:
         if not isinstance(sr_sub, dict):
             sr_sub = {}
         self.sentence_retrieval_top_k = int(sr_sub.get('top_k', 5))
+        retrieval_mode = sr_sub.get('mode', 'top_k')
+        if isinstance(retrieval_mode, str):
+            retrieval_mode = retrieval_mode.strip().lower()
+        else:
+            retrieval_mode = 'top_k'
+        if retrieval_mode not in {'top_k', 'all_sentences'}:
+            self.logger.warning(
+                "Invalid verification.sentence_retrieval.mode '%s'; falling back to 'top_k'",
+                retrieval_mode,
+            )
+            retrieval_mode = 'top_k'
+        self.sentence_retrieval_mode = retrieval_mode
+
+        raw_max_sentences = sr_sub.get('all_sentences_max_k', 0)
+        try:
+            self.sentence_retrieval_all_sentences_max_k = int(raw_max_sentences)
+        except (TypeError, ValueError):
+            self.sentence_retrieval_all_sentences_max_k = 0
+        self.sentence_retrieval_all_sentences_max_k = max(
+            0,
+            self.sentence_retrieval_all_sentences_max_k,
+        )
 
         mitigation_config = self.config.get('mitigation', {})
         if not isinstance(mitigation_config, dict):
@@ -1308,7 +1330,23 @@ class RAGTruthEvaluator:
 
             if self.sentence_retriever is not None and evidence_chunks:
                 claim_texts = [claim.text for claim in claims]
-                if hasattr(self.sentence_retriever, 'retrieve_batch'):
+                if (
+                    self.sentence_retrieval_mode == 'all_sentences'
+                    and hasattr(self.sentence_retriever, 'retrieve_all')
+                ):
+                    all_sentence_evidence = self.sentence_retriever.retrieve_all(
+                        str(sample_id),
+                        max_sentences=(
+                            self.sentence_retrieval_all_sentences_max_k
+                            if self.sentence_retrieval_all_sentences_max_k > 0
+                            else None
+                        ),
+                    )
+                    per_claim_evidence = [
+                        list(all_sentence_evidence)
+                        for _ in claim_texts
+                    ]
+                elif hasattr(self.sentence_retriever, 'retrieve_batch'):
                     per_claim_evidence = self.sentence_retriever.retrieve_batch(
                         claim_texts,
                         str(sample_id),
@@ -1331,19 +1369,25 @@ class RAGTruthEvaluator:
                             f"Summary sample {sample_id} returned no sentence evidence for claim '{claim.text[:120]}'. "
                             "Strict index-only policy forbids fallback to full gold context."
                         )
+                    claim_metadata = dict(metadata)
+                    claim_metadata['sentence_retrieval_mode'] = self.sentence_retrieval_mode
+                    claim_metadata['sentence_evidence_count'] = len(per_claim_ev)
                     resolved_pairs.append({
                         'claim': claim,
                         'evidence': per_claim_ev if per_claim_ev else evidence_chunks,
-                        'metadata': metadata,
+                        'metadata': claim_metadata,
                     })
             else:
                 for claim in claims:
                     if not evidence_chunks:
                         continue
+                    claim_metadata = dict(metadata)
+                    claim_metadata['sentence_retrieval_mode'] = 'disabled'
+                    claim_metadata['sentence_evidence_count'] = len(evidence_chunks)
                     resolved_pairs.append({
                         'claim': claim,
                         'evidence': evidence_chunks,
-                        'metadata': metadata,
+                        'metadata': claim_metadata,
                     })
         else:
             if self.ragtruth_eval_mode == 'normal':
@@ -1796,7 +1840,23 @@ class RAGTruthEvaluator:
             )
             claim_evidence_pairs = []
             claim_texts = [claim.text for claim in all_claims]
-            if hasattr(self.sentence_retriever, 'retrieve_from_index_batch'):
+            if (
+                self.sentence_retrieval_mode == 'all_sentences'
+                and hasattr(self.sentence_retriever, 'retrieve_from_index_all')
+            ):
+                all_sentence_evidence = self.sentence_retriever.retrieve_from_index_all(
+                    ctx_index,
+                    max_sentences=(
+                        self.sentence_retrieval_all_sentences_max_k
+                        if self.sentence_retrieval_all_sentences_max_k > 0
+                        else None
+                    ),
+                )
+                per_claim_evidence = [
+                    list(all_sentence_evidence)
+                    for _ in claim_texts
+                ]
+            elif hasattr(self.sentence_retriever, 'retrieve_from_index_batch'):
                 per_claim_evidence = self.sentence_retriever.retrieve_from_index_batch(
                     claim_texts,
                     ctx_index,

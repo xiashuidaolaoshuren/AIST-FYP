@@ -335,7 +335,14 @@ verification:
   #   python scripts/build_sentence_index.py --dataset ragtruth --split test
   sentence_retrieval:
     enabled: true
+    # Retrieval strategy for claim-to-sentence verification:
+    # - top_k: current default, retrieve the best-k sentences per claim.
+    # - all_sentences: evaluator experiment mode for SummaC-style all-sentence-pairs NLI.
+    mode: "top_k"
     top_k: 8
+    # Optional cap used only when mode="all_sentences".
+    # 0 means use all indexed sentences for the sample/context.
+    all_sentences_max_k: 0
     # Exclude low-ranked dense matches from contradiction peak selection.
     min_dense_score_for_contradiction: 0.35
     # Path template for the pre-built sentence index.

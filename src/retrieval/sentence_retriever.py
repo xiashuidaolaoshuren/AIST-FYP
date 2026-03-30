@@ -73,6 +73,7 @@ class EvidenceSentenceRetriever:
     """
 
     _MIN_SENT_LENGTH = 10  # minimum characters for a valid sentence
+    _NO_INDEX_ERROR = "No pre-built index loaded. Use from_index() or call _load_index()."
 
     def __init__(
         self,
@@ -194,9 +195,7 @@ class EvidenceSentenceRetriever:
             or self._sentences is None
             or self._embeddings is None
         ):
-            raise RuntimeError(
-                "No pre-built index loaded. Use from_index() or call _load_index()."
-            )
+            raise RuntimeError(self._NO_INDEX_ERROR)
 
         key = str(sample_id)
         if key not in self._sample_index:
@@ -238,9 +237,7 @@ class EvidenceSentenceRetriever:
             or self._sentences is None
             or self._embeddings is None
         ):
-            raise RuntimeError(
-                "No pre-built index loaded. Use from_index() or call _load_index()."
-            )
+            raise RuntimeError(self._NO_INDEX_ERROR)
 
         key = str(sample_id)
         if key not in self._sample_index:
@@ -262,6 +259,41 @@ class EvidenceSentenceRetriever:
             self._sentences[row_start:row_end],
             top_k,
         )
+
+    def retrieve_all(
+        self,
+        sample_id: str,
+        max_sentences: Optional[int] = None,
+    ) -> List[EvidenceChunk]:
+        """
+        Return all indexed sentences for *sample_id* as EvidenceChunks.
+
+        This supports evaluator-side all-sentence-pairs NLI experiments where
+        each claim is verified against the full sentence pool instead of top-k.
+        """
+        if (
+            self._sample_index is None
+            or self._sentences is None
+            or self._embeddings is None
+        ):
+            raise RuntimeError(self._NO_INDEX_ERROR)
+
+        key = str(sample_id)
+        if key not in self._sample_index:
+            self.logger.warning(
+                "sample_id '%s' not in sentence index; returning empty.", key
+            )
+            return []
+
+        row_start, row_end = self._sample_index[key]
+        if row_end <= row_start:
+            return []
+
+        sentences = self._sentences[row_start:row_end]
+        if max_sentences is not None and max_sentences > 0:
+            sentences = sentences[:max_sentences]
+
+        return self._rows_to_evidence_chunks(sentences)
 
     # ------------------------------------------------------------------
     # On-the-fly index building and retrieval
@@ -352,6 +384,26 @@ class EvidenceSentenceRetriever:
         return self._cosine_topk_batch(
             query_texts, ctx_index.embeddings, ctx_index.sentences, top_k
         )
+
+    def retrieve_from_index_all(
+        self,
+        ctx_index: ContextSentenceIndex,
+        max_sentences: Optional[int] = None,
+    ) -> List[EvidenceChunk]:
+        """
+        Return all sentences from an in-memory context index as EvidenceChunks.
+
+        This is the on-the-fly counterpart of retrieve_all() used in
+        gold-context generation flows.
+        """
+        if ctx_index.embeddings.shape[0] == 0:
+            return []
+
+        sentences = ctx_index.sentences
+        if max_sentences is not None and max_sentences > 0:
+            sentences = sentences[:max_sentences]
+
+        return self._rows_to_evidence_chunks(sentences)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -485,6 +537,29 @@ class EvidenceSentenceRetriever:
                 global_sent_idx += 1
 
         return sents
+
+    def _rows_to_evidence_chunks(self, sentences: List[dict]) -> List[EvidenceChunk]:
+        """Convert indexed sentence rows into EvidenceChunk objects."""
+        chunks: List[EvidenceChunk] = []
+        for idx, sent in enumerate(sentences, start=1):
+            text = sent.get("text", "")
+            if not text:
+                continue
+            chunks.append(
+                EvidenceChunk(
+                    doc_id=sent.get("doc_id", f"sent_{idx}"),
+                    sent_id=int(sent.get("sent_idx", idx - 1)),
+                    text=text,
+                    char_start=int(sent.get("char_start", 0)),
+                    char_end=int(sent.get("char_end", len(text))),
+                    # Keep these chunks eligible for contradiction-path logic.
+                    score_dense=1.0,
+                    rank=idx,
+                    source=sent.get("source", "gold_context"),
+                    version=sent.get("version", "sentence_v1"),
+                )
+            )
+        return chunks
 
     def _split_contexts_to_sentences(
         self,
