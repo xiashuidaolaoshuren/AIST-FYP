@@ -295,6 +295,88 @@ class EvidenceSentenceRetriever:
 
         return self._rows_to_evidence_chunks(sentences)
 
+    def retrieve_all_ranked(
+        self,
+        query_text: str,
+        sample_id: str,
+        max_sentences: Optional[int] = None,
+    ) -> List[EvidenceChunk]:
+        """
+        Return all indexed sentences for *sample_id* ranked by semantic
+        similarity to *query_text*.
+
+        Unlike retrieve_all(), this preserves meaningful dense scores and rank
+        order so downstream contradiction suppression can reason about evidence
+        quality while still seeing the full sentence pool.
+        """
+        if (
+            self._sample_index is None
+            or self._sentences is None
+            or self._embeddings is None
+        ):
+            raise RuntimeError(self._NO_INDEX_ERROR)
+
+        key = str(sample_id)
+        if key not in self._sample_index:
+            self.logger.warning(
+                "sample_id '%s' not in sentence index; returning empty.", key
+            )
+            return []
+
+        row_start, row_end = self._sample_index[key]
+        if row_end <= row_start:
+            return []
+
+        sample_embeddings = self._embeddings[row_start:row_end].astype(np.float32)
+        return self._cosine_ranked_all(
+            query_text,
+            sample_embeddings,
+            self._sentences[row_start:row_end],
+            max_sentences=max_sentences,
+        )
+
+    def retrieve_all_ranked_batch(
+        self,
+        query_texts: List[str],
+        sample_id: str,
+        max_sentences: Optional[int] = None,
+    ) -> List[List[EvidenceChunk]]:
+        """
+        Batched variant of retrieve_all_ranked() for multiple claims.
+
+        Returns one ranked full-pool evidence list per query.
+        """
+        if not query_texts:
+            return []
+
+        if (
+            self._sample_index is None
+            or self._sentences is None
+            or self._embeddings is None
+        ):
+            raise RuntimeError(self._NO_INDEX_ERROR)
+
+        key = str(sample_id)
+        if key not in self._sample_index:
+            self.logger.warning(
+                "sample_id '%s' not in sentence index; returning empty for %d claims.",
+                key,
+                len(query_texts),
+            )
+            return [[] for _ in query_texts]
+
+        row_start, row_end = self._sample_index[key]
+        if row_end <= row_start:
+            return [[] for _ in query_texts]
+
+        sample_embeddings = self._embeddings[row_start:row_end].astype(np.float32)
+        return self._cosine_ranked_all_batch(
+            query_texts,
+            sample_embeddings,
+            self._sentences[row_start:row_end],
+            max_sentences=max_sentences,
+        )
+
     # ------------------------------------------------------------------
     # On-the-fly index building and retrieval
     # ------------------------------------------------------------------
@@ -405,6 +487,45 @@ class EvidenceSentenceRetriever:
 
         return self._rows_to_evidence_chunks(sentences)
 
+    def retrieve_from_index_all_ranked(
+        self,
+        query_text: str,
+        ctx_index: ContextSentenceIndex,
+        max_sentences: Optional[int] = None,
+    ) -> List[EvidenceChunk]:
+        """
+        Return all in-memory index sentences ranked by semantic similarity to
+        *query_text*.
+        """
+        if ctx_index.embeddings.shape[0] == 0:
+            return []
+        return self._cosine_ranked_all(
+            query_text,
+            ctx_index.embeddings,
+            ctx_index.sentences,
+            max_sentences=max_sentences,
+        )
+
+    def retrieve_from_index_all_ranked_batch(
+        self,
+        query_texts: List[str],
+        ctx_index: ContextSentenceIndex,
+        max_sentences: Optional[int] = None,
+    ) -> List[List[EvidenceChunk]]:
+        """
+        Batched variant of retrieve_from_index_all_ranked().
+        """
+        if not query_texts:
+            return []
+        if ctx_index.embeddings.shape[0] == 0:
+            return [[] for _ in query_texts]
+        return self._cosine_ranked_all_batch(
+            query_texts,
+            ctx_index.embeddings,
+            ctx_index.sentences,
+            max_sentences=max_sentences,
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -484,6 +605,97 @@ class EvidenceSentenceRetriever:
 
             chunks: List[EvidenceChunk] = []
             for rank, local_i in enumerate(top_idx, start=1):
+                local_i = int(local_i)
+                sent = sentences[local_i]
+                chunks.append(
+                    EvidenceChunk(
+                        doc_id=sent.get("doc_id", f"sent_{local_i}"),
+                        sent_id=int(sent.get("sent_idx", local_i)),
+                        text=sent["text"],
+                        char_start=int(sent.get("char_start", 0)),
+                        char_end=int(sent.get("char_end", len(sent["text"]))),
+                        score_dense=float(scores[local_i]),
+                        rank=rank,
+                        source=sent.get("source", "gold_context"),
+                        version=sent.get("version", "sentence_v1"),
+                    )
+                )
+            all_chunks.append(chunks)
+
+        return all_chunks
+
+    def _cosine_ranked_all(
+        self,
+        query_text: str,
+        embeddings: np.ndarray,
+        sentences: List[dict],
+        max_sentences: Optional[int] = None,
+    ) -> List[EvidenceChunk]:
+        """
+        Return all sentence chunks ranked by cosine similarity for one query.
+        """
+        query_vec = self._encoder.encode(
+            [query_text],
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        ).astype(np.float32)[0]
+
+        scores = embeddings @ query_vec
+        sorted_idx = np.argsort(scores)[::-1]
+        if max_sentences is not None and max_sentences > 0:
+            sorted_idx = sorted_idx[:max_sentences]
+
+        chunks: List[EvidenceChunk] = []
+        for rank, local_i in enumerate(sorted_idx, start=1):
+            local_i = int(local_i)
+            sent = sentences[local_i]
+            chunks.append(
+                EvidenceChunk(
+                    doc_id=sent.get("doc_id", f"sent_{local_i}"),
+                    sent_id=int(sent.get("sent_idx", local_i)),
+                    text=sent["text"],
+                    char_start=int(sent.get("char_start", 0)),
+                    char_end=int(sent.get("char_end", len(sent["text"]))),
+                    score_dense=float(scores[local_i]),
+                    rank=rank,
+                    source=sent.get("source", "gold_context"),
+                    version=sent.get("version", "sentence_v1"),
+                )
+            )
+        return chunks
+
+    def _cosine_ranked_all_batch(
+        self,
+        query_texts: List[str],
+        embeddings: np.ndarray,
+        sentences: List[dict],
+        max_sentences: Optional[int] = None,
+    ) -> List[List[EvidenceChunk]]:
+        """
+        Return all sentence chunks ranked by cosine similarity for each query.
+        """
+        if not query_texts:
+            return []
+
+        query_vecs = self._encoder.encode(
+            query_texts,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        ).astype(np.float32)
+
+        scores_matrix = embeddings @ query_vecs.T
+        all_chunks: List[List[EvidenceChunk]] = []
+
+        for query_idx in range(scores_matrix.shape[1]):
+            scores = scores_matrix[:, query_idx]
+            sorted_idx = np.argsort(scores)[::-1]
+            if max_sentences is not None and max_sentences > 0:
+                sorted_idx = sorted_idx[:max_sentences]
+
+            chunks: List[EvidenceChunk] = []
+            for rank, local_i in enumerate(sorted_idx, start=1):
                 local_i = int(local_i)
                 sent = sentences[local_i]
                 chunks.append(

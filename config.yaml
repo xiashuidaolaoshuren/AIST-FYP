@@ -590,6 +590,11 @@ evaluation:
       # Minimum TP single-contra cp=0.738 and coverage=0.465 — thresholds below these are safe.
       summary_single_contra_min_contradict_prob: 0.60  # require at least this contradict_prob when Summary fires on exactly 1 contradictory claim
       summary_single_contra_min_coverage: 0.44         # require at least this coverage_score for the sole contradictory claim
+      # Optional additional guard for all_sentences mode only.
+      # Helps suppress weak contradiction spikes from long-tail sentence pairs.
+      all_sentences_summary_contradictory_override_enabled: false
+      all_sentences_summary_min_contradict_prob_for_contradictory: 0.75
+      all_sentences_summary_min_coverage_for_contradictory: 0.45
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default

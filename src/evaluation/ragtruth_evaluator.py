@@ -350,6 +350,35 @@ class RAGTruthEvaluator:
                     )
                 except (TypeError, ValueError):
                     self.summary_single_contra_min_coverage = 0.0
+                self.all_sentences_summary_contradictory_override_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'all_sentences_summary_contradictory_override_enabled',
+                        False,
+                    )
+                )
+                raw_all_sent_summary_min_cp = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_min_contradict_prob_for_contradictory',
+                    0.0,
+                )
+                try:
+                    self.all_sentences_summary_min_contradict_prob_for_contradictory = float(
+                        raw_all_sent_summary_min_cp
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
+                raw_all_sent_summary_min_cov = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_min_coverage_for_contradictory',
+                    0.0,
+                )
+                try:
+                    self.all_sentences_summary_min_coverage_for_contradictory = float(
+                        raw_all_sent_summary_min_cov
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_min_coverage_for_contradictory = 0.0
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -366,6 +395,9 @@ class RAGTruthEvaluator:
                 self.qa_pure_lc_block_ratio = 0.95
                 self.summary_single_contra_min_contradict_prob = 0.0
                 self.summary_single_contra_min_coverage = 0.0
+                self.all_sentences_summary_contradictory_override_enabled = False
+                self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
+                self.all_sentences_summary_min_coverage_for_contradictory = 0.0
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -382,6 +414,9 @@ class RAGTruthEvaluator:
             self.qa_pure_lc_block_ratio = 0.95
             self.summary_single_contra_min_contradict_prob = 0.0
             self.summary_single_contra_min_coverage = 0.0
+            self.all_sentences_summary_contradictory_override_enabled = False
+            self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
+            self.all_sentences_summary_min_coverage_for_contradictory = 0.0
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
         try:
@@ -445,6 +480,20 @@ class RAGTruthEvaluator:
         )
         self.summary_single_contra_min_coverage = float(
             np.clip(self.summary_single_contra_min_coverage, 0.0, 1.0)
+        )
+        self.all_sentences_summary_min_contradict_prob_for_contradictory = float(
+            np.clip(
+                self.all_sentences_summary_min_contradict_prob_for_contradictory,
+                0.0,
+                1.0,
+            )
+        )
+        self.all_sentences_summary_min_coverage_for_contradictory = float(
+            np.clip(
+                self.all_sentences_summary_min_coverage_for_contradictory,
+                0.0,
+                1.0,
+            )
         )
         self.lc_avg_contradict_ratio_threshold = float(
             np.clip(self.lc_avg_contradict_ratio_threshold, 0.0, 1.0)
@@ -1356,6 +1405,19 @@ class RAGTruthEvaluator:
                 claim_texts = [claim.text for claim in claims]
                 if (
                     self.sentence_retrieval_mode == 'all_sentences'
+                    and hasattr(self.sentence_retriever, 'retrieve_all_ranked_batch')
+                ):
+                    per_claim_evidence = self.sentence_retriever.retrieve_all_ranked_batch(
+                        claim_texts,
+                        str(sample_id),
+                        max_sentences=(
+                            self.sentence_retrieval_all_sentences_max_k
+                            if self.sentence_retrieval_all_sentences_max_k > 0
+                            else None
+                        ),
+                    )
+                elif (
+                    self.sentence_retrieval_mode == 'all_sentences'
                     and hasattr(self.sentence_retriever, 'retrieve_all')
                 ):
                     all_sentence_evidence = self.sentence_retriever.retrieve_all(
@@ -1572,6 +1634,11 @@ class RAGTruthEvaluator:
             for d in contradictory_decisions
         ]
         max_contradict_prob = max(contradict_probs) if contradict_probs else 0.0
+        contradict_coverages = [
+            float(d.confidence.get('coverage_score', 0.0))
+            for d in contradictory_decisions
+        ]
+        max_contradict_coverage = max(contradict_coverages) if contradict_coverages else 0.0
         low_confidence_count = len([
             d for d in claim_decisions
             if d.status == 'Low Confidence'
@@ -1655,6 +1722,19 @@ class RAGTruthEvaluator:
             and max_contradict_prob < self.data2txt_min_contradict_prob_for_contradictory
         ):
             data2txt_contradictory_override_block = True
+            contradictory_trigger = False
+        all_sentences_summary_contradictory_override_block = False
+        if (
+            task_type == 'Summary'
+            and self.sentence_retrieval_mode == 'all_sentences'
+            and self.all_sentences_summary_contradictory_override_enabled
+            and contradictory_trigger
+            and (
+                max_contradict_prob < self.all_sentences_summary_min_contradict_prob_for_contradictory
+                or max_contradict_coverage < self.all_sentences_summary_min_coverage_for_contradictory
+            )
+        ):
+            all_sentences_summary_contradictory_override_block = True
             contradictory_trigger = False
         # Summary single-contradiction guard: suppress weak single-contra triggers.
         # Fires when Summary has exactly 1 contradictory claim but that claim's
@@ -1754,8 +1834,11 @@ class RAGTruthEvaluator:
             'avg_support_prob_low_conf': avg_support_prob_low_conf,
             'avg_contradict_prob_low_conf': avg_contradict_prob_low_conf,
             'max_contradict_prob': max_contradict_prob,
+            'max_contradict_coverage': max_contradict_coverage,
             'qa_pure_lc_block': qa_pure_lc_block,
             'data2txt_contradictory_override_block': data2txt_contradictory_override_block,
+            'all_sentences_summary_contradictory_override_block': all_sentences_summary_contradictory_override_block,
+            'summary_single_contra_block': summary_single_contra_block,
             'detected_pre_qa_block': pre_block_detected_hallucination,
             'detection_trigger_paths': trigger_paths,
             'detection_trigger_path': primary_trigger_path,
@@ -1874,6 +1957,19 @@ class RAGTruthEvaluator:
             claim_evidence_pairs = []
             claim_texts = [claim.text for claim in all_claims]
             if (
+                self.sentence_retrieval_mode == 'all_sentences'
+                and hasattr(self.sentence_retriever, 'retrieve_from_index_all_ranked_batch')
+            ):
+                per_claim_evidence = self.sentence_retriever.retrieve_from_index_all_ranked_batch(
+                    claim_texts,
+                    ctx_index,
+                    max_sentences=(
+                        self.sentence_retrieval_all_sentences_max_k
+                        if self.sentence_retrieval_all_sentences_max_k > 0
+                        else None
+                    ),
+                )
+            elif (
                 self.sentence_retrieval_mode == 'all_sentences'
                 and hasattr(self.sentence_retriever, 'retrieve_from_index_all')
             ):
