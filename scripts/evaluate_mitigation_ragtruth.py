@@ -231,6 +231,7 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
     confusion = metrics.get("confusion_matrix", {})
     statistics = metrics.get("statistics", {})
     hrr_metrics = statistics.get("hrr_metrics", {})
+    tp_mitigation_metrics = statistics.get("tp_mitigation_metrics", {})
     sample_results = payload.get("sample_results", [])
     sample_ids: list[str] = []
     if isinstance(sample_results, list):
@@ -259,6 +260,18 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "total_non_gold_claims": int(hrr_metrics.get("total_non_gold_claims", 0)),
         "non_gold_claims_removed": int(hrr_metrics.get("non_gold_claims_removed", 0)),
         "frr": float(hrr_metrics.get("frr", 0.0)),
+        "samples_with_gold_hallucination": int(hrr_metrics.get("samples_with_gold_hallucination", 0)),
+        "samples_fixed": int(hrr_metrics.get("samples_fixed", 0)),
+        "sample_fix_rate": float(hrr_metrics.get("sample_fix_rate", 0.0)),
+        "tp_count": int(tp_mitigation_metrics.get("tp_count", 0)),
+        "tp_total_gold_claims": int(tp_mitigation_metrics.get("tp_total_gold_claims", 0)),
+        "tp_gold_claims_removed": int(tp_mitigation_metrics.get("tp_gold_claims_removed", 0)),
+        "tp_hrr": float(tp_mitigation_metrics.get("tp_hrr", 0.0)),
+        "tp_total_non_gold_claims": int(tp_mitigation_metrics.get("tp_total_non_gold_claims", 0)),
+        "tp_non_gold_claims_removed": int(tp_mitigation_metrics.get("tp_non_gold_claims_removed", 0)),
+        "tp_frr": float(tp_mitigation_metrics.get("tp_frr", 0.0)),
+        "tp_samples_with_response_changed": int(tp_mitigation_metrics.get("tp_samples_with_response_changed", 0)),
+        "tp_response_change_rate": float(tp_mitigation_metrics.get("tp_response_change_rate", 0.0)),
         "num_samples_evaluated": len(sample_ids),
         "sample_ids": sample_ids,
     }
@@ -420,6 +433,25 @@ def _write_summary(
             f"{name} | {str(metric['filter_active']).lower()} | {metric['hrr'] * 100.0:.2f}% | {metric['frr'] * 100.0:.2f}% | "
             f"{metric['gold_claims_removed']} | {metric['non_gold_claims_removed']} | {metric['total_gold_claims']} | "
             f"{metric['total_non_gold_claims']} | {hrr_delta} | {frr_delta} |"
+        )
+
+    lines.extend([
+        "",
+        "## TP-Conditioned Mitigation Metrics",
+        "",
+        "| Variant | TP Samples | TP HRR (%) | TP FRR (%) | TP Gold Claims Removed | TP Non-Gold Claims Removed | TP Response Changed | TP Response Change Rate (%) | Sample Fix Rate (%) | Samples Fixed / Gold-Hallucinated Samples |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+
+    for name, metric in variant_metrics.items():
+        lines.append(
+            "| "
+            f"{name} | {metric['tp_count']} | {metric['tp_hrr'] * 100.0:.2f}% | {metric['tp_frr'] * 100.0:.2f}% | "
+            f"{metric['tp_gold_claims_removed']} / {metric['tp_total_gold_claims']} | "
+            f"{metric['tp_non_gold_claims_removed']} / {metric['tp_total_non_gold_claims']} | "
+            f"{metric['tp_samples_with_response_changed']} | {metric['tp_response_change_rate'] * 100.0:.2f}% | "
+            f"{metric['sample_fix_rate'] * 100.0:.2f}% | "
+            f"{metric['samples_fixed']} / {metric['samples_with_gold_hallucination']} |"
         )
 
     lines.extend([

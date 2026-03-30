@@ -71,6 +71,12 @@ class ClaimFilter:
         
         self.placeholder = filter_config.get('placeholder', '[CLAIM REMOVED: Contradictory]')
         self.enabled = filter_config.get('enabled', True)
+        self.lc_soft_filter_prob_threshold = float(
+            filter_config.get('lc_soft_filter_prob_threshold', 0.0)
+        )
+        self.lc_placeholder = filter_config.get(
+            'lc_placeholder', '[CLAIM UNCERTAIN: Low Confidence]'
+        )
         
         logger.info(
             f"ClaimFilter initialized: enabled={self.enabled}, "
@@ -152,6 +158,8 @@ class ClaimFilter:
         ]
         
         if not contradictory_decisions:
+            if self.lc_soft_filter_prob_threshold > 0.0:
+                return self._filter_lc_claims(answer_text, claim_dict, decisions)
             logger.info("No contradictory claims found, returning original text")
             return answer_text, 0
         
@@ -204,7 +212,66 @@ class ClaimFilter:
         )
         
         return filtered_text, removed_count
-    
+
+    def _filter_lc_claims(
+        self,
+        answer_text: str,
+        claim_dict: dict,
+        decisions: List[ClaimDecision],
+    ) -> Tuple[str, int]:
+        """Soft-filter Low Confidence claims whose contradict_prob exceeds the configured threshold.
+
+        Only called when no Contradictory claims were found, targeting the lc_avg_contradict path.
+        """
+        lc_decisions = [
+            d for d in decisions
+            if d.status == 'Low Confidence'
+            and float(d.confidence.get('contradict_prob', 0.0)) >= self.lc_soft_filter_prob_threshold
+            and d.claim_id in claim_dict
+        ]
+        if not lc_decisions:
+            logger.info(
+                "No LC claims above soft-filter threshold (%.2f), returning original text",
+                self.lc_soft_filter_prob_threshold,
+            )
+            return answer_text, 0
+
+        logger.info(
+            "Soft-filtering %d Low Confidence claims (contradict_prob >= %.2f)",
+            len(lc_decisions),
+            self.lc_soft_filter_prob_threshold,
+        )
+
+        sorted_decisions = sorted(
+            lc_decisions,
+            key=lambda d: claim_dict[d.claim_id].answer_char_span[0],
+            reverse=True,
+        )
+
+        filtered_text = answer_text
+        removed_count = 0
+
+        for decision in sorted_decisions:
+            claim = claim_dict[decision.claim_id]
+            start, end = claim.answer_char_span
+
+            if start < 0 or end > len(filtered_text) or start >= end:
+                logger.warning(
+                    "Invalid char_span [%d, %d] for LC claim %s. Skipping.",
+                    start, end, decision.claim_id,
+                )
+                continue
+
+            filtered_text = filtered_text[:start] + self.lc_placeholder + filtered_text[end:]
+            removed_count += 1
+
+        logger.info(
+            "LC soft-filter complete: removed %d claims. "
+            "Original length: %d, Filtered length: %d",
+            removed_count, len(answer_text), len(filtered_text),
+        )
+        return filtered_text, removed_count
+
     def get_filtering_summary(
         self,
         claims: List[Claim],

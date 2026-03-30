@@ -281,6 +281,20 @@ class RAGTruthEvaluator:
                     }
                 else:
                     self.per_task_low_coverage_ratio_threshold = {}
+                raw_lc_avg_contradict_ratio = getattr(
+                    benchmark_config, 'lc_avg_contradict_ratio_threshold', 0.30
+                )
+                try:
+                    self.lc_avg_contradict_ratio_threshold = float(raw_lc_avg_contradict_ratio)
+                except (TypeError, ValueError):
+                    self.lc_avg_contradict_ratio_threshold = 0.30
+                raw_lc_avg_contradict_prob = getattr(
+                    benchmark_config, 'lc_avg_contradict_prob_threshold', 0.25
+                )
+                try:
+                    self.lc_avg_contradict_prob_threshold = float(raw_lc_avg_contradict_prob)
+                except (TypeError, ValueError):
+                    self.lc_avg_contradict_prob_threshold = 0.25
                 raw_lc_claim_floor = getattr(benchmark_config, 'min_claims_for_lc_escalation', 4)
                 try:
                     self.min_claims_for_lc_escalation = int(raw_lc_claim_floor)
@@ -343,6 +357,8 @@ class RAGTruthEvaluator:
                 self.low_confidence_ratio_threshold = 0.5
                 self.low_coverage_ratio_threshold = 0.3
                 self.per_task_low_coverage_ratio_threshold = {}
+                self.lc_avg_contradict_ratio_threshold = 0.30
+                self.lc_avg_contradict_prob_threshold = 0.25
                 self.min_claims_for_lc_escalation = 4
                 self.data2txt_min_lc_count = 6
                 self.data2txt_contradictory_override_enabled = False
@@ -357,6 +373,8 @@ class RAGTruthEvaluator:
             self.low_confidence_ratio_threshold = 0.5
             self.low_coverage_ratio_threshold = 0.3
             self.per_task_low_coverage_ratio_threshold = {}
+            self.lc_avg_contradict_ratio_threshold = 0.30
+            self.lc_avg_contradict_prob_threshold = 0.25
             self.min_claims_for_lc_escalation = 4
             self.data2txt_min_lc_count = 6
             self.data2txt_contradictory_override_enabled = False
@@ -427,6 +445,12 @@ class RAGTruthEvaluator:
         )
         self.summary_single_contra_min_coverage = float(
             np.clip(self.summary_single_contra_min_coverage, 0.0, 1.0)
+        )
+        self.lc_avg_contradict_ratio_threshold = float(
+            np.clip(self.lc_avg_contradict_ratio_threshold, 0.0, 1.0)
+        )
+        self.lc_avg_contradict_prob_threshold = float(
+            np.clip(self.lc_avg_contradict_prob_threshold, 0.0, 1.0)
         )
             
         # Validate benchmark directory exists
@@ -1606,6 +1630,12 @@ class RAGTruthEvaluator:
             and low_confidence_count >= self.data2txt_min_lc_count
             and low_confidence_ratio >= self.low_confidence_ratio_threshold
         )
+        lc_avg_contradict_trigger = (
+            contradictory_count == 0
+            and low_confidence_ratio >= self.lc_avg_contradict_ratio_threshold
+            and avg_contradict_prob_low_conf >= self.lc_avg_contradict_prob_threshold
+            and len(claim_decisions) >= self.min_claims_for_lc_escalation
+        )
         qa_pure_lc_block = (
             task_type == 'QA'
             and contradictory_count == 0
@@ -1657,6 +1687,7 @@ class RAGTruthEvaluator:
             contradictory_trigger
             or low_confidence_coverage_trigger
             or data2txt_lc_escalation
+            or lc_avg_contradict_trigger
         )
         detected_hallucination = pre_block_detected_hallucination and not qa_pure_lc_block
 
@@ -1667,6 +1698,8 @@ class RAGTruthEvaluator:
             trigger_paths.append('low_confidence_coverage')
         if data2txt_lc_escalation:
             trigger_paths.append('data2txt_low_confidence')
+        if lc_avg_contradict_trigger:
+            trigger_paths.append('lc_avg_contradict')
         if not trigger_paths:
             trigger_paths.append('none')
 
@@ -2109,6 +2142,81 @@ class RAGTruthEvaluator:
                 non_gold_claims_removed,
             )
 
+        def _compute_sample_fix_counts(rows: List[Dict[str, Any]]) -> Tuple[int, int]:
+            samples_with_gold_hallucination = 0
+            samples_fixed = 0
+
+            for row in rows:
+                if not bool(row.get('gold_has_hallucination', False)):
+                    continue
+
+                samples_with_gold_hallucination += 1
+                response_changed = str(row.get('response_after_mitigation', '')) != str(
+                    row.get('generated_response', '')
+                )
+
+                claim_results = row.get('claim_results', [])
+                removed_gold_hallucinated_claim = False
+                if isinstance(claim_results, list):
+                    for claim_result in claim_results:
+                        if not isinstance(claim_result, dict):
+                            continue
+                        if (
+                            bool(claim_result.get('overlaps_gold_hallucination', False))
+                            and str(claim_result.get('predicted_status', '')) == 'Contradictory'
+                        ):
+                            removed_gold_hallucinated_claim = True
+                            break
+
+                if response_changed and removed_gold_hallucinated_claim:
+                    samples_fixed += 1
+
+            return samples_with_gold_hallucination, samples_fixed
+
+        def _compute_tp_mitigation_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+            tp_rows = [
+                row for row in rows
+                if bool(row.get('gold_has_hallucination', False))
+                and bool(row.get('detected_hallucination', False))
+            ]
+            tp_count = len(tp_rows)
+            (
+                tp_total_gold_claims,
+                tp_gold_claims_removed,
+                tp_total_non_gold_claims,
+                tp_non_gold_claims_removed,
+            ) = _compute_hrr_counts(tp_rows)
+
+            tp_hrr = (
+                float(tp_gold_claims_removed / tp_total_gold_claims)
+                if tp_total_gold_claims > 0 else 0.0
+            )
+            tp_frr = (
+                float(tp_non_gold_claims_removed / tp_total_non_gold_claims)
+                if tp_total_non_gold_claims > 0 else 0.0
+            )
+            tp_samples_with_response_changed = sum(
+                1
+                for row in tp_rows
+                if str(row.get('response_after_mitigation', '')) != str(row.get('generated_response', ''))
+            )
+            tp_response_change_rate = (
+                float(tp_samples_with_response_changed / tp_count)
+                if tp_count > 0 else 0.0
+            )
+
+            return {
+                'tp_count': int(tp_count),
+                'tp_total_gold_claims': int(tp_total_gold_claims),
+                'tp_gold_claims_removed': int(tp_gold_claims_removed),
+                'tp_hrr': float(tp_hrr),
+                'tp_total_non_gold_claims': int(tp_total_non_gold_claims),
+                'tp_non_gold_claims_removed': int(tp_non_gold_claims_removed),
+                'tp_frr': float(tp_frr),
+                'tp_samples_with_response_changed': int(tp_samples_with_response_changed),
+                'tp_response_change_rate': float(tp_response_change_rate),
+            }
+
         # Extract predictions and ground truth
         y_true = [r['gold_has_hallucination'] for r in results]
         y_pred = [r['detected_hallucination'] for r in results]
@@ -2149,6 +2257,15 @@ class RAGTruthEvaluator:
             float(non_gold_claims_removed / total_non_gold_claims)
             if total_non_gold_claims > 0 else 0.0
         )
+        (
+            samples_with_gold_hallucination,
+            samples_fixed,
+        ) = _compute_sample_fix_counts(results)
+        sample_fix_rate = (
+            float(samples_fixed / samples_with_gold_hallucination)
+            if samples_with_gold_hallucination > 0 else 0.0
+        )
+        tp_mitigation_metrics = _compute_tp_mitigation_metrics(results)
 
         trigger_path_counts = Counter(
             str(r.get('detection_trigger_path', 'none')) for r in results
@@ -2200,6 +2317,15 @@ class RAGTruthEvaluator:
                 float(task_non_gold_claims_removed / task_total_non_gold_claims)
                 if task_total_non_gold_claims > 0 else 0.0
             )
+            (
+                task_samples_with_gold_hallucination,
+                task_samples_fixed,
+            ) = _compute_sample_fix_counts(task_results)
+            task_sample_fix_rate = (
+                float(task_samples_fixed / task_samples_with_gold_hallucination)
+                if task_samples_with_gold_hallucination > 0 else 0.0
+            )
+            task_tp_mitigation_metrics = _compute_tp_mitigation_metrics(task_results)
             task_trigger_path_counts = Counter(
                 str(r.get('detection_trigger_path', 'none')) for r in task_results
             )
@@ -2243,7 +2369,11 @@ class RAGTruthEvaluator:
                         'total_non_gold_claims': int(task_total_non_gold_claims),
                         'non_gold_claims_removed': int(task_non_gold_claims_removed),
                         'frr': float(task_frr),
+                        'samples_with_gold_hallucination': int(task_samples_with_gold_hallucination),
+                        'samples_fixed': int(task_samples_fixed),
+                        'sample_fix_rate': float(task_sample_fix_rate),
                     },
+                    'tp_mitigation_metrics': task_tp_mitigation_metrics,
                     'detection_trigger_path_counts': dict(task_trigger_path_counts),
                     'false_positive_trigger_path_counts': dict(task_fp_trigger_path_counts)
                 }
@@ -2284,7 +2414,11 @@ class RAGTruthEvaluator:
                     'total_non_gold_claims': int(total_non_gold_claims),
                     'non_gold_claims_removed': int(non_gold_claims_removed),
                     'frr': float(overall_frr),
+                    'samples_with_gold_hallucination': int(samples_with_gold_hallucination),
+                    'samples_fixed': int(samples_fixed),
+                    'sample_fix_rate': float(sample_fix_rate),
                 },
+                'tp_mitigation_metrics': tp_mitigation_metrics,
                 'detection_trigger_path_counts': dict(trigger_path_counts),
                 'false_positive_trigger_path_counts': dict(false_positive_trigger_path_counts)
             },
@@ -2294,9 +2428,13 @@ class RAGTruthEvaluator:
                     'or when low_confidence_ratio >= threshold and low_coverage_ratio >= threshold.'
                 ),
                 'claim_hallucination': 'Claim is counted as hallucinated when predicted status is Contradictory.',
+                'sample_fix_rate': (
+                    'Rate of gold-hallucinated samples where mitigation changed the final response and '
+                    'at least one gold-overlapping claim was predicted as Contradictory.'
+                ),
                 'detection_trigger_path': (
                     "Primary path that first triggered sample-level detection: "
-                    "'contradictory', 'low_confidence_coverage', 'data2txt_low_confidence', or 'none'."
+                    "'contradictory', 'low_confidence_coverage', 'data2txt_low_confidence', 'lc_avg_contradict', or 'none'."
                 )
             }
         }

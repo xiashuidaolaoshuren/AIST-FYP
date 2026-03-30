@@ -140,7 +140,7 @@ generation:
   # Sampling parameters
   temperature: 0.2
   top_p: 0.9
-  do_sample: false
+  do_sample: true
 
   # Optional decoding controls for causal models (e.g., Qwen)
   # Helps reduce repetitive/meta-text outputs during evaluation.
@@ -460,6 +460,12 @@ mitigation:
     
     # Placeholder text for removed contradictory claims
     placeholder: "[CLAIM REMOVED: Contradictory]"
+
+    # Soft-filter threshold for Low Confidence claims (0.0 = disabled).
+    # When set, LC claims with contradict_prob >= threshold are also replaced (using lc_placeholder).
+    # Only activates when no Contradictory claims exist, targeting the lc_avg_contradict path.
+    lc_soft_filter_prob_threshold: 0.25
+    lc_placeholder: "[CLAIM UNCERTAIN: Low Confidence]"
   
   # Re-Prompting Configuration (Month 5/6)
   reprompt:
@@ -505,6 +511,11 @@ mitigation:
 
     # Minimum contradictory claims required before filtering is allowed
     filter_min_contradictory_claims: 1
+
+    # Trigger reprompt/filter based on LC signal when no contradictory claims are found.
+    # Used by the lc_avg_contradict detection path in gold_context_generation mode.
+    reprompt_lc_avg_contradict_prob_threshold: 0.25
+    reprompt_lc_avg_contradict_ratio_threshold: 0.30
 
 # Checkpointing
 checkpointing:
@@ -563,6 +574,12 @@ evaluation:
       teacher_forced_intrinsic: true  # compute intrinsic uncertainty by scoring gold response
       low_confidence_ratio_threshold: 0.6  # sample-level hallucination if Low Confidence ratio >= threshold
       low_coverage_ratio_threshold: 0.28  # require stronger weak-evidence corroboration when escalating from Low Confidence
+      per_task_low_coverage_ratio_threshold:
+        Summary: 0.0    # gold_context_generation: gold doc is always well-covered; drop LC+coverage gate for Summary
+        QA: 0.18        # relaxed from global 0.28 to recover QA LC misses
+        Data2txt: 0.28  # keep original gate for Data2txt
+      lc_avg_contradict_ratio_threshold: 0.30  # new trigger: minimum LC ratio for lc_avg_contradict detection path
+      lc_avg_contradict_prob_threshold: 0.25   # new trigger: minimum avg contradiction prob among LC claims
       min_claims_for_lc_escalation: 3  # keep protection for 1-2 claim responses while recovering 3-claim QA misses
       data2txt_min_lc_count: 6  # Data2txt-specific fallback: escalate only when many claims are Low Confidence and contradiction evidence is absent
       data2txt_contradictory_override_enabled: false  # optional safety gate for Data2txt contradictory trigger

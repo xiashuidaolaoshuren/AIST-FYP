@@ -17,6 +17,8 @@ class RouterThresholds:
     reprompt_contradiction_ratio: float = 0.35
     filter_contradiction_ratio: float = 0.5
     filter_min_contradictory_claims: int = 1
+    reprompt_lc_avg_contradict_prob_threshold: float = 0.25
+    reprompt_lc_avg_contradict_ratio_threshold: float = 0.30
 
 
 class MitigationPolicyRouter:
@@ -44,6 +46,12 @@ class MitigationPolicyRouter:
             reprompt_contradiction_ratio=float(router_cfg.get("reprompt_contradiction_ratio", 0.35)),
             filter_contradiction_ratio=float(router_cfg.get("filter_contradiction_ratio", 0.5)),
             filter_min_contradictory_claims=int(router_cfg.get("filter_min_contradictory_claims", 1)),
+            reprompt_lc_avg_contradict_prob_threshold=float(
+                router_cfg.get("reprompt_lc_avg_contradict_prob_threshold", 0.25)
+            ),
+            reprompt_lc_avg_contradict_ratio_threshold=float(
+                router_cfg.get("reprompt_lc_avg_contradict_ratio_threshold", 0.30)
+            ),
         )
 
         return cls(
@@ -70,6 +78,17 @@ class MitigationPolicyRouter:
         low_confidence_count = len([d for d in decisions if d.status == "Low Confidence"])
         contradiction_ratio = contradictory_count / total if total else 0.0
         low_confidence_ratio = low_confidence_count / total if total else 0.0
+        low_confidence_decisions = [d for d in decisions if d.status == "Low Confidence"]
+        avg_contradict_prob_low_conf = (
+            sum(float(d.confidence.get('contradict_prob', 0.0)) for d in low_confidence_decisions)
+            / len(low_confidence_decisions)
+            if low_confidence_decisions else 0.0
+        )
+        lc_avg_contradict_signal = (
+            contradictory_count == 0
+            and low_confidence_ratio >= self.thresholds.reprompt_lc_avg_contradict_ratio_threshold
+            and avg_contradict_prob_low_conf >= self.thresholds.reprompt_lc_avg_contradict_prob_threshold
+        )
 
         allowed: Set[str] = set()
 
@@ -83,9 +102,10 @@ class MitigationPolicyRouter:
             if (
                 contradictory_count > 0
                 or contradiction_ratio >= self.thresholds.reprompt_contradiction_ratio
+                or lc_avg_contradict_signal
             ):
                 allowed.add("reprompt")
-            if contradictory_count >= 1:
+            if contradictory_count >= 1 or lc_avg_contradict_signal:
                 allowed.add("filter")
         elif objective == "citation":
             if contradiction_ratio >= max(self.thresholds.reprompt_contradiction_ratio, 0.5):
