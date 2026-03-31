@@ -594,9 +594,19 @@ evaluation:
       summary_single_contra_min_coverage: 0.44         # require at least this coverage_score for the sole contradictory claim
       # Optional additional guard for all_sentences mode only.
       # Helps suppress weak contradiction spikes from long-tail sentence pairs.
-      all_sentences_summary_contradictory_override_enabled: true
+      all_sentences_summary_contradictory_override_enabled: false
       all_sentences_summary_min_contradict_prob_for_contradictory: 0.75
       all_sentences_summary_min_coverage_for_contradictory: 0.45
+      # Structural all_sentences Summary LC guard: suppress sample-level LC escalation
+      # when coverage is strong but contradiction signals remain weak or absent.
+      # Eval-17 candidates showed this pattern dominates the remaining Summary LC FPs.
+      all_sentences_summary_lc_guard_enabled: true
+      all_sentences_summary_lc_guard_require_zero_contradictions: true
+      all_sentences_summary_lc_guard_max_contradict_prob: 0.0
+      all_sentences_summary_lc_guard_min_low_confidence_ratio: 0.70
+      all_sentences_summary_lc_guard_min_avg_coverage_score_all: 0.72
+      all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf: 0.05
+      all_sentences_summary_lc_guard_max_avg_support_prob_low_conf: 0.10
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default

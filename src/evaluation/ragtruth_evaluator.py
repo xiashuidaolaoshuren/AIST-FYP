@@ -379,6 +379,75 @@ class RAGTruthEvaluator:
                     )
                 except (TypeError, ValueError):
                     self.all_sentences_summary_min_coverage_for_contradictory = 0.0
+                self.all_sentences_summary_lc_guard_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'all_sentences_summary_lc_guard_enabled',
+                        False,
+                    )
+                )
+                raw_all_sent_summary_lc_min_lc_ratio = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_guard_min_low_confidence_ratio',
+                    0.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_guard_min_low_confidence_ratio = float(
+                        raw_all_sent_summary_lc_min_lc_ratio
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_guard_min_low_confidence_ratio = 0.0
+                raw_all_sent_summary_lc_min_cov = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_guard_min_avg_coverage_score_all',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_guard_min_avg_coverage_score_all = float(
+                        raw_all_sent_summary_lc_min_cov
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_guard_min_avg_coverage_score_all = 1.0
+                raw_all_sent_summary_lc_max_cp = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf = float(
+                        raw_all_sent_summary_lc_max_cp
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf = 1.0
+                raw_all_sent_summary_lc_max_sp = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_guard_max_avg_support_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf = float(
+                        raw_all_sent_summary_lc_max_sp
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf = 1.0
+                raw_all_sent_summary_lc_max_contra = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_guard_max_contradict_prob',
+                    0.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_guard_max_contradict_prob = float(
+                        raw_all_sent_summary_lc_max_contra
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_guard_max_contradict_prob = 0.0
+                self.all_sentences_summary_lc_guard_require_zero_contradictions = bool(
+                    getattr(
+                        benchmark_config,
+                        'all_sentences_summary_lc_guard_require_zero_contradictions',
+                        True,
+                    )
+                )
                 raw_disable_lc_avg_tasks = getattr(
                     benchmark_config,
                     'disable_lc_avg_contradict_for_tasks',
@@ -416,6 +485,13 @@ class RAGTruthEvaluator:
                 self.all_sentences_summary_contradictory_override_enabled = False
                 self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
                 self.all_sentences_summary_min_coverage_for_contradictory = 0.0
+                self.all_sentences_summary_lc_guard_enabled = False
+                self.all_sentences_summary_lc_guard_min_low_confidence_ratio = 0.0
+                self.all_sentences_summary_lc_guard_min_avg_coverage_score_all = 1.0
+                self.all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf = 1.0
+                self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf = 1.0
+                self.all_sentences_summary_lc_guard_max_contradict_prob = 0.0
+                self.all_sentences_summary_lc_guard_require_zero_contradictions = True
                 self.disable_lc_avg_contradict_for_tasks = set()
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
@@ -436,6 +512,13 @@ class RAGTruthEvaluator:
             self.all_sentences_summary_contradictory_override_enabled = False
             self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
             self.all_sentences_summary_min_coverage_for_contradictory = 0.0
+            self.all_sentences_summary_lc_guard_enabled = False
+            self.all_sentences_summary_lc_guard_min_low_confidence_ratio = 0.0
+            self.all_sentences_summary_lc_guard_min_avg_coverage_score_all = 1.0
+            self.all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf = 1.0
+            self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf = 1.0
+            self.all_sentences_summary_lc_guard_max_contradict_prob = 0.0
+            self.all_sentences_summary_lc_guard_require_zero_contradictions = True
             self.disable_lc_avg_contradict_for_tasks = set()
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
@@ -514,6 +597,29 @@ class RAGTruthEvaluator:
                 0.0,
                 1.0,
             )
+        )
+        self.all_sentences_summary_lc_guard_min_low_confidence_ratio = float(
+            np.clip(self.all_sentences_summary_lc_guard_min_low_confidence_ratio, 0.0, 1.0)
+        )
+        self.all_sentences_summary_lc_guard_min_avg_coverage_score_all = float(
+            np.clip(self.all_sentences_summary_lc_guard_min_avg_coverage_score_all, 0.0, 1.0)
+        )
+        self.all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf = float(
+            np.clip(
+                self.all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf,
+                0.0,
+                1.0,
+            )
+        )
+        self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf = float(
+            np.clip(
+                self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf,
+                0.0,
+                1.0,
+            )
+        )
+        self.all_sentences_summary_lc_guard_max_contradict_prob = float(
+            np.clip(self.all_sentences_summary_lc_guard_max_contradict_prob, 0.0, 1.0)
         )
         self.lc_avg_contradict_ratio_threshold = float(
             np.clip(self.lc_avg_contradict_ratio_threshold, 0.0, 1.0)
@@ -1787,6 +1893,26 @@ class RAGTruthEvaluator:
             and low_coverage_ratio >= task_low_coverage_ratio_threshold
             and len(claim_decisions) >= self.min_claims_for_lc_escalation
         )
+        all_sentences_summary_lc_guard_block = False
+        if (
+            task_type == 'Summary'
+            and self.sentence_retrieval_mode == 'all_sentences'
+            and self.all_sentences_summary_lc_guard_enabled
+            and low_confidence_coverage_trigger
+            and low_confidence_ratio >= self.all_sentences_summary_lc_guard_min_low_confidence_ratio
+            and avg_coverage_score_all >= self.all_sentences_summary_lc_guard_min_avg_coverage_score_all
+            and avg_contradict_prob_low_conf
+            <= self.all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf
+            and avg_support_prob_low_conf
+            <= self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf
+            and max_contradict_prob <= self.all_sentences_summary_lc_guard_max_contradict_prob
+            and (
+                not self.all_sentences_summary_lc_guard_require_zero_contradictions
+                or contradictory_count == 0
+            )
+        ):
+            all_sentences_summary_lc_guard_block = True
+            low_confidence_coverage_trigger = False
         pre_block_detected_hallucination = (
             contradictory_trigger
             or low_confidence_coverage_trigger
@@ -1862,6 +1988,7 @@ class RAGTruthEvaluator:
             'qa_pure_lc_block': qa_pure_lc_block,
             'data2txt_contradictory_override_block': data2txt_contradictory_override_block,
             'all_sentences_summary_contradictory_override_block': all_sentences_summary_contradictory_override_block,
+            'all_sentences_summary_lc_guard_block': all_sentences_summary_lc_guard_block,
             'summary_single_contra_block': summary_single_contra_block,
             'lc_avg_contradict_task_block': task_type.upper() in self.disable_lc_avg_contradict_for_tasks,
             'detected_pre_qa_block': pre_block_detected_hallucination,
