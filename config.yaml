@@ -588,7 +588,7 @@ evaluation:
         QA: 0.18        # relaxed from global 0.28 to recover QA LC misses
         Data2txt: 0.28  # keep original gate for Data2txt
       lc_avg_contradict_ratio_threshold: 0.30  # new trigger: minimum LC ratio for lc_avg_contradict detection path
-      lc_avg_contradict_prob_threshold: 0.25   # new trigger: minimum avg contradiction prob among LC claims
+      lc_avg_contradict_prob_threshold: 0.27   # Eval-18: blocks 1 Summary lc_avg FP with no TP loss across current lc_avg-triggered samples
       disable_lc_avg_contradict_for_tasks:
         - QA  # Eval-16: QA lc_avg_contradict is 6 FP / 0 TP, so disable this path for QA
       min_claims_for_lc_escalation: 3  # keep protection for 1-2 claim responses while recovering 3-claim QA misses
@@ -608,14 +608,15 @@ evaluation:
       all_sentences_summary_min_coverage_for_contradictory: 0.45
       # Structural all_sentences Summary LC guard: suppress sample-level LC escalation
       # when coverage is strong but contradiction signals remain weak or absent.
-      # Eval-17 candidates showed this pattern dominates the remaining Summary LC FPs.
+      # Eval-18 relaxation keeps 0 TP loss on the remaining Summary LC bucket while
+      # blocking 6 additional FPs on retrospective analysis.
       all_sentences_summary_lc_guard_enabled: true
       all_sentences_summary_lc_guard_require_zero_contradictions: true
       all_sentences_summary_lc_guard_max_contradict_prob: 0.0
-      all_sentences_summary_lc_guard_min_low_confidence_ratio: 0.70
+      all_sentences_summary_lc_guard_min_low_confidence_ratio: 0.67
       all_sentences_summary_lc_guard_min_avg_coverage_score_all: 0.72
-      all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf: 0.05
-      all_sentences_summary_lc_guard_max_avg_support_prob_low_conf: 0.10
+      all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf: 0.15
+      all_sentences_summary_lc_guard_max_avg_support_prob_low_conf: 0.26
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default

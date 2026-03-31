@@ -3,7 +3,7 @@
 
 Usage:
   python scripts/analyze_eval_fp_tradeoffs.py \
-    --input "C:\\Users\\admin\\Desktop\\eval_temp\\verification\\ragtruth_full_verifier(16).json" \
+    --input "C:\\Users\\admin\\Desktop\\eval_temp\\verification\\ragtruth_full_verifier(18).json" \
     --output outputs/eval16_fp_tradeoffs.json
 """
 
@@ -179,6 +179,7 @@ def build_analysis(data: Dict[str, Any], precision: int) -> Dict[str, Any]:
                 for field in SIGNAL_FIELDS
             },
             "threshold_sweeps": {
+                "low_confidence_ratio_min": _threshold_sweep(fp_group, tp_group, "low_confidence_ratio", "ge", precision),
                 "low_coverage_ratio_min": _threshold_sweep(fp_group, tp_group, "low_coverage_ratio", "ge", precision),
                 "max_contradict_prob_min": _threshold_sweep(fp_group, tp_group, "max_contradict_prob", "ge", precision),
                 "max_contradict_coverage_min": _threshold_sweep(fp_group, tp_group, "max_contradict_coverage", "ge", precision),
