@@ -379,6 +379,24 @@ class RAGTruthEvaluator:
                     )
                 except (TypeError, ValueError):
                     self.all_sentences_summary_min_coverage_for_contradictory = 0.0
+                raw_disable_lc_avg_tasks = getattr(
+                    benchmark_config,
+                    'disable_lc_avg_contradict_for_tasks',
+                    [],
+                )
+                if isinstance(raw_disable_lc_avg_tasks, str):
+                    parsed_disable_lc_avg_tasks = [
+                        t.strip() for t in raw_disable_lc_avg_tasks.split(',') if t.strip()
+                    ]
+                elif isinstance(raw_disable_lc_avg_tasks, (list, tuple, set)):
+                    parsed_disable_lc_avg_tasks = [
+                        str(t).strip() for t in raw_disable_lc_avg_tasks if str(t).strip()
+                    ]
+                else:
+                    parsed_disable_lc_avg_tasks = []
+                self.disable_lc_avg_contradict_for_tasks = {
+                    t.upper() for t in parsed_disable_lc_avg_tasks
+                }
             else:
                 self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
                 self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -398,6 +416,7 @@ class RAGTruthEvaluator:
                 self.all_sentences_summary_contradictory_override_enabled = False
                 self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
                 self.all_sentences_summary_min_coverage_for_contradictory = 0.0
+                self.disable_lc_avg_contradict_for_tasks = set()
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
             self.ragtruth_eval_mode = 'ragtruth_eval'
@@ -417,6 +436,7 @@ class RAGTruthEvaluator:
             self.all_sentences_summary_contradictory_override_enabled = False
             self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
             self.all_sentences_summary_min_coverage_for_contradictory = 0.0
+            self.disable_lc_avg_contradict_for_tasks = set()
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
         try:
@@ -1705,7 +1725,8 @@ class RAGTruthEvaluator:
             and low_confidence_ratio >= self.low_confidence_ratio_threshold
         )
         lc_avg_contradict_trigger = (
-            contradictory_count < effective_min_contradictory
+            task_type.upper() not in self.disable_lc_avg_contradict_for_tasks
+            and contradictory_count < effective_min_contradictory
             and low_confidence_ratio >= self.lc_avg_contradict_ratio_threshold
             and avg_contradict_prob_low_conf >= self.lc_avg_contradict_prob_threshold
             and len(claim_decisions) >= self.min_claims_for_lc_escalation
@@ -1842,6 +1863,7 @@ class RAGTruthEvaluator:
             'data2txt_contradictory_override_block': data2txt_contradictory_override_block,
             'all_sentences_summary_contradictory_override_block': all_sentences_summary_contradictory_override_block,
             'summary_single_contra_block': summary_single_contra_block,
+            'lc_avg_contradict_task_block': task_type.upper() in self.disable_lc_avg_contradict_for_tasks,
             'detected_pre_qa_block': pre_block_detected_hallucination,
             'detection_trigger_paths': trigger_paths,
             'detection_trigger_path': primary_trigger_path,

@@ -580,6 +580,8 @@ evaluation:
         Data2txt: 0.28  # keep original gate for Data2txt
       lc_avg_contradict_ratio_threshold: 0.30  # new trigger: minimum LC ratio for lc_avg_contradict detection path
       lc_avg_contradict_prob_threshold: 0.25   # new trigger: minimum avg contradiction prob among LC claims
+      disable_lc_avg_contradict_for_tasks:
+        - QA  # Eval-16: QA lc_avg_contradict is 6 FP / 0 TP, so disable this path for QA
       min_claims_for_lc_escalation: 3  # keep protection for 1-2 claim responses while recovering 3-claim QA misses
       data2txt_min_lc_count: 6  # Data2txt-specific fallback: escalate only when many claims are Low Confidence and contradiction evidence is absent
       data2txt_contradictory_override_enabled: false  # optional safety gate for Data2txt contradictory trigger
@@ -592,7 +594,7 @@ evaluation:
       summary_single_contra_min_coverage: 0.44         # require at least this coverage_score for the sole contradictory claim
       # Optional additional guard for all_sentences mode only.
       # Helps suppress weak contradiction spikes from long-tail sentence pairs.
-      all_sentences_summary_contradictory_override_enabled: false
+      all_sentences_summary_contradictory_override_enabled: true
       all_sentences_summary_min_contradict_prob_for_contradictory: 0.75
       all_sentences_summary_min_coverage_for_contradictory: 0.45
       # Minimum contradictory claims needed to flag a sample as hallucinated.
