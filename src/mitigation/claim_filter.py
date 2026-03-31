@@ -283,6 +283,13 @@ class ClaimFilter:
         if task_type and task_type in self.lc_soft_filter_lc_avg_contradict_excluded_tasks:
             return base_threshold, False
 
+        # Only escalate when lc_avg_contradict is the primary detection trigger.
+        # If low_confidence_coverage, contradictory, or data2txt_low_confidence is the
+        # primary trigger, the aggressive threshold over-removes non-gold claims.
+        detection_trigger_path = str((sample_context or {}).get('detection_trigger_path', ''))
+        if detection_trigger_path and detection_trigger_path != 'lc_avg_contradict':
+            return base_threshold, False
+
         if len(decisions) < self.lc_soft_filter_lc_avg_contradict_min_claims:
             return base_threshold, False
 

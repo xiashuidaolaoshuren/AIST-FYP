@@ -1717,6 +1717,14 @@ class RAGTruthEvaluator:
         )
         mitigation_applied = False
         lc_soft_filter_threshold_applied = 0.0
+        # Compute pre-mitigation primary trigger path and inject into claim metadata
+        # so the adaptive LC soft-filter can gate on whether lc_avg_contradict is the
+        # exclusive driver (versus low_confidence_coverage or contradictory being primary).
+        pre_mitigation_trigger_path = self._compute_primary_trigger_path(
+            claim_decisions, task_type
+        )
+        for rp in resolved_pairs:
+            rp['metadata']['detection_trigger_path'] = pre_mitigation_trigger_path
         if mitigation_runtime_enabled and resolved_pairs:
             if (
                 mitigation_reprompt_state is not None
@@ -2293,7 +2301,75 @@ class RAGTruthEvaluator:
                     'version': evidence.get('version', None)
                 })
         return serialized
-    
+
+    def _compute_primary_trigger_path(
+        self,
+        claim_decisions: List["ClaimDecision"],
+        task_type: str,
+    ) -> str:
+        """Return the primary detection trigger path from pre-mitigation claim decisions.
+
+        Mirrors the priority order used in full trigger computation (contradictory >
+        low_confidence_coverage > data2txt_low_confidence > lc_avg_contradict) but
+        omits the late-stage override/block guards, which is acceptable for the purpose
+        of gating the adaptive LC soft-filter threshold.
+        """
+        if not claim_decisions:
+            return 'none'
+
+        effective_min_contradictory = self.per_task_min_contradictory.get(
+            task_type, self.min_contradictory_count
+        )
+        contradictory_count = sum(1 for d in claim_decisions if d.status == 'Contradictory')
+        contradictory_trigger = contradictory_count >= effective_min_contradictory
+        if contradictory_trigger:
+            return 'contradictory'
+
+        low_confidence_decisions = [d for d in claim_decisions if d.status == 'Low Confidence']
+        low_confidence_count = len(low_confidence_decisions)
+        n = len(claim_decisions)
+        low_confidence_ratio = low_confidence_count / n
+        low_coverage_count = sum(
+            1 for d in claim_decisions
+            if d.confidence.get('coverage_score', 1.0) < 0.5
+        )
+        low_coverage_ratio = low_coverage_count / n
+        task_low_coverage_ratio_threshold = self.per_task_low_coverage_ratio_threshold.get(
+            task_type, self.low_coverage_ratio_threshold
+        )
+        low_confidence_coverage_trigger = (
+            low_confidence_ratio >= self.low_confidence_ratio_threshold
+            and low_coverage_ratio >= task_low_coverage_ratio_threshold
+            and n >= self.min_claims_for_lc_escalation
+        )
+        if low_confidence_coverage_trigger:
+            return 'low_confidence_coverage'
+
+        data2txt_lc_escalation = (
+            task_type == 'Data2txt'
+            and contradictory_count == 0
+            and low_confidence_count >= self.data2txt_min_lc_count
+            and low_confidence_ratio >= self.low_confidence_ratio_threshold
+        )
+        if data2txt_lc_escalation:
+            return 'data2txt_low_confidence'
+
+        avg_contradict_prob_low_conf = (
+            float(np.mean([float(d.confidence.get('contradict_prob', 0.0)) for d in low_confidence_decisions]))
+            if low_confidence_decisions else 0.0
+        )
+        lc_avg_contradict_trigger = (
+            task_type.upper() not in self.disable_lc_avg_contradict_for_tasks
+            and contradictory_count < effective_min_contradictory
+            and low_confidence_ratio >= self.lc_avg_contradict_ratio_threshold
+            and avg_contradict_prob_low_conf >= self.lc_avg_contradict_prob_threshold
+            and n >= self.min_claims_for_lc_escalation
+        )
+        if lc_avg_contradict_trigger:
+            return 'lc_avg_contradict'
+
+        return 'none'
+
     def _check_overlap_with_gold(
         self,
         claim_text: str,

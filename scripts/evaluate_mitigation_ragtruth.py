@@ -235,10 +235,40 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
     gold_overlap_breakdown = statistics.get("gold_overlap_breakdown", {})
     sample_results = payload.get("sample_results", [])
     sample_ids: list[str] = []
+    lc_soft_filter_escalated_count = 0
     if isinstance(sample_results, list):
         for item in sample_results:
             if isinstance(item, dict) and item.get("sample_id") is not None:
                 sample_ids.append(str(item["sample_id"]))
+            threshold = float(item.get("lc_soft_filter_threshold_applied", 0.0)) if isinstance(item, dict) else 0.0
+            if 0.0 < threshold < 0.09:
+                lc_soft_filter_escalated_count += 1
+
+    # Per-task HRR/FRR metrics
+    per_task_raw = metrics.get("per_task", {})
+    per_task: dict[str, Any] = {}
+    for task_name, task_data in per_task_raw.items():
+        t_stats = task_data.get("statistics", {})
+        t_hrr_m = t_stats.get("hrr_metrics", {})
+        t_tp_m = t_stats.get("tp_mitigation_metrics", {})
+        t_overlap = t_stats.get("gold_overlap_breakdown", {})
+        per_task[task_name] = {
+            "hrr": float(t_hrr_m.get("hrr", 0.0)),
+            "frr": float(t_hrr_m.get("frr", 0.0)),
+            "total_gold_claims": int(t_hrr_m.get("total_gold_claims", 0)),
+            "gold_claims_removed": int(t_hrr_m.get("gold_claims_removed", 0)),
+            "total_non_gold_claims": int(t_hrr_m.get("total_non_gold_claims", 0)),
+            "non_gold_claims_removed": int(t_hrr_m.get("non_gold_claims_removed", 0)),
+            "sample_fix_rate": float(t_hrr_m.get("sample_fix_rate", 0.0)),
+            "samples_fixed": int(t_hrr_m.get("samples_fixed", 0)),
+            "samples_with_gold_hallucination": int(t_hrr_m.get("samples_with_gold_hallucination", 0)),
+            "tp_hrr": float(t_tp_m.get("tp_hrr", 0.0)),
+            "tp_frr": float(t_tp_m.get("tp_frr", 0.0)),
+            "tp_sample_fix_rate": float(t_tp_m.get("tp_sample_fix_rate", 0.0)),
+            "tp_count": int(t_tp_m.get("tp_count", 0)),
+            "gold_overlap_claims": int(t_overlap.get("gold_overlap_claims", 0)),
+            "gold_overlap_removed_by_filter": int(t_overlap.get("gold_overlap_removed_by_filter", 0)),
+        }
 
     return {
         "accuracy": float(overall.get("accuracy", 0.0)),
@@ -293,6 +323,8 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "gold_overlap_other": int(gold_overlap_breakdown.get("gold_overlap_other", 0)),
         "num_samples_evaluated": len(sample_ids),
         "sample_ids": sample_ids,
+        "lc_soft_filter_escalated_count": lc_soft_filter_escalated_count,
+        "per_task": per_task,
     }
 
 
@@ -552,6 +584,45 @@ def _write_summary(
         lines.append(
             f"| {name} | {metric['tp']} | {metric['tn']} | {metric['fp']} | {metric['fn']} |"
         )
+
+    # Per-task HRR / FRR breakdown
+    task_names: list[str] = sorted(
+        {t for m in variant_metrics.values() for t in m.get("per_task", {}).keys()}
+    )
+    if task_names:
+        lines.extend([
+            "",
+            "## Per-Task HRR / FRR",
+            "",
+            "| Variant | Task | HRR (%) | FRR (%) | Gold Removed | Gold Total | Non-Gold Removed | Non-Gold Total | Sample Fix Rate (%) | TP HRR (%) | TP FRR (%) | TP Sample Fix Rate (%) |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for name, metric in variant_metrics.items():
+            task_map = metric.get("per_task", {})
+            for task in task_names:
+                t = task_map.get(task)
+                if t is None:
+                    lines.append(f"| {name} | {task} | – | – | – | – | – | – | – | – | – | – |")
+                    continue
+                lines.append(
+                    f"| {name} | {task} | {t['hrr'] * 100.0:.2f}% | {t['frr'] * 100.0:.2f}% | "
+                    f"{t['gold_claims_removed']} | {t['total_gold_claims']} | "
+                    f"{t['non_gold_claims_removed']} | {t['total_non_gold_claims']} | "
+                    f"{t['sample_fix_rate'] * 100.0:.2f}% | "
+                    f"{t['tp_hrr'] * 100.0:.2f}% | {t['tp_frr'] * 100.0:.2f}% | "
+                    f"{t['tp_sample_fix_rate'] * 100.0:.2f}% |"
+                )
+
+    # Adaptive LC soft-filter diagnostic
+    lines.extend([
+        "",
+        "## Adaptive LC Soft-Filter Diagnostic",
+        "",
+        "| Variant | Samples with Escalated Threshold (0.05) |",
+        "|---|---:|",
+    ])
+    for name, metric in variant_metrics.items():
+        lines.append(f"| {name} | {metric.get('lc_soft_filter_escalated_count', 0)} |")
 
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text("\n".join(lines), encoding="utf-8")
