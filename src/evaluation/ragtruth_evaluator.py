@@ -1585,6 +1585,7 @@ class RAGTruthEvaluator:
                             "Strict index-only policy forbids fallback to full gold context."
                         )
                     claim_metadata = dict(metadata)
+                    claim_metadata['task_type'] = task_type
                     claim_metadata['sentence_retrieval_mode'] = self.sentence_retrieval_mode
                     claim_metadata['sentence_evidence_count'] = len(per_claim_ev)
                     resolved_pairs.append({
@@ -1597,6 +1598,7 @@ class RAGTruthEvaluator:
                     if not evidence_chunks:
                         continue
                     claim_metadata = dict(metadata)
+                    claim_metadata['task_type'] = task_type
                     claim_metadata['sentence_retrieval_mode'] = 'disabled'
                     claim_metadata['sentence_evidence_count'] = len(evidence_chunks)
                     resolved_pairs.append({
@@ -1664,7 +1666,9 @@ class RAGTruthEvaluator:
                     self.logger.warning("Skipping claim-evidence pair due to missing claim or evidence")
                     continue
 
-                resolved_pairs.append({'claim': claim, 'evidence': evidence, 'metadata': metadata})
+                claim_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+                claim_metadata['task_type'] = task_type
+                resolved_pairs.append({'claim': claim, 'evidence': evidence, 'metadata': claim_metadata})
 
         return {
             'sample': sample,
@@ -1712,6 +1716,7 @@ class RAGTruthEvaluator:
             self.mitigation_orchestrator and self.mitigation_orchestrator.enabled
         )
         mitigation_applied = False
+        lc_soft_filter_threshold_applied = 0.0
         if mitigation_runtime_enabled and resolved_pairs:
             if (
                 mitigation_reprompt_state is not None
@@ -1740,6 +1745,11 @@ class RAGTruthEvaluator:
             mitigation_actions = mitigation_result.get('actions', [])
             filtered_response = mitigation_result.get('final_answer', generated_response)
             removed_count = mitigation_result.get('filtered_claim_count', 0)
+            filter_metadata = mitigation_result.get('filter_metadata', {})
+            if isinstance(filter_metadata, dict):
+                lc_soft_filter_threshold_applied = float(
+                    filter_metadata.get('lc_soft_filter_threshold_applied', 0.0)
+                )
             resolved_pairs = mitigation_result.get('claim_records', resolved_pairs)
             claim_decisions = mitigation_result.get('decisions', claim_decisions)
             claim_signals = mitigation_result.get('signals', claim_signals)
@@ -1998,6 +2008,7 @@ class RAGTruthEvaluator:
             'mitigation_applied': mitigation_applied,
             'mitigation_actions': mitigation_actions,
             'filtered_claim_count': removed_count,
+            'lc_soft_filter_threshold_applied': lc_soft_filter_threshold_applied,
             'pre_verification_filtered_claim_count': pre_verification_filtered_claim_count,
             'claim_results': claim_results
         }
@@ -2363,6 +2374,13 @@ class RAGTruthEvaluator:
                 getattr(self.mitigation_orchestrator.claim_filter, 'lc_soft_filter_prob_threshold', 0.0)
             )
 
+        def _get_row_lc_soft_filter_threshold(row: Dict[str, Any]) -> float:
+            value = row.get('lc_soft_filter_threshold_applied', lc_soft_filter_threshold)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return lc_soft_filter_threshold
+
         def _compute_hrr_counts(rows: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
             total_gold_claims = 0
             gold_claims_removed = 0
@@ -2370,6 +2388,7 @@ class RAGTruthEvaluator:
             non_gold_claims_removed = 0
 
             for row in rows:
+                row_lc_soft_filter_threshold = _get_row_lc_soft_filter_threshold(row)
                 claim_results = row.get('claim_results', [])
                 if not isinstance(claim_results, list):
                     continue
@@ -2388,9 +2407,9 @@ class RAGTruthEvaluator:
                         and (
                             predicted_status == 'Contradictory'
                             or (
-                                lc_soft_filter_threshold > 0.0
+                                row_lc_soft_filter_threshold > 0.0
                                 and predicted_status == 'Low Confidence'
-                                and contradict_prob >= lc_soft_filter_threshold
+                                and contradict_prob >= row_lc_soft_filter_threshold
                             )
                         )
                     )
@@ -2423,6 +2442,7 @@ class RAGTruthEvaluator:
             }
 
             for row in rows:
+                row_lc_soft_filter_threshold = _get_row_lc_soft_filter_threshold(row)
                 claim_results = row.get('claim_results', [])
                 if not isinstance(claim_results, list):
                     continue
@@ -2445,9 +2465,9 @@ class RAGTruthEvaluator:
                         and (
                             predicted_status == 'Contradictory'
                             or (
-                                lc_soft_filter_threshold > 0.0
+                                row_lc_soft_filter_threshold > 0.0
                                 and predicted_status == 'Low Confidence'
-                                and contradict_prob >= lc_soft_filter_threshold
+                                and contradict_prob >= row_lc_soft_filter_threshold
                             )
                         )
                     )
@@ -2458,8 +2478,8 @@ class RAGTruthEvaluator:
                         breakdown['gold_overlap_contradictory'] += 1
                     elif predicted_status == 'Low Confidence':
                         if (
-                            lc_soft_filter_threshold > 0.0
-                            and contradict_prob >= lc_soft_filter_threshold
+                            row_lc_soft_filter_threshold > 0.0
+                            and contradict_prob >= row_lc_soft_filter_threshold
                         ):
                             breakdown['gold_overlap_low_confidence_ge_soft_threshold'] += 1
                         else:
@@ -2480,6 +2500,7 @@ class RAGTruthEvaluator:
                     continue
 
                 samples_with_gold_hallucination += 1
+                row_lc_soft_filter_threshold = _get_row_lc_soft_filter_threshold(row)
                 response_changed = str(row.get('response_after_mitigation', '')) != str(
                     row.get('generated_response', '')
                 )
@@ -2497,9 +2518,9 @@ class RAGTruthEvaluator:
                         removed_by_filter = (
                             str(claim_result.get('predicted_status', '')) == 'Contradictory'
                             or (
-                                lc_soft_filter_threshold > 0.0
+                                row_lc_soft_filter_threshold > 0.0
                                 and str(claim_result.get('predicted_status', '')) == 'Low Confidence'
-                                and contradict_prob >= lc_soft_filter_threshold
+                                and contradict_prob >= row_lc_soft_filter_threshold
                             )
                         )
                         if (
@@ -2783,12 +2804,12 @@ class RAGTruthEvaluator:
                 'sample_fix_rate': (
                     'Rate of gold-hallucinated samples where mitigation changed the final response and '
                     'at least one gold-overlapping claim was removed by filter '
-                    '(Contradictory or LC soft-filter above threshold).'
+                    '(Contradictory or LC soft-filter above the applied per-sample threshold).'
                 ),
                 'gold_overlap_breakdown': (
                     'Status distribution for claims overlapping gold hallucination spans. '
                     'Used to diagnose low HRR numerator (e.g., many gold-overlap claims staying Supported '
-                    'or Low Confidence below soft-filter threshold).'
+                    'or Low Confidence below the applied per-sample soft-filter threshold).'
                 ),
                 'detection_trigger_path': (
                     "Primary path that first triggered sample-level detection: "

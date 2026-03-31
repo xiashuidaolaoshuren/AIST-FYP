@@ -14,8 +14,9 @@ This approach ensures transparency (users see that claims were removed)
 while preventing harmful hallucinations from reaching the final output.
 """
 
-from typing import List, Tuple, Dict
+from typing import Any, List, Optional, Tuple, Dict
 import logging
+import numpy as np
 
 from src.utils.data_structures import Claim, ClaimDecision
 from src.utils.config import Config
@@ -74,6 +75,25 @@ class ClaimFilter:
         self.lc_soft_filter_prob_threshold = float(
             filter_config.get('lc_soft_filter_prob_threshold', 0.0)
         )
+        self.lc_soft_filter_lc_avg_contradict_threshold = float(
+            filter_config.get(
+                'lc_soft_filter_lc_avg_contradict_threshold',
+                self.lc_soft_filter_prob_threshold,
+            )
+        )
+        self.lc_soft_filter_lc_avg_contradict_min_ratio = float(
+            filter_config.get('lc_soft_filter_lc_avg_contradict_min_ratio', 0.30)
+        )
+        self.lc_soft_filter_lc_avg_contradict_min_avg_contradict_prob = float(
+            filter_config.get('lc_soft_filter_lc_avg_contradict_min_avg_contradict_prob', 0.25)
+        )
+        self.lc_soft_filter_lc_avg_contradict_min_claims = int(
+            filter_config.get('lc_soft_filter_lc_avg_contradict_min_claims', 3)
+        )
+        self.lc_soft_filter_lc_avg_contradict_excluded_tasks = {
+            str(task).upper()
+            for task in filter_config.get('lc_soft_filter_lc_avg_contradict_excluded_tasks', ['QA'])
+        }
         self.lc_placeholder = filter_config.get(
             'lc_placeholder', '[CLAIM UNCERTAIN: Low Confidence]'
         )
@@ -87,8 +107,9 @@ class ClaimFilter:
         self,
         answer_text: str,
         claims: List[Claim],
-        decisions: List[ClaimDecision]
-    ) -> Tuple[str, int]:
+        decisions: List[ClaimDecision],
+        sample_context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, int, Dict[str, Any]]:
         """
         Filter contradictory claims from answer text.
         
@@ -132,7 +153,11 @@ class ClaimFilter:
         """
         if not self.enabled:
             logger.debug("Claim filtering is disabled, returning original text")
-            return answer_text, 0
+            return answer_text, 0, {
+                'mode': 'disabled',
+                'lc_soft_filter_threshold_applied': 0.0,
+                'lc_soft_filter_escalated': False,
+            }
         
         if len(claims) != len(decisions):
             raise ValueError(
@@ -142,7 +167,11 @@ class ClaimFilter:
         
         if not claims:
             logger.debug("No claims to filter, returning original text")
-            return answer_text, 0
+            return answer_text, 0, {
+                'mode': 'no_claims',
+                'lc_soft_filter_threshold_applied': 0.0,
+                'lc_soft_filter_escalated': False,
+            }
         
         logger.debug(
             f"Filtering {len(claims)} claims from answer (length={len(answer_text)})"
@@ -159,9 +188,27 @@ class ClaimFilter:
         
         if not contradictory_decisions:
             if self.lc_soft_filter_prob_threshold > 0.0:
-                return self._filter_lc_claims(answer_text, claim_dict, decisions)
+                lc_threshold, escalated = self._resolve_lc_soft_filter_threshold(
+                    decisions,
+                    sample_context,
+                )
+                filtered_text, removed_count = self._filter_lc_claims(
+                    answer_text,
+                    claim_dict,
+                    decisions,
+                    lc_threshold,
+                )
+                return filtered_text, removed_count, {
+                    'mode': 'low_confidence',
+                    'lc_soft_filter_threshold_applied': lc_threshold,
+                    'lc_soft_filter_escalated': escalated,
+                }
             logger.info("No contradictory claims found, returning original text")
-            return answer_text, 0
+            return answer_text, 0, {
+                'mode': 'none',
+                'lc_soft_filter_threshold_applied': 0.0,
+                'lc_soft_filter_escalated': False,
+            }
         
         logger.info(
             f"Found {len(contradictory_decisions)} contradictory claims to remove"
@@ -211,13 +258,59 @@ class ClaimFilter:
             f"Filtered length: {len(filtered_text)}"
         )
         
-        return filtered_text, removed_count
+        return filtered_text, removed_count, {
+            'mode': 'contradictory',
+            'lc_soft_filter_threshold_applied': self.lc_soft_filter_prob_threshold,
+            'lc_soft_filter_escalated': False,
+        }
+
+    def _resolve_lc_soft_filter_threshold(
+        self,
+        decisions: List[ClaimDecision],
+        sample_context: Optional[Dict[str, Any]],
+    ) -> Tuple[float, bool]:
+        """Return (threshold, escalated) for LC soft-filtering in this sample."""
+        base_threshold = self.lc_soft_filter_prob_threshold
+        aggressive_threshold = self.lc_soft_filter_lc_avg_contradict_threshold
+
+        if base_threshold <= 0.0:
+            return 0.0, False
+
+        if aggressive_threshold <= 0.0 or aggressive_threshold >= base_threshold:
+            return base_threshold, False
+
+        task_type = str((sample_context or {}).get('task_type', '')).upper()
+        if task_type and task_type in self.lc_soft_filter_lc_avg_contradict_excluded_tasks:
+            return base_threshold, False
+
+        if len(decisions) < self.lc_soft_filter_lc_avg_contradict_min_claims:
+            return base_threshold, False
+
+        low_confidence_decisions = [
+            d for d in decisions if d.status == 'Low Confidence'
+        ]
+        if not low_confidence_decisions:
+            return base_threshold, False
+
+        low_confidence_ratio = len(low_confidence_decisions) / max(len(decisions), 1)
+        if low_confidence_ratio < self.lc_soft_filter_lc_avg_contradict_min_ratio:
+            return base_threshold, False
+
+        avg_contradict_prob_low_conf = float(np.mean([
+            float(d.confidence.get('contradict_prob', 0.0))
+            for d in low_confidence_decisions
+        ]))
+        if avg_contradict_prob_low_conf < self.lc_soft_filter_lc_avg_contradict_min_avg_contradict_prob:
+            return base_threshold, False
+
+        return aggressive_threshold, True
 
     def _filter_lc_claims(
         self,
         answer_text: str,
         claim_dict: dict,
         decisions: List[ClaimDecision],
+        lc_threshold: float,
     ) -> Tuple[str, int]:
         """Soft-filter Low Confidence claims whose contradict_prob exceeds the configured threshold.
 
@@ -226,20 +319,20 @@ class ClaimFilter:
         lc_decisions = [
             d for d in decisions
             if d.status == 'Low Confidence'
-            and float(d.confidence.get('contradict_prob', 0.0)) >= self.lc_soft_filter_prob_threshold
+            and float(d.confidence.get('contradict_prob', 0.0)) >= lc_threshold
             and d.claim_id in claim_dict
         ]
         if not lc_decisions:
             logger.info(
                 "No LC claims above soft-filter threshold (%.2f), returning original text",
-                self.lc_soft_filter_prob_threshold,
+                lc_threshold,
             )
             return answer_text, 0
 
         logger.info(
             "Soft-filtering %d Low Confidence claims (contradict_prob >= %.2f)",
             len(lc_decisions),
-            self.lc_soft_filter_prob_threshold,
+            lc_threshold,
         )
 
         sorted_decisions = sorted(

@@ -143,6 +143,7 @@ class MitigationOrchestrator:
                 planned_actions = self.router.resolve_actions(decisions, objective_override)
 
         filtered_claim_count = 0
+        filter_metadata: Dict[str, Any] = {}
         if (
             "filter" in planned_actions
             and self.claim_filter
@@ -150,10 +151,11 @@ class MitigationOrchestrator:
             and decisions
             and claim_records
         ):
-            answer_text, filtered_claim_count = self.claim_filter.filter_answer(
+            answer_text, filtered_claim_count, filter_metadata = self.claim_filter.filter_answer(
                 answer_text=answer_text,
                 claims=[r["claim"] for r in claim_records],
                 decisions=decisions,
+                sample_context=(claim_records[0].get("metadata") or {}),
             )
             if filtered_claim_count > 0:
                 actions.append("filter")
@@ -165,6 +167,7 @@ class MitigationOrchestrator:
             "signals": signals,
             "actions": actions,
             "filtered_claim_count": filtered_claim_count,
+            "filter_metadata": filter_metadata,
         }
 
     def _verify_and_decide(self, claim_records: List[Dict[str, Any]]):
@@ -328,6 +331,7 @@ class MitigationOrchestrator:
                 planned_actions = self.router.resolve_actions(decisions, objective_override)
 
         filtered_claim_count = 0
+        filter_metadata: Dict[str, Any] = {}
         if (
             "filter" in planned_actions
             and self.claim_filter
@@ -335,10 +339,11 @@ class MitigationOrchestrator:
             and decisions
             and claim_records
         ):
-            answer_text, filtered_claim_count = self.claim_filter.filter_answer(
+            answer_text, filtered_claim_count, filter_metadata = self.claim_filter.filter_answer(
                 answer_text=answer_text,
                 claims=[r["claim"] for r in claim_records],
                 decisions=decisions,
+                sample_context=(claim_records[0].get("metadata") or {}),
             )
             if filtered_claim_count > 0:
                 actions.append("filter")
@@ -350,6 +355,7 @@ class MitigationOrchestrator:
             "signals": signals,
             "actions": actions,
             "filtered_claim_count": filtered_claim_count,
+            "filter_metadata": filter_metadata,
         }
 
     def apply_run_reprompt_collect_nli(
@@ -469,6 +475,7 @@ class MitigationOrchestrator:
             )
 
         filtered_claim_count = 0
+        filter_metadata: Dict[str, Any] = {}
         if (
             "filter" in planned_actions
             and self.claim_filter
@@ -476,10 +483,11 @@ class MitigationOrchestrator:
             and decisions
             and claim_records
         ):
-            answer_text, filtered_claim_count = self.claim_filter.filter_answer(
+            answer_text, filtered_claim_count, filter_metadata = self.claim_filter.filter_answer(
                 answer_text=answer_text,
                 claims=[r["claim"] for r in claim_records],
                 decisions=decisions,
+                sample_context=(claim_records[0].get("metadata") or {}),
             )
             if filtered_claim_count > 0:
                 actions.append("filter")
@@ -491,6 +499,7 @@ class MitigationOrchestrator:
             "signals": signals,
             "actions": actions,
             "filtered_claim_count": filtered_claim_count,
+            "filter_metadata": filter_metadata,
         }
 
     def collect_nli_phase(self, claim_records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[Tuple[int, str, str]]]:

@@ -465,6 +465,15 @@ mitigation:
     # When set, LC claims with contradict_prob >= threshold are also replaced (using lc_placeholder).
     # Only activates when no Contradictory claims exist, targeting the lc_avg_contradict path.
     lc_soft_filter_prob_threshold: 0.10
+    # Optional lower threshold used only when sample-level LC signals are strong
+    # (lc_avg_contradict-like pattern), to recover LC claims that sit below the global threshold.
+    # Keep QA excluded to avoid reintroducing known false-positive behavior.
+    lc_soft_filter_lc_avg_contradict_threshold: 0.05
+    lc_soft_filter_lc_avg_contradict_min_ratio: 0.30
+    lc_soft_filter_lc_avg_contradict_min_avg_contradict_prob: 0.25
+    lc_soft_filter_lc_avg_contradict_min_claims: 3
+    lc_soft_filter_lc_avg_contradict_excluded_tasks:
+      - QA
     lc_placeholder: "[CLAIM UNCERTAIN: Low Confidence]"
   
   # Re-Prompting Configuration (Month 5/6)
