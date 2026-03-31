@@ -448,6 +448,195 @@ class RAGTruthEvaluator:
                         True,
                     )
                 )
+                self.all_sentences_summary_lc_residual_guard_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'all_sentences_summary_lc_residual_guard_enabled',
+                        False,
+                    )
+                )
+                raw_all_sent_summary_lc_residual_min_lc_ratio = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_residual_guard_min_low_confidence_ratio',
+                    0.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_residual_guard_min_low_confidence_ratio = float(
+                        raw_all_sent_summary_lc_residual_min_lc_ratio
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_residual_guard_min_low_confidence_ratio = 0.0
+                raw_all_sent_summary_lc_residual_min_cov = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all = float(
+                        raw_all_sent_summary_lc_residual_min_cov
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all = 1.0
+                raw_all_sent_summary_lc_residual_max_cp = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf = float(
+                        raw_all_sent_summary_lc_residual_max_cp
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf = 1.0
+                raw_all_sent_summary_lc_residual_max_sp = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf = float(
+                        raw_all_sent_summary_lc_residual_max_sp
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf = 1.0
+                raw_all_sent_summary_lc_residual_max_contra = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_lc_residual_guard_max_contradict_prob',
+                    0.0,
+                )
+                try:
+                    self.all_sentences_summary_lc_residual_guard_max_contradict_prob = float(
+                        raw_all_sent_summary_lc_residual_max_contra
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_lc_residual_guard_max_contradict_prob = 0.0
+                self.all_sentences_summary_lc_residual_guard_require_zero_contradictions = bool(
+                    getattr(
+                        benchmark_config,
+                        'all_sentences_summary_lc_residual_guard_require_zero_contradictions',
+                        True,
+                    )
+                )
+                self.all_sentences_summary_contradictory_structural_guard_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'all_sentences_summary_contradictory_structural_guard_enabled',
+                        False,
+                    )
+                )
+                raw_all_sent_summary_contra_struct_max_cp = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_contradictory_structural_guard_max_contradict_prob',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_contradictory_structural_guard_max_contradict_prob = float(
+                        raw_all_sent_summary_contra_struct_max_cp
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_contradictory_structural_guard_max_contradict_prob = 1.0
+                raw_all_sent_summary_contra_struct_max_cov = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_contradictory_structural_guard_max_contradict_coverage',
+                    1.0,
+                )
+                try:
+                    self.all_sentences_summary_contradictory_structural_guard_max_contradict_coverage = float(
+                        raw_all_sent_summary_contra_struct_max_cov
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_contradictory_structural_guard_max_contradict_coverage = 1.0
+                raw_all_sent_summary_contra_struct_min_avg_cov = getattr(
+                    benchmark_config,
+                    'all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all',
+                    0.0,
+                )
+                try:
+                    self.all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all = float(
+                        raw_all_sent_summary_contra_struct_min_avg_cov
+                    )
+                except (TypeError, ValueError):
+                    self.all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all = 0.0
+                self.data2txt_contradictory_structural_guard_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'data2txt_contradictory_structural_guard_enabled',
+                        False,
+                    )
+                )
+                raw_data2txt_contra_struct_max_cp = getattr(
+                    benchmark_config,
+                    'data2txt_contradictory_structural_guard_max_contradict_prob',
+                    1.0,
+                )
+                try:
+                    self.data2txt_contradictory_structural_guard_max_contradict_prob = float(
+                        raw_data2txt_contra_struct_max_cp
+                    )
+                except (TypeError, ValueError):
+                    self.data2txt_contradictory_structural_guard_max_contradict_prob = 1.0
+                raw_data2txt_contra_struct_min_avg_cov = getattr(
+                    benchmark_config,
+                    'data2txt_contradictory_structural_guard_min_avg_coverage_score_all',
+                    0.0,
+                )
+                try:
+                    self.data2txt_contradictory_structural_guard_min_avg_coverage_score_all = float(
+                        raw_data2txt_contra_struct_min_avg_cov
+                    )
+                except (TypeError, ValueError):
+                    self.data2txt_contradictory_structural_guard_min_avg_coverage_score_all = 0.0
+                raw_data2txt_contra_struct_max_avg_cp = getattr(
+                    benchmark_config,
+                    'data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf = float(
+                        raw_data2txt_contra_struct_max_avg_cp
+                    )
+                except (TypeError, ValueError):
+                    self.data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf = 1.0
+                self.data2txt_low_confidence_structural_guard_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'data2txt_low_confidence_structural_guard_enabled',
+                        False,
+                    )
+                )
+                raw_data2txt_lc_struct_min_lc_ratio = getattr(
+                    benchmark_config,
+                    'data2txt_low_confidence_structural_guard_min_low_confidence_ratio',
+                    0.0,
+                )
+                try:
+                    self.data2txt_low_confidence_structural_guard_min_low_confidence_ratio = float(
+                        raw_data2txt_lc_struct_min_lc_ratio
+                    )
+                except (TypeError, ValueError):
+                    self.data2txt_low_confidence_structural_guard_min_low_confidence_ratio = 0.0
+                raw_data2txt_lc_struct_min_avg_cov = getattr(
+                    benchmark_config,
+                    'data2txt_low_confidence_structural_guard_min_avg_coverage_score_all',
+                    0.0,
+                )
+                try:
+                    self.data2txt_low_confidence_structural_guard_min_avg_coverage_score_all = float(
+                        raw_data2txt_lc_struct_min_avg_cov
+                    )
+                except (TypeError, ValueError):
+                    self.data2txt_low_confidence_structural_guard_min_avg_coverage_score_all = 0.0
+                raw_data2txt_lc_struct_max_avg_cp = getattr(
+                    benchmark_config,
+                    'data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf = float(
+                        raw_data2txt_lc_struct_max_avg_cp
+                    )
+                except (TypeError, ValueError):
+                    self.data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf = 1.0
                 raw_disable_lc_avg_tasks = getattr(
                     benchmark_config,
                     'disable_lc_avg_contradict_for_tasks',
@@ -492,6 +681,25 @@ class RAGTruthEvaluator:
                 self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf = 1.0
                 self.all_sentences_summary_lc_guard_max_contradict_prob = 0.0
                 self.all_sentences_summary_lc_guard_require_zero_contradictions = True
+                self.all_sentences_summary_lc_residual_guard_enabled = False
+                self.all_sentences_summary_lc_residual_guard_min_low_confidence_ratio = 0.0
+                self.all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all = 1.0
+                self.all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf = 1.0
+                self.all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf = 1.0
+                self.all_sentences_summary_lc_residual_guard_max_contradict_prob = 0.0
+                self.all_sentences_summary_lc_residual_guard_require_zero_contradictions = True
+                self.all_sentences_summary_contradictory_structural_guard_enabled = False
+                self.all_sentences_summary_contradictory_structural_guard_max_contradict_prob = 1.0
+                self.all_sentences_summary_contradictory_structural_guard_max_contradict_coverage = 1.0
+                self.all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all = 0.0
+                self.data2txt_contradictory_structural_guard_enabled = False
+                self.data2txt_contradictory_structural_guard_max_contradict_prob = 1.0
+                self.data2txt_contradictory_structural_guard_min_avg_coverage_score_all = 0.0
+                self.data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf = 1.0
+                self.data2txt_low_confidence_structural_guard_enabled = False
+                self.data2txt_low_confidence_structural_guard_min_low_confidence_ratio = 0.0
+                self.data2txt_low_confidence_structural_guard_min_avg_coverage_score_all = 0.0
+                self.data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf = 1.0
                 self.disable_lc_avg_contradict_for_tasks = set()
         else:
             self.benchmark_dir = Path('benchmark/RAGTruth/dataset')
@@ -519,6 +727,25 @@ class RAGTruthEvaluator:
             self.all_sentences_summary_lc_guard_max_avg_support_prob_low_conf = 1.0
             self.all_sentences_summary_lc_guard_max_contradict_prob = 0.0
             self.all_sentences_summary_lc_guard_require_zero_contradictions = True
+            self.all_sentences_summary_lc_residual_guard_enabled = False
+            self.all_sentences_summary_lc_residual_guard_min_low_confidence_ratio = 0.0
+            self.all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all = 1.0
+            self.all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf = 1.0
+            self.all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf = 1.0
+            self.all_sentences_summary_lc_residual_guard_max_contradict_prob = 0.0
+            self.all_sentences_summary_lc_residual_guard_require_zero_contradictions = True
+            self.all_sentences_summary_contradictory_structural_guard_enabled = False
+            self.all_sentences_summary_contradictory_structural_guard_max_contradict_prob = 1.0
+            self.all_sentences_summary_contradictory_structural_guard_max_contradict_coverage = 1.0
+            self.all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all = 0.0
+            self.data2txt_contradictory_structural_guard_enabled = False
+            self.data2txt_contradictory_structural_guard_max_contradict_prob = 1.0
+            self.data2txt_contradictory_structural_guard_min_avg_coverage_score_all = 0.0
+            self.data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf = 1.0
+            self.data2txt_low_confidence_structural_guard_enabled = False
+            self.data2txt_low_confidence_structural_guard_min_low_confidence_ratio = 0.0
+            self.data2txt_low_confidence_structural_guard_min_avg_coverage_score_all = 0.0
+            self.data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf = 1.0
             self.disable_lc_avg_contradict_for_tasks = set()
 
         # Per-task minimum contradictory claims to flag a sample as hallucinated.
@@ -620,6 +847,76 @@ class RAGTruthEvaluator:
         )
         self.all_sentences_summary_lc_guard_max_contradict_prob = float(
             np.clip(self.all_sentences_summary_lc_guard_max_contradict_prob, 0.0, 1.0)
+        )
+        self.all_sentences_summary_lc_residual_guard_min_low_confidence_ratio = float(
+            np.clip(self.all_sentences_summary_lc_residual_guard_min_low_confidence_ratio, 0.0, 1.0)
+        )
+        self.all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all = float(
+            np.clip(self.all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all, 0.0, 1.0)
+        )
+        self.all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf = float(
+            np.clip(
+                self.all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf,
+                0.0,
+                1.0,
+            )
+        )
+        self.all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf = float(
+            np.clip(
+                self.all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf,
+                0.0,
+                1.0,
+            )
+        )
+        self.all_sentences_summary_lc_residual_guard_max_contradict_prob = float(
+            np.clip(self.all_sentences_summary_lc_residual_guard_max_contradict_prob, 0.0, 1.0)
+        )
+        self.all_sentences_summary_contradictory_structural_guard_max_contradict_prob = float(
+            np.clip(
+                self.all_sentences_summary_contradictory_structural_guard_max_contradict_prob,
+                0.0,
+                1.0,
+            )
+        )
+        self.all_sentences_summary_contradictory_structural_guard_max_contradict_coverage = float(
+            np.clip(
+                self.all_sentences_summary_contradictory_structural_guard_max_contradict_coverage,
+                0.0,
+                1.0,
+            )
+        )
+        self.all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all = float(
+            np.clip(
+                self.all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all,
+                0.0,
+                1.0,
+            )
+        )
+        self.data2txt_contradictory_structural_guard_max_contradict_prob = float(
+            np.clip(self.data2txt_contradictory_structural_guard_max_contradict_prob, 0.0, 1.0)
+        )
+        self.data2txt_contradictory_structural_guard_min_avg_coverage_score_all = float(
+            np.clip(self.data2txt_contradictory_structural_guard_min_avg_coverage_score_all, 0.0, 1.0)
+        )
+        self.data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf = float(
+            np.clip(
+                self.data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf,
+                0.0,
+                1.0,
+            )
+        )
+        self.data2txt_low_confidence_structural_guard_min_low_confidence_ratio = float(
+            np.clip(self.data2txt_low_confidence_structural_guard_min_low_confidence_ratio, 0.0, 1.0)
+        )
+        self.data2txt_low_confidence_structural_guard_min_avg_coverage_score_all = float(
+            np.clip(self.data2txt_low_confidence_structural_guard_min_avg_coverage_score_all, 0.0, 1.0)
+        )
+        self.data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf = float(
+            np.clip(
+                self.data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf,
+                0.0,
+                1.0,
+            )
         )
         self.lc_avg_contradict_ratio_threshold = float(
             np.clip(self.lc_avg_contradict_ratio_threshold, 0.0, 1.0)
@@ -1906,6 +2203,34 @@ class RAGTruthEvaluator:
             ):
                 summary_single_contra_block = True
                 contradictory_trigger = False
+        all_sentences_summary_contradictory_structural_guard_block = False
+        if (
+            task_type == 'Summary'
+            and self.sentence_retrieval_mode == 'all_sentences'
+            and self.all_sentences_summary_contradictory_structural_guard_enabled
+            and contradictory_trigger
+            and max_contradict_prob
+            < self.all_sentences_summary_contradictory_structural_guard_max_contradict_prob
+            and max_contradict_coverage
+            < self.all_sentences_summary_contradictory_structural_guard_max_contradict_coverage
+            and avg_coverage_score_all
+            >= self.all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all
+        ):
+            all_sentences_summary_contradictory_structural_guard_block = True
+            contradictory_trigger = False
+        data2txt_contradictory_structural_guard_block = False
+        if (
+            task_type == 'Data2txt'
+            and self.data2txt_contradictory_structural_guard_enabled
+            and contradictory_trigger
+            and max_contradict_prob < self.data2txt_contradictory_structural_guard_max_contradict_prob
+            and avg_coverage_score_all
+            >= self.data2txt_contradictory_structural_guard_min_avg_coverage_score_all
+            and avg_contradict_prob_low_conf
+            <= self.data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf
+        ):
+            data2txt_contradictory_structural_guard_block = True
+            contradictory_trigger = False
         low_confidence_coverage_trigger = (
             low_confidence_ratio >= self.low_confidence_ratio_threshold
             and low_coverage_ratio >= task_low_coverage_ratio_threshold
@@ -1931,6 +2256,42 @@ class RAGTruthEvaluator:
         ):
             all_sentences_summary_lc_guard_block = True
             low_confidence_coverage_trigger = False
+        all_sentences_summary_lc_residual_guard_block = False
+        if (
+            task_type == 'Summary'
+            and self.sentence_retrieval_mode == 'all_sentences'
+            and self.all_sentences_summary_lc_residual_guard_enabled
+            and low_confidence_coverage_trigger
+            and low_confidence_ratio
+            >= self.all_sentences_summary_lc_residual_guard_min_low_confidence_ratio
+            and avg_coverage_score_all
+            >= self.all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all
+            and avg_contradict_prob_low_conf
+            <= self.all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf
+            and avg_support_prob_low_conf
+            <= self.all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf
+            and max_contradict_prob <= self.all_sentences_summary_lc_residual_guard_max_contradict_prob
+            and (
+                not self.all_sentences_summary_lc_residual_guard_require_zero_contradictions
+                or contradictory_count == 0
+            )
+        ):
+            all_sentences_summary_lc_residual_guard_block = True
+            low_confidence_coverage_trigger = False
+        data2txt_low_confidence_structural_guard_block = False
+        if (
+            task_type == 'Data2txt'
+            and self.data2txt_low_confidence_structural_guard_enabled
+            and data2txt_lc_escalation
+            and low_confidence_ratio
+            >= self.data2txt_low_confidence_structural_guard_min_low_confidence_ratio
+            and avg_coverage_score_all
+            >= self.data2txt_low_confidence_structural_guard_min_avg_coverage_score_all
+            and avg_contradict_prob_low_conf
+            <= self.data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf
+        ):
+            data2txt_low_confidence_structural_guard_block = True
+            data2txt_lc_escalation = False
         pre_block_detected_hallucination = (
             contradictory_trigger
             or low_confidence_coverage_trigger
@@ -2005,8 +2366,12 @@ class RAGTruthEvaluator:
             'max_contradict_coverage': max_contradict_coverage,
             'qa_pure_lc_block': qa_pure_lc_block,
             'data2txt_contradictory_override_block': data2txt_contradictory_override_block,
+            'data2txt_contradictory_structural_guard_block': data2txt_contradictory_structural_guard_block,
             'all_sentences_summary_contradictory_override_block': all_sentences_summary_contradictory_override_block,
+            'all_sentences_summary_contradictory_structural_guard_block': all_sentences_summary_contradictory_structural_guard_block,
             'all_sentences_summary_lc_guard_block': all_sentences_summary_lc_guard_block,
+            'all_sentences_summary_lc_residual_guard_block': all_sentences_summary_lc_residual_guard_block,
+            'data2txt_low_confidence_structural_guard_block': data2txt_low_confidence_structural_guard_block,
             'summary_single_contra_block': summary_single_contra_block,
             'lc_avg_contradict_task_block': task_type.upper() in self.disable_lc_avg_contradict_for_tasks,
             'detected_pre_qa_block': pre_block_detected_hallucination,

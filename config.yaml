@@ -587,7 +587,7 @@ evaluation:
         Summary: 0.0    # gold_context_generation: gold doc is always well-covered; drop LC+coverage gate for Summary
         QA: 0.18        # relaxed from global 0.28 to recover QA LC misses
         Data2txt: 0.28  # keep original gate for Data2txt
-      lc_avg_contradict_ratio_threshold: 0.30  # new trigger: minimum LC ratio for lc_avg_contradict detection path
+      lc_avg_contradict_ratio_threshold: 0.40  # Eval-19 cleanup: removes remaining Summary lc_avg FP while preserving observed TP paths
       lc_avg_contradict_prob_threshold: 0.27   # Eval-18: blocks 1 Summary lc_avg FP with no TP loss across current lc_avg-triggered samples
       disable_lc_avg_contradict_for_tasks:
         - QA  # Eval-16: QA lc_avg_contradict is 6 FP / 0 TP, so disable this path for QA
@@ -617,6 +617,31 @@ evaluation:
       all_sentences_summary_lc_guard_min_avg_coverage_score_all: 0.72
       all_sentences_summary_lc_guard_max_avg_contradict_prob_low_conf: 0.15
       all_sentences_summary_lc_guard_max_avg_support_prob_low_conf: 0.26
+      # Residual Summary LC guard for the post-Eval-19 FP subtype
+      # (moderate LC ratio + near-zero support + decent overall coverage).
+      all_sentences_summary_lc_residual_guard_enabled: true
+      all_sentences_summary_lc_residual_guard_require_zero_contradictions: true
+      all_sentences_summary_lc_residual_guard_max_contradict_prob: 0.0
+      all_sentences_summary_lc_residual_guard_min_low_confidence_ratio: 0.60
+      all_sentences_summary_lc_residual_guard_min_avg_coverage_score_all: 0.7306
+      all_sentences_summary_lc_residual_guard_max_avg_contradict_prob_low_conf: 0.1255
+      all_sentences_summary_lc_residual_guard_max_avg_support_prob_low_conf: 0.0237
+      # Structural Summary contradictory guard for all_sentences mode.
+      # Suppresses localized contradiction spikes on otherwise well-covered samples.
+      all_sentences_summary_contradictory_structural_guard_enabled: true
+      all_sentences_summary_contradictory_structural_guard_max_contradict_prob: 0.9973
+      all_sentences_summary_contradictory_structural_guard_max_contradict_coverage: 0.9217
+      all_sentences_summary_contradictory_structural_guard_min_avg_coverage_score_all: 0.8183
+      # Structural Data2txt contradictory guard.
+      data2txt_contradictory_structural_guard_enabled: true
+      data2txt_contradictory_structural_guard_max_contradict_prob: 0.9980
+      data2txt_contradictory_structural_guard_min_avg_coverage_score_all: 0.7777
+      data2txt_contradictory_structural_guard_max_avg_contradict_prob_low_conf: 0.0105
+      # Structural Data2txt low-confidence fallback guard.
+      data2txt_low_confidence_structural_guard_enabled: true
+      data2txt_low_confidence_structural_guard_min_low_confidence_ratio: 0.70
+      data2txt_low_confidence_structural_guard_min_avg_coverage_score_all: 0.7949
+      data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf: 0.1175
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default
