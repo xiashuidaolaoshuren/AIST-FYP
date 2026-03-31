@@ -232,6 +232,7 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
     statistics = metrics.get("statistics", {})
     hrr_metrics = statistics.get("hrr_metrics", {})
     tp_mitigation_metrics = statistics.get("tp_mitigation_metrics", {})
+    gold_overlap_breakdown = statistics.get("gold_overlap_breakdown", {})
     sample_results = payload.get("sample_results", [])
     sample_ids: list[str] = []
     if isinstance(sample_results, list):
@@ -279,6 +280,17 @@ def _load_metrics(output_json: Path) -> dict[str, Any]:
         "tp_response_change_rate": float(tp_mitigation_metrics.get("tp_response_change_rate", 0.0)),
         "tp_samples_fixed": int(tp_mitigation_metrics.get("tp_samples_fixed", 0)),
         "tp_sample_fix_rate": float(tp_mitigation_metrics.get("tp_sample_fix_rate", 0.0)),
+        "gold_overlap_claims": int(gold_overlap_breakdown.get("gold_overlap_claims", 0)),
+        "gold_overlap_removed_by_filter": int(gold_overlap_breakdown.get("gold_overlap_removed_by_filter", 0)),
+        "gold_overlap_contradictory": int(gold_overlap_breakdown.get("gold_overlap_contradictory", 0)),
+        "gold_overlap_low_confidence_ge_soft_threshold": int(
+            gold_overlap_breakdown.get("gold_overlap_low_confidence_ge_soft_threshold", 0)
+        ),
+        "gold_overlap_low_confidence_lt_soft_threshold": int(
+            gold_overlap_breakdown.get("gold_overlap_low_confidence_lt_soft_threshold", 0)
+        ),
+        "gold_overlap_supported": int(gold_overlap_breakdown.get("gold_overlap_supported", 0)),
+        "gold_overlap_other": int(gold_overlap_breakdown.get("gold_overlap_other", 0)),
         "num_samples_evaluated": len(sample_ids),
         "sample_ids": sample_ids,
     }
@@ -460,6 +472,28 @@ def _write_summary(
             f"{metric['tp_samples_fixed']} | {metric['tp_sample_fix_rate'] * 100.0:.2f}% | "
             f"{metric['sample_fix_rate'] * 100.0:.2f}% | "
             f"{metric['samples_fixed']} / {metric['samples_with_gold_hallucination']} |"
+        )
+
+    lines.extend([
+        "",
+        "## Gold-Overlap Claim Diagnostic",
+        "",
+        "| Variant | Gold-Overlap Claims | Removed by Filter | Removed Rate (%) | Contradictory | LC >= Soft Threshold | LC < Soft Threshold | Supported | Other |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+
+    for name, metric in variant_metrics.items():
+        removed_rate = (
+            (metric["gold_overlap_removed_by_filter"] / metric["gold_overlap_claims"]) * 100.0
+            if metric["gold_overlap_claims"] > 0 else 0.0
+        )
+        lines.append(
+            "| "
+            f"{name} | {metric['gold_overlap_claims']} | {metric['gold_overlap_removed_by_filter']} | "
+            f"{removed_rate:.2f}% | {metric['gold_overlap_contradictory']} | "
+            f"{metric['gold_overlap_low_confidence_ge_soft_threshold']} | "
+            f"{metric['gold_overlap_low_confidence_lt_soft_threshold']} | "
+            f"{metric['gold_overlap_supported']} | {metric['gold_overlap_other']} |"
         )
 
     lines.extend([

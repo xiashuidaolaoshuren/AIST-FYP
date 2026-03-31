@@ -464,7 +464,7 @@ mitigation:
     # Soft-filter threshold for Low Confidence claims (0.0 = disabled).
     # When set, LC claims with contradict_prob >= threshold are also replaced (using lc_placeholder).
     # Only activates when no Contradictory claims exist, targeting the lc_avg_contradict path.
-    lc_soft_filter_prob_threshold: 0.25
+    lc_soft_filter_prob_threshold: 0.10
     lc_placeholder: "[CLAIM UNCERTAIN: Low Confidence]"
   
   # Re-Prompting Configuration (Month 5/6)
@@ -584,7 +584,7 @@ evaluation:
       data2txt_min_lc_count: 6  # Data2txt-specific fallback: escalate only when many claims are Low Confidence and contradiction evidence is absent
       data2txt_contradictory_override_enabled: false  # optional safety gate for Data2txt contradictory trigger
       data2txt_min_contradict_prob_for_contradictory: 0.5  # when override is enabled, require max contradict_prob among contradictory claims to exceed this threshold
-      qa_pure_lc_block_ratio: 0.95  # QA guard: suppress all-LC/no-contradiction samples (e.g., lc_ratio=1.0) that over-trigger false alarms
+      qa_pure_lc_block_ratio: 1.0  # QA guard: only suppress strict all-LC/no-contradiction samples
       # Summary single-contradiction guards: suppress weak single-contra triggers that fire on poor evidence.
       # Analysis showed FP claims cluster at cp<0.60 (only 1 FP at 0.45) and coverage<0.44 (2 FPs at 0.34 and 0.41).
       # Minimum TP single-contra cp=0.738 and coverage=0.465 — thresholds below these are safe.

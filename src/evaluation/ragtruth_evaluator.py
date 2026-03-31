@@ -2262,6 +2262,66 @@ class RAGTruthEvaluator:
                 non_gold_claims_removed,
             )
 
+        def _compute_gold_overlap_breakdown(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+            breakdown = {
+                'gold_overlap_claims': 0,
+                'gold_overlap_removed_by_filter': 0,
+                'gold_overlap_contradictory': 0,
+                'gold_overlap_low_confidence_ge_soft_threshold': 0,
+                'gold_overlap_low_confidence_lt_soft_threshold': 0,
+                'gold_overlap_supported': 0,
+                'gold_overlap_other': 0,
+            }
+
+            for row in rows:
+                claim_results = row.get('claim_results', [])
+                if not isinstance(claim_results, list):
+                    continue
+                for claim_result in claim_results:
+                    if not isinstance(claim_result, dict):
+                        continue
+                    if not bool(claim_result.get('overlaps_gold_hallucination', False)):
+                        continue
+
+                    breakdown['gold_overlap_claims'] += 1
+
+                    predicted_status = str(claim_result.get('predicted_status', ''))
+                    confidence = claim_result.get('confidence', {})
+                    if not isinstance(confidence, dict):
+                        confidence = {}
+                    contradict_prob = float(confidence.get('contradict_prob', 0.0))
+
+                    removed_by_filter = (
+                        filter_active
+                        and (
+                            predicted_status == 'Contradictory'
+                            or (
+                                lc_soft_filter_threshold > 0.0
+                                and predicted_status == 'Low Confidence'
+                                and contradict_prob >= lc_soft_filter_threshold
+                            )
+                        )
+                    )
+                    if removed_by_filter:
+                        breakdown['gold_overlap_removed_by_filter'] += 1
+
+                    if predicted_status == 'Contradictory':
+                        breakdown['gold_overlap_contradictory'] += 1
+                    elif predicted_status == 'Low Confidence':
+                        if (
+                            lc_soft_filter_threshold > 0.0
+                            and contradict_prob >= lc_soft_filter_threshold
+                        ):
+                            breakdown['gold_overlap_low_confidence_ge_soft_threshold'] += 1
+                        else:
+                            breakdown['gold_overlap_low_confidence_lt_soft_threshold'] += 1
+                    elif predicted_status == 'Supported':
+                        breakdown['gold_overlap_supported'] += 1
+                    else:
+                        breakdown['gold_overlap_other'] += 1
+
+            return breakdown
+
         def _compute_sample_fix_counts(rows: List[Dict[str, Any]]) -> Tuple[int, int]:
             samples_with_gold_hallucination = 0
             samples_fixed = 0
@@ -2405,6 +2465,7 @@ class RAGTruthEvaluator:
             if samples_with_gold_hallucination > 0 else 0.0
         )
         tp_mitigation_metrics = _compute_tp_mitigation_metrics(results)
+        gold_overlap_breakdown = _compute_gold_overlap_breakdown(results)
 
         trigger_path_counts = Counter(
             str(r.get('detection_trigger_path', 'none')) for r in results
@@ -2465,6 +2526,7 @@ class RAGTruthEvaluator:
                 if task_samples_with_gold_hallucination > 0 else 0.0
             )
             task_tp_mitigation_metrics = _compute_tp_mitigation_metrics(task_results)
+            task_gold_overlap_breakdown = _compute_gold_overlap_breakdown(task_results)
             task_trigger_path_counts = Counter(
                 str(r.get('detection_trigger_path', 'none')) for r in task_results
             )
@@ -2513,6 +2575,7 @@ class RAGTruthEvaluator:
                         'sample_fix_rate': float(task_sample_fix_rate),
                     },
                     'tp_mitigation_metrics': task_tp_mitigation_metrics,
+                    'gold_overlap_breakdown': task_gold_overlap_breakdown,
                     'detection_trigger_path_counts': dict(task_trigger_path_counts),
                     'false_positive_trigger_path_counts': dict(task_fp_trigger_path_counts)
                 }
@@ -2558,6 +2621,7 @@ class RAGTruthEvaluator:
                     'sample_fix_rate': float(sample_fix_rate),
                 },
                 'tp_mitigation_metrics': tp_mitigation_metrics,
+                'gold_overlap_breakdown': gold_overlap_breakdown,
                 'detection_trigger_path_counts': dict(trigger_path_counts),
                 'false_positive_trigger_path_counts': dict(false_positive_trigger_path_counts)
             },
@@ -2571,6 +2635,11 @@ class RAGTruthEvaluator:
                     'Rate of gold-hallucinated samples where mitigation changed the final response and '
                     'at least one gold-overlapping claim was removed by filter '
                     '(Contradictory or LC soft-filter above threshold).'
+                ),
+                'gold_overlap_breakdown': (
+                    'Status distribution for claims overlapping gold hallucination spans. '
+                    'Used to diagnose low HRR numerator (e.g., many gold-overlap claims staying Supported '
+                    'or Low Confidence below soft-filter threshold).'
                 ),
                 'detection_trigger_path': (
                     "Primary path that first triggered sample-level detection: "
