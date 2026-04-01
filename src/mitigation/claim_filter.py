@@ -75,6 +75,10 @@ class ClaimFilter:
         self.lc_soft_filter_prob_threshold = float(
             filter_config.get('lc_soft_filter_prob_threshold', 0.0)
         )
+        self.lc_soft_filter_excluded_tasks = {
+            str(task).upper()
+            for task in filter_config.get('lc_soft_filter_excluded_tasks', ['QA'])
+        }
         self.lc_soft_filter_lc_avg_contradict_threshold = float(
             filter_config.get(
                 'lc_soft_filter_lc_avg_contradict_threshold',
@@ -192,6 +196,13 @@ class ClaimFilter:
                     decisions,
                     sample_context,
                 )
+                if lc_threshold <= 0.0:
+                    logger.info("LC soft-filter skipped for this sample (threshold=%.2f)", lc_threshold)
+                    return answer_text, 0, {
+                        'mode': 'none',
+                        'lc_soft_filter_threshold_applied': 0.0,
+                        'lc_soft_filter_escalated': False,
+                    }
                 filtered_text, removed_count = self._filter_lc_claims(
                     answer_text,
                     claim_dict,
@@ -276,10 +287,13 @@ class ClaimFilter:
         if base_threshold <= 0.0:
             return 0.0, False
 
+        task_type = str((sample_context or {}).get('task_type', '')).upper()
+        if task_type and task_type in self.lc_soft_filter_excluded_tasks:
+            return 0.0, False
+
         if aggressive_threshold <= 0.0 or aggressive_threshold >= base_threshold:
             return base_threshold, False
 
-        task_type = str((sample_context or {}).get('task_type', '')).upper()
         if task_type and task_type in self.lc_soft_filter_lc_avg_contradict_excluded_tasks:
             return base_threshold, False
 

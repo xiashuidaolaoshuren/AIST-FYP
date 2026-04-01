@@ -464,7 +464,10 @@ mitigation:
     # Soft-filter threshold for Low Confidence claims (0.0 = disabled).
     # When set, LC claims with contradict_prob >= threshold are also replaced (using lc_placeholder).
     # Only activates when no Contradictory claims exist, targeting the lc_avg_contradict path.
-    lc_soft_filter_prob_threshold: 0.10
+    lc_soft_filter_prob_threshold: 0.08
+    # Tasks excluded from base LC soft-filtering to avoid high FRR.
+    lc_soft_filter_excluded_tasks:
+      - QA
     # Optional lower threshold used only when sample-level LC signals are strong
     # (lc_avg_contradict-like pattern), to recover LC claims that sit below the global threshold.
     # Keep QA excluded to avoid reintroducing known false-positive behavior.
