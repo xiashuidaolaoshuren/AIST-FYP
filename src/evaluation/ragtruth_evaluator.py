@@ -328,6 +328,35 @@ class RAGTruthEvaluator:
                     self.qa_pure_lc_block_ratio = float(raw_qa_pure_lc_block_ratio)
                 except (TypeError, ValueError):
                     self.qa_pure_lc_block_ratio = 0.95
+                self.qa_single_contra_exception_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'qa_single_contra_exception_enabled',
+                        False,
+                    )
+                )
+                raw_qa_single_contra_exception_min_cp = getattr(
+                    benchmark_config,
+                    'qa_single_contra_exception_min_contradict_prob',
+                    1.0,
+                )
+                try:
+                    self.qa_single_contra_exception_min_contradict_prob = float(
+                        raw_qa_single_contra_exception_min_cp
+                    )
+                except (TypeError, ValueError):
+                    self.qa_single_contra_exception_min_contradict_prob = 1.0
+                raw_qa_single_contra_exception_max_cov = getattr(
+                    benchmark_config,
+                    'qa_single_contra_exception_max_contradict_coverage',
+                    0.0,
+                )
+                try:
+                    self.qa_single_contra_exception_max_contradict_coverage = float(
+                        raw_qa_single_contra_exception_max_cov
+                    )
+                except (TypeError, ValueError):
+                    self.qa_single_contra_exception_max_contradict_coverage = 0.0
                 raw_summary_single_contra_min_cp = getattr(
                     benchmark_config,
                     'summary_single_contra_min_contradict_prob',
@@ -669,6 +698,9 @@ class RAGTruthEvaluator:
                 self.data2txt_contradictory_override_enabled = False
                 self.data2txt_min_contradict_prob_for_contradictory = 0.0
                 self.qa_pure_lc_block_ratio = 0.95
+                self.qa_single_contra_exception_enabled = False
+                self.qa_single_contra_exception_min_contradict_prob = 1.0
+                self.qa_single_contra_exception_max_contradict_coverage = 0.0
                 self.summary_single_contra_min_contradict_prob = 0.0
                 self.summary_single_contra_min_coverage = 0.0
                 self.all_sentences_summary_contradictory_override_enabled = False
@@ -715,6 +747,9 @@ class RAGTruthEvaluator:
             self.data2txt_contradictory_override_enabled = False
             self.data2txt_min_contradict_prob_for_contradictory = 0.0
             self.qa_pure_lc_block_ratio = 0.95
+            self.qa_single_contra_exception_enabled = False
+            self.qa_single_contra_exception_min_contradict_prob = 1.0
+            self.qa_single_contra_exception_max_contradict_coverage = 0.0
             self.summary_single_contra_min_contradict_prob = 0.0
             self.summary_single_contra_min_coverage = 0.0
             self.all_sentences_summary_contradictory_override_enabled = False
@@ -804,6 +839,12 @@ class RAGTruthEvaluator:
         )
         self.qa_pure_lc_block_ratio = float(
             np.clip(self.qa_pure_lc_block_ratio, 0.0, 1.0)
+        )
+        self.qa_single_contra_exception_min_contradict_prob = float(
+            np.clip(self.qa_single_contra_exception_min_contradict_prob, 0.0, 1.0)
+        )
+        self.qa_single_contra_exception_max_contradict_coverage = float(
+            np.clip(self.qa_single_contra_exception_max_contradict_coverage, 0.0, 1.0)
         )
         self.summary_single_contra_min_contradict_prob = float(
             np.clip(self.summary_single_contra_min_contradict_prob, 0.0, 1.0)
@@ -2158,7 +2199,18 @@ class RAGTruthEvaluator:
             and len(claim_decisions) >= self.min_claims_for_lc_escalation
             and low_confidence_ratio >= self.qa_pure_lc_block_ratio
         )
-        contradictory_trigger = contradictory_count >= effective_min_contradictory
+        qa_single_contra_exception_trigger = (
+            task_type == 'QA'
+            and self.qa_single_contra_exception_enabled
+            and contradictory_count == 1
+            and max_contradict_prob >= self.qa_single_contra_exception_min_contradict_prob
+            and max_contradict_coverage
+            <= self.qa_single_contra_exception_max_contradict_coverage
+        )
+        contradictory_trigger = (
+            contradictory_count >= effective_min_contradictory
+            or qa_single_contra_exception_trigger
+        )
         data2txt_contradictory_override_block = False
         if (
             task_type == 'Data2txt'
@@ -2365,6 +2417,7 @@ class RAGTruthEvaluator:
             'max_contradict_prob': max_contradict_prob,
             'max_contradict_coverage': max_contradict_coverage,
             'qa_pure_lc_block': qa_pure_lc_block,
+            'qa_single_contra_exception_trigger': qa_single_contra_exception_trigger,
             'data2txt_contradictory_override_block': data2txt_contradictory_override_block,
             'data2txt_contradictory_structural_guard_block': data2txt_contradictory_structural_guard_block,
             'all_sentences_summary_contradictory_override_block': all_sentences_summary_contradictory_override_block,

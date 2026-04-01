@@ -599,6 +599,11 @@ evaluation:
       data2txt_contradictory_override_enabled: false  # optional safety gate for Data2txt contradictory trigger
       data2txt_min_contradict_prob_for_contradictory: 0.5  # when override is enabled, require max contradict_prob among contradictory claims to exceed this threshold
       qa_pure_lc_block_ratio: 1.0  # QA guard: only suppress strict all-LC/no-contradiction samples
+      # QA single-contra exception: recover high-confidence single-contradiction misses
+      # when per-task min contradictory count for QA is set to 2.
+      qa_single_contra_exception_enabled: true
+      qa_single_contra_exception_min_contradict_prob: 0.99
+      qa_single_contra_exception_max_contradict_coverage: 0.40
       # Summary single-contradiction guards: suppress weak single-contra triggers that fire on poor evidence.
       # Analysis showed FP claims cluster at cp<0.60 (only 1 FP at 0.45) and coverage<0.44 (2 FPs at 0.34 and 0.41).
       # Minimum TP single-contra cp=0.738 and coverage=0.465 — thresholds below these are safe.
@@ -644,7 +649,7 @@ evaluation:
       data2txt_low_confidence_structural_guard_enabled: true
       data2txt_low_confidence_structural_guard_min_low_confidence_ratio: 0.70
       data2txt_low_confidence_structural_guard_min_avg_coverage_score_all: 0.7949
-      data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf: 0.1175
+      data2txt_low_confidence_structural_guard_max_avg_contradict_prob_low_conf: 0.10
       # Minimum contradictory claims needed to flag a sample as hallucinated.
       # Per-task overrides handle task-specific DeBERTa over-firing patterns.
       min_contradictory_count_for_detection: 1  # global default
