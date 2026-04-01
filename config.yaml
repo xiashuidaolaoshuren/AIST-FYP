@@ -613,6 +613,10 @@ evaluation:
       # Minimum TP single-contra cp=0.738 and coverage=0.465 — thresholds below these are safe.
       summary_single_contra_min_contradict_prob: 0.60  # require at least this contradict_prob when Summary fires on exactly 1 contradictory claim
       summary_single_contra_min_coverage: 0.44         # require at least this coverage_score for the sole contradictory claim
+      # Eval-22 candidate: second-tier guard for lower-coverage Summary single-contra overfire.
+      summary_single_contra_low_cov_guard_enabled: true
+      summary_single_contra_low_cov_guard_max_contradict_prob: 0.99
+      summary_single_contra_low_cov_guard_max_avg_coverage_score_all: 0.80
       # Optional additional guard for all_sentences mode only.
       # Helps suppress weak contradiction spikes from long-tail sentence pairs.
       all_sentences_summary_contradictory_override_enabled: false
