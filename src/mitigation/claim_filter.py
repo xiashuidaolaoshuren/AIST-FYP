@@ -101,6 +101,12 @@ class ClaimFilter:
         self.lc_placeholder = filter_config.get(
             'lc_placeholder', '[CLAIM UNCERTAIN: Low Confidence]'
         )
+        self.qa_supported_contradict_override_enabled = bool(
+            filter_config.get('qa_supported_contradict_override_enabled', False)
+        )
+        self.qa_supported_contradict_override_threshold = float(
+            filter_config.get('qa_supported_contradict_override_threshold', 0.25)
+        )
         
         logger.info(
             f"ClaimFilter initialized: enabled={self.enabled}, "
@@ -161,6 +167,7 @@ class ClaimFilter:
                 'mode': 'disabled',
                 'lc_soft_filter_threshold_applied': 0.0,
                 'lc_soft_filter_escalated': False,
+                'qa_supported_override_removed': 0,
             }
         
         if len(claims) != len(decisions):
@@ -175,6 +182,7 @@ class ClaimFilter:
                 'mode': 'no_claims',
                 'lc_soft_filter_threshold_applied': 0.0,
                 'lc_soft_filter_escalated': False,
+                'qa_supported_override_removed': 0,
             }
         
         logger.debug(
@@ -189,8 +197,27 @@ class ClaimFilter:
             decision for decision in decisions
             if decision.status == 'Contradictory'
         ]
+        qa_supported_override_decisions = self._get_qa_supported_override_decisions(
+            decisions,
+            sample_context,
+        )
         
         if not contradictory_decisions:
+            if qa_supported_override_decisions:
+                filtered_text, override_removed = self._replace_decision_spans(
+                    answer_text,
+                    claim_dict,
+                    qa_supported_override_decisions,
+                    self.lc_placeholder,
+                    'QA Supported-override',
+                )
+                return filtered_text, override_removed, {
+                    'mode': 'qa_supported_override',
+                    'lc_soft_filter_threshold_applied': 0.0,
+                    'lc_soft_filter_escalated': False,
+                    'qa_supported_override_removed': override_removed,
+                }
+
             if self.lc_soft_filter_prob_threshold > 0.0:
                 lc_threshold, escalated = self._resolve_lc_soft_filter_threshold(
                     decisions,
@@ -202,6 +229,7 @@ class ClaimFilter:
                         'mode': 'none',
                         'lc_soft_filter_threshold_applied': 0.0,
                         'lc_soft_filter_escalated': False,
+                        'qa_supported_override_removed': 0,
                     }
                 filtered_text, removed_count = self._filter_lc_claims(
                     answer_text,
@@ -213,55 +241,39 @@ class ClaimFilter:
                     'mode': 'low_confidence',
                     'lc_soft_filter_threshold_applied': lc_threshold,
                     'lc_soft_filter_escalated': escalated,
+                    'qa_supported_override_removed': 0,
                 }
             logger.info("No contradictory claims found, returning original text")
             return answer_text, 0, {
                 'mode': 'none',
                 'lc_soft_filter_threshold_applied': 0.0,
                 'lc_soft_filter_escalated': False,
+                'qa_supported_override_removed': 0,
             }
         
         logger.info(
             f"Found {len(contradictory_decisions)} contradictory claims to remove"
         )
         
-        # Sort decisions by claim char_span in REVERSE order
-        # This prevents index corruption when replacing text
-        sorted_decisions = sorted(
+        filtered_text, contradictory_removed = self._replace_decision_spans(
+            answer_text,
+            claim_dict,
             contradictory_decisions,
-            key=lambda d: claim_dict[d.claim_id].answer_char_span[0],
-            reverse=True
+            self.placeholder,
+            'Contradictory',
         )
-        
-        # Apply filtering
-        filtered_text = answer_text
-        removed_count = 0
-        
-        for decision in sorted_decisions:
-            claim = claim_dict[decision.claim_id]
-            start, end = claim.answer_char_span
-            
-            # Validate span
-            if start < 0 or end > len(filtered_text) or start >= end:
-                logger.warning(
-                    f"Invalid char_span [{start}, {end}] for claim {claim.claim_id}. "
-                    f"Text length: {len(filtered_text)}. Skipping."
-                )
-                continue
-            
-            # Replace claim text with placeholder
-            filtered_text = (
-                filtered_text[:start] +
-                self.placeholder +
-                filtered_text[end:]
+
+        qa_override_removed = 0
+        if qa_supported_override_decisions:
+            filtered_text, qa_override_removed = self._replace_decision_spans(
+                filtered_text,
+                claim_dict,
+                qa_supported_override_decisions,
+                self.lc_placeholder,
+                'QA Supported-override',
             )
-            
-            removed_count += 1
-            
-            logger.debug(
-                f"Removed claim {claim.claim_id} at span [{start}, {end}]: "
-                f"'{claim.text[:50]}...'"
-            )
+
+        removed_count = contradictory_removed + qa_override_removed
         
         logger.info(
             f"Filtering complete: removed {removed_count} claims. "
@@ -273,7 +285,85 @@ class ClaimFilter:
             'mode': 'contradictory',
             'lc_soft_filter_threshold_applied': self.lc_soft_filter_prob_threshold,
             'lc_soft_filter_escalated': False,
+            'qa_supported_override_removed': qa_override_removed,
         }
+
+    def _get_qa_supported_override_decisions(
+        self,
+        decisions: List[ClaimDecision],
+        sample_context: Optional[Dict[str, Any]],
+    ) -> List[ClaimDecision]:
+        """Return Supported decisions to be treated as uncertain for QA only."""
+        if not self.qa_supported_contradict_override_enabled:
+            return []
+
+        task_type = str((sample_context or {}).get('task_type', '')).upper()
+        if task_type != 'QA':
+            return []
+
+        threshold = self.qa_supported_contradict_override_threshold
+        if threshold <= 0.0:
+            return []
+
+        return [
+            decision for decision in decisions
+            if decision.status == 'Supported'
+            and float(decision.confidence.get('contradict_prob', 0.0)) >= threshold
+        ]
+
+    def _replace_decision_spans(
+        self,
+        answer_text: str,
+        claim_dict: Dict[str, Claim],
+        decisions_to_replace: List[ClaimDecision],
+        placeholder: str,
+        replacement_label: str,
+    ) -> Tuple[str, int]:
+        """Replace claim spans in reverse order and return (updated_text, replaced_count)."""
+        if not decisions_to_replace:
+            return answer_text, 0
+
+        valid_decisions = [d for d in decisions_to_replace if d.claim_id in claim_dict]
+        if not valid_decisions:
+            return answer_text, 0
+
+        sorted_decisions = sorted(
+            valid_decisions,
+            key=lambda d: claim_dict[d.claim_id].answer_char_span[0],
+            reverse=True,
+        )
+
+        filtered_text = answer_text
+        replaced_count = 0
+
+        for decision in sorted_decisions:
+            claim = claim_dict[decision.claim_id]
+            start, end = claim.answer_char_span
+
+            if start < 0 or end > len(filtered_text) or start >= end:
+                logger.warning(
+                    "Invalid char_span [%d, %d] for %s claim %s. Text length: %d. Skipping.",
+                    start,
+                    end,
+                    replacement_label,
+                    claim.claim_id,
+                    len(filtered_text),
+                )
+                continue
+
+            filtered_text = filtered_text[:start] + placeholder + filtered_text[end:]
+            replaced_count += 1
+
+            logger.debug(
+                "Removed %s claim %s at span [%d, %d]: '%s...'",
+                replacement_label,
+                claim.claim_id,
+                start,
+                end,
+                claim.text[:50],
+            )
+
+        return filtered_text, replaced_count
 
     def _resolve_lc_soft_filter_threshold(
         self,

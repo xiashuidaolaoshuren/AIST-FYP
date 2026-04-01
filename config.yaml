@@ -478,6 +478,10 @@ mitigation:
     lc_soft_filter_lc_avg_contradict_excluded_tasks:
       - QA
     lc_placeholder: "[CLAIM UNCERTAIN: Low Confidence]"
+    # QA-only safeguard: if a Supported claim still carries high contradict_prob,
+    # treat it as uncertain and replace it with lc_placeholder.
+    qa_supported_contradict_override_enabled: true
+    qa_supported_contradict_override_threshold: 0.25
   
   # Re-Prompting Configuration (Month 5/6)
   reprompt:
