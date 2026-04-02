@@ -127,7 +127,18 @@ To launch the integrated system with the Gradio UI:
 python scripts/demo_full_pipeline.py
 ```
 
-*   **URL**: `http://localhost:7860` (or `http://0.0.0.0:7860`)
+Optional launch flags:
+
+```bash
+# Force a specific data strategy
+python scripts/demo_full_pipeline.py --strategy validation
+
+# Colab/public launch mode
+python scripts/demo_full_pipeline.py --share --server-name 0.0.0.0 --server-port 7860
+```
+
+*   **Local URL**: `http://localhost:7860`
+*   **Colab/public mode**: use `--share`; Gradio will print a public URL after launch.
 *   **Note**: Ensure `config.yaml` has `verification.enabled: true`.
 
 ### 6.2 Example Output

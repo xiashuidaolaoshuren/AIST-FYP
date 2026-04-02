@@ -6,6 +6,8 @@ for interactive visualization of claim verification results.
 Supports multiple data strategies (development, validation, production).
 """
 
+import argparse
+import os
 import sys
 import json
 from datetime import datetime
@@ -155,6 +157,50 @@ def ask_user_to_choose_strategy(strategies: list) -> str:
             sys.exit(0)
 
 
+def is_running_in_colab() -> bool:
+    """Return True when running inside a Google Colab runtime."""
+    try:
+        import google.colab  # type: ignore  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse CLI args while tolerating unknown notebook-injected flags."""
+    parser = argparse.ArgumentParser(
+        description="Launch the full hallucination-detection demo UI."
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=["development", "validation", "production"],
+        help="Data strategy to use. If omitted, script auto-selects.",
+    )
+    parser.add_argument(
+        "--share",
+        action="store_true",
+        help="Enable Gradio public share link (recommended for Colab).",
+    )
+    parser.add_argument(
+        "--server-name",
+        default=None,
+        help="Gradio server_name. Defaults to 127.0.0.1 locally, 0.0.0.0 on Colab.",
+    )
+    parser.add_argument(
+        "--server-port",
+        type=int,
+        default=7860,
+        help="Gradio server port (default: 7860).",
+    )
+    parser.add_argument(
+        "--force-non-interactive",
+        action="store_true",
+        help="Disable terminal prompts and auto-pick the first available strategy.",
+    )
+    args, _ = parser.parse_known_args()
+    return args
+
+
 def main():
     """
     Initialize all components and launch the Gradio UI.
@@ -166,6 +212,9 @@ def main():
     4. Initializes RuleBasedAggregator for claim classification
     5. Creates and launches the Gradio UI
     """
+    args = parse_args()
+    in_colab = is_running_in_colab()
+
     print("=" * 80)
     print("HALLUCINATION DETECTION - FULL PIPELINE DEMO")
     print("=" * 80)
@@ -184,9 +233,26 @@ def main():
         return
     
     # Step 0.5: Ask user to choose strategy if multiple available
-    if len(available_strategies) == 1:
+    non_interactive_mode = in_colab or args.force_non_interactive or (not sys.stdin.isatty())
+
+    if args.strategy:
+        if args.strategy not in available_strategies:
+            print(
+                f"\n❌ ERROR: Requested strategy '{args.strategy}' is not available in this environment."
+            )
+            print(f"Available strategies: {', '.join(available_strategies)}")
+            return
+        strategy = args.strategy
+        print(f"\n✓ Strategy provided by CLI: {strategy.upper()}")
+    elif len(available_strategies) == 1:
         strategy = available_strategies[0]
         print(f"\n✓ Only one strategy available, using: {strategy.upper()}")
+    elif non_interactive_mode:
+        strategy = available_strategies[0]
+        print(
+            "\n✓ Non-interactive mode detected; "
+            f"auto-selected first available strategy: {strategy.upper()}"
+        )
     else:
         strategy = ask_user_to_choose_strategy(available_strategies)
     
@@ -308,9 +374,21 @@ def main():
     print("=" * 80)
     print()
     print(f"Data Strategy: {strategy.upper()}")
+    launch_share = args.share or in_colab
+    launch_server_name = args.server_name or ("0.0.0.0" if in_colab else "127.0.0.1")
+
+    if in_colab:
+        print("Runtime: Google Colab (share link enabled by default)")
+    else:
+        print("Runtime: Local")
+
+    print(f"Gradio Launch Settings: share={launch_share}, server_name={launch_server_name}, server_port={args.server_port}")
     print()
-    print("The interface will open in your browser at:")
-    print("   http://localhost:7860")
+    if launch_share:
+        print("The interface will print a public Gradio URL after launch.")
+    else:
+        print("The interface will open in your browser at:")
+        print(f"   http://{launch_server_name}:{args.server_port}")
     print()
     print("Color Coding:")
     print("   🟢 Green   = Supported (high confidence)")
@@ -323,10 +401,12 @@ def main():
     
     try:
         demo.launch(
-            share=False,
-            server_port=7860,
-            server_name="127.0.0.1",
-            show_error=True
+            share=launch_share,
+            server_port=args.server_port,
+            server_name=launch_server_name,
+            show_error=True,
+            inline=in_colab,
+            inbrowser=(not in_colab),
         )
     except KeyboardInterrupt:
         print("\n\n👋 Shutting down...")
