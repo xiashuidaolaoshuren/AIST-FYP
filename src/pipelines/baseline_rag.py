@@ -382,6 +382,157 @@ class BaselineRAGPipeline:
                 for c in removed[:3]
             ],
         }
+
+    def _resolve_generation_params(
+        self,
+        max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        do_sample: Optional[bool] = None,
+        repetition_penalty: Optional[float] = None,
+        no_repeat_ngram_size: Optional[int] = None,
+        sanitize_meta_text: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Resolve generation parameters from overrides with config fallback."""
+        if self.config:
+            return {
+                'max_new_tokens': max_new_tokens or self.config.generation.max_new_tokens,
+                'temperature': temperature if temperature is not None else self.config.generation.temperature,
+                'top_p': top_p if top_p is not None else self.config.generation.top_p,
+                'do_sample': do_sample if do_sample is not None else self.config.generation.do_sample,
+                'repetition_penalty': (
+                    repetition_penalty if repetition_penalty is not None
+                    else self.config.generation.get('repetition_penalty', None)
+                ),
+                'no_repeat_ngram_size': (
+                    no_repeat_ngram_size if no_repeat_ngram_size is not None
+                    else self.config.generation.get('no_repeat_ngram_size', None)
+                ),
+                'sanitize_meta_text': (
+                    sanitize_meta_text if sanitize_meta_text is not None
+                    else bool(self.config.generation.get('sanitize_meta_text', False))
+                ),
+            }
+
+        return {
+            'max_new_tokens': max_new_tokens or 256,
+            'temperature': temperature if temperature is not None else 0.7,
+            'top_p': top_p if top_p is not None else 0.9,
+            'do_sample': do_sample if do_sample is not None else True,
+            'repetition_penalty': repetition_penalty,
+            'no_repeat_ngram_size': no_repeat_ngram_size,
+            'sanitize_meta_text': bool(sanitize_meta_text) if sanitize_meta_text is not None else False,
+        }
+
+    def generate_from_evidence(
+        self,
+        query: str,
+        evidence_chunks: List[EvidenceChunk],
+        top_k: int = 5,
+        max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        do_sample: Optional[bool] = None,
+        repetition_penalty: Optional[float] = None,
+        no_repeat_ngram_size: Optional[int] = None,
+        sanitize_meta_text: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a response using caller-provided evidence chunks.
+
+        This path bypasses retrieval and is designed for controlled demo flows
+        where users provide their own context for verification.
+        """
+        if not query or not query.strip():
+            raise ValueError("query must be a non-empty string")
+
+        selected_chunks = list(evidence_chunks[: max(1, top_k)]) if evidence_chunks else []
+        gen_params = self._resolve_generation_params(
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            do_sample=do_sample,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+            sanitize_meta_text=sanitize_meta_text,
+        )
+
+        generation_output = self.generator.generate_with_metadata(
+            prompt=query,
+            evidence_chunks=selected_chunks,
+            **gen_params,
+        )
+        generated_text = generation_output['text']
+
+        sub_task_type = None
+        if self.config and hasattr(self.config, 'task_type'):
+            sub_task_type = getattr(self.config, 'task_type', None)
+
+        claims = extract_claims(
+            generated_text,
+            method='auto',
+            task_type=sub_task_type,
+        )
+
+        sub_answer = {
+            'text': generated_text,
+            'char_span': [0, len(generated_text)],
+            'sub_answer_id': 0,
+            'sub_query': query,
+        }
+        claims_by_sub_answer = [{
+            'sub_answer_id': 0,
+            'sub_text': generated_text,
+            'sub_query': query,
+            'claims': claims,
+        }]
+
+        evidence_spans = [chunk.to_dict() for chunk in selected_chunks]
+        evidence_candidates = [
+            f"{chunk.doc_id}#{chunk.sent_id}" for chunk in selected_chunks
+        ]
+        top_evidence = evidence_candidates[0] if evidence_candidates else ""
+        claim_evidence_pairs = [
+            ClaimEvidencePair(
+                claim_id=claim.claim_id,
+                evidence_candidates=evidence_candidates,
+                top_evidence=top_evidence,
+                evidence_spans=evidence_spans,
+            )
+            for claim in claims
+        ]
+
+        return {
+            'query': query,
+            'draft_response': generated_text,
+            'response_after_mitigation': generated_text,
+            'mitigation_actions': [],
+            'filtered_claim_count': 0,
+            'sub_answers': [sub_answer],
+            'claims_by_sub_answer': claims_by_sub_answer,
+            'claim_evidence_pairs': [pair.to_dict() for pair in claim_evidence_pairs],
+            'generator_metadata': {
+                'text': generated_text,
+                'sub_answers': [sub_answer],
+                'sub_answer_metadata': [{
+                    'sub_answer_id': 0,
+                    'char_span': [0, len(generated_text)],
+                    'sub_query': query,
+                    'metadata': generation_output,
+                }],
+                'original_query': query,
+                'num_sub_questions': 1,
+            },
+            'retrieval_metadata': {
+                'top_k': len(selected_chunks),
+                'num_retrieved': len(selected_chunks),
+                'top_score': max([chunk.score_dense for chunk in selected_chunks], default=0.0),
+                'score_metric': 'score_dense',
+                'guardrail_diagnostics': [],
+                'evidence_doc_ids': list(dict.fromkeys([chunk.doc_id for chunk in selected_chunks]))[:10],
+                'source': 'user_context',
+            }
+        }
     
     def run(
         self,
@@ -472,35 +623,15 @@ class BaselineRAGPipeline:
         )
         
         # Prepare generation parameters
-        if self.config:
-            gen_params = {
-                'max_new_tokens': max_new_tokens or self.config.generation.max_new_tokens,
-                'temperature': temperature if temperature is not None else self.config.generation.temperature,
-                'top_p': top_p if top_p is not None else self.config.generation.top_p,
-                'do_sample': do_sample if do_sample is not None else self.config.generation.do_sample,
-                'repetition_penalty': (
-                    repetition_penalty if repetition_penalty is not None
-                    else self.config.generation.get('repetition_penalty', None)
-                ),
-                'no_repeat_ngram_size': (
-                    no_repeat_ngram_size if no_repeat_ngram_size is not None
-                    else self.config.generation.get('no_repeat_ngram_size', None)
-                ),
-                'sanitize_meta_text': (
-                    sanitize_meta_text if sanitize_meta_text is not None
-                    else bool(self.config.generation.get('sanitize_meta_text', False))
-                ),
-            }
-        else:
-            gen_params = {
-                'max_new_tokens': max_new_tokens or 256,
-                'temperature': temperature if temperature is not None else 0.7,
-                'top_p': top_p if top_p is not None else 0.9,
-                'do_sample': do_sample if do_sample is not None else True,
-                'repetition_penalty': repetition_penalty,
-                'no_repeat_ngram_size': no_repeat_ngram_size,
-                'sanitize_meta_text': bool(sanitize_meta_text) if sanitize_meta_text is not None else False,
-            }
+        gen_params = self._resolve_generation_params(
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            do_sample=do_sample,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+            sanitize_meta_text=sanitize_meta_text,
+        )
         
         # Process each sub-question separately
         all_sub_answers = []

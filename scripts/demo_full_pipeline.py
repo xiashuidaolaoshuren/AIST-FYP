@@ -19,7 +19,7 @@ from src.pipelines import BaselineRAGPipeline
 from src.verification.verifier_hub import VerifierHub
 from src.verification.rule_based_aggregator import RuleBasedAggregator
 from src.mitigation.reprompt import RePrompter
-from src.ui import ConfidenceUI
+from src.ui import ConfidenceUI, ControlledPipelineUI
 from src.utils.config import Config
 from src.utils.logger import setup_logger
 
@@ -28,7 +28,7 @@ class LoggingUIWrapper:
     """
     Wrapper around ConfidenceUI to log all queries and results to JSON.
     """
-    def __init__(self, ui: ConfidenceUI, log_filepath: str):
+    def __init__(self, ui, log_filepath: str):
         self.ui = ui
         self.log_filepath = log_filepath
         self.query_logs = []
@@ -197,6 +197,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable terminal prompts and auto-pick the first available strategy.",
     )
+    parser.add_argument(
+        "--ui-mode",
+        choices=["controlled", "legacy"],
+        default="controlled",
+        help="UI mode: controlled (generate/edit/verify flow) or legacy (single-step).",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -344,15 +350,23 @@ def main():
     else:
         print("ℹ️  Re-prompting disabled in config (mitigation.reprompt.enabled: false)\n")
     
-    # Step 5: Create ConfidenceUI with logging
+    # Step 5: Create selected UI mode with logging
     print("🎨 Creating Gradio UI with logging...")
     try:
-        ui = ConfidenceUI(
-            rag_pipeline=pipeline,
-            verifier_hub=verifier_hub,
-            aggregator=aggregator,
-            repromptr=repromptr
-        )
+        if args.ui_mode == "legacy":
+            ui = ConfidenceUI(
+                rag_pipeline=pipeline,
+                verifier_hub=verifier_hub,
+                aggregator=aggregator,
+                repromptr=repromptr
+            )
+        else:
+            ui = ControlledPipelineUI(
+                rag_pipeline=pipeline,
+                verifier_hub=verifier_hub,
+                aggregator=aggregator,
+                repromptr=repromptr
+            )
         
         # Wrap UI with logging functionality
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -360,7 +374,7 @@ def main():
         logging_ui = LoggingUIWrapper(ui, log_filepath)
         demo = logging_ui.create_interface()
         
-        print("✓ Gradio UI created successfully")
+        print(f"✓ Gradio UI created successfully (mode={args.ui_mode})")
         print(f"✓ Query logging enabled -> {log_filepath}\n")
     except Exception as e:
         print(f"❌ ERROR creating UI: {e}")
