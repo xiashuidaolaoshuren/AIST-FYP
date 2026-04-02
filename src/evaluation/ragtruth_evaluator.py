@@ -408,6 +408,57 @@ class RAGTruthEvaluator:
                     )
                 except (TypeError, ValueError):
                     self.summary_single_contra_low_cov_guard_max_avg_coverage_score_all = 1.0
+                self.summary_lc_after_single_contra_guard_enabled = bool(
+                    getattr(
+                        benchmark_config,
+                        'summary_lc_after_single_contra_guard_enabled',
+                        False,
+                    )
+                )
+                raw_summary_lc_after_single_contra_guard_max_cp = getattr(
+                    benchmark_config,
+                    'summary_lc_after_single_contra_guard_max_contradict_prob',
+                    1.0,
+                )
+                try:
+                    self.summary_lc_after_single_contra_guard_max_contradict_prob = float(
+                        raw_summary_lc_after_single_contra_guard_max_cp
+                    )
+                except (TypeError, ValueError):
+                    self.summary_lc_after_single_contra_guard_max_contradict_prob = 1.0
+                raw_summary_lc_after_single_contra_guard_min_avg_cov = getattr(
+                    benchmark_config,
+                    'summary_lc_after_single_contra_guard_min_avg_coverage_score_all',
+                    0.0,
+                )
+                try:
+                    self.summary_lc_after_single_contra_guard_min_avg_coverage_score_all = float(
+                        raw_summary_lc_after_single_contra_guard_min_avg_cov
+                    )
+                except (TypeError, ValueError):
+                    self.summary_lc_after_single_contra_guard_min_avg_coverage_score_all = 0.0
+                raw_summary_lc_after_single_contra_guard_max_avg_cp_lc = getattr(
+                    benchmark_config,
+                    'summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf = float(
+                        raw_summary_lc_after_single_contra_guard_max_avg_cp_lc
+                    )
+                except (TypeError, ValueError):
+                    self.summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf = 1.0
+                raw_summary_lc_after_single_contra_guard_max_avg_sp_lc = getattr(
+                    benchmark_config,
+                    'summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf',
+                    1.0,
+                )
+                try:
+                    self.summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf = float(
+                        raw_summary_lc_after_single_contra_guard_max_avg_sp_lc
+                    )
+                except (TypeError, ValueError):
+                    self.summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf = 1.0
                 self.all_sentences_summary_contradictory_override_enabled = bool(
                     getattr(
                         benchmark_config,
@@ -735,6 +786,11 @@ class RAGTruthEvaluator:
                 self.summary_single_contra_low_cov_guard_enabled = False
                 self.summary_single_contra_low_cov_guard_max_contradict_prob = 1.0
                 self.summary_single_contra_low_cov_guard_max_avg_coverage_score_all = 1.0
+                self.summary_lc_after_single_contra_guard_enabled = False
+                self.summary_lc_after_single_contra_guard_max_contradict_prob = 1.0
+                self.summary_lc_after_single_contra_guard_min_avg_coverage_score_all = 0.0
+                self.summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf = 1.0
+                self.summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf = 1.0
                 self.all_sentences_summary_contradictory_override_enabled = False
                 self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
                 self.all_sentences_summary_min_coverage_for_contradictory = 0.0
@@ -787,6 +843,11 @@ class RAGTruthEvaluator:
             self.summary_single_contra_low_cov_guard_enabled = False
             self.summary_single_contra_low_cov_guard_max_contradict_prob = 1.0
             self.summary_single_contra_low_cov_guard_max_avg_coverage_score_all = 1.0
+            self.summary_lc_after_single_contra_guard_enabled = False
+            self.summary_lc_after_single_contra_guard_max_contradict_prob = 1.0
+            self.summary_lc_after_single_contra_guard_min_avg_coverage_score_all = 0.0
+            self.summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf = 1.0
+            self.summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf = 1.0
             self.all_sentences_summary_contradictory_override_enabled = False
             self.all_sentences_summary_min_contradict_prob_for_contradictory = 0.0
             self.all_sentences_summary_min_coverage_for_contradictory = 0.0
@@ -892,6 +953,18 @@ class RAGTruthEvaluator:
         )
         self.summary_single_contra_low_cov_guard_max_avg_coverage_score_all = float(
             np.clip(self.summary_single_contra_low_cov_guard_max_avg_coverage_score_all, 0.0, 1.0)
+        )
+        self.summary_lc_after_single_contra_guard_max_contradict_prob = float(
+            np.clip(self.summary_lc_after_single_contra_guard_max_contradict_prob, 0.0, 1.0)
+        )
+        self.summary_lc_after_single_contra_guard_min_avg_coverage_score_all = float(
+            np.clip(self.summary_lc_after_single_contra_guard_min_avg_coverage_score_all, 0.0, 1.0)
+        )
+        self.summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf = float(
+            np.clip(self.summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf, 0.0, 1.0)
+        )
+        self.summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf = float(
+            np.clip(self.summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf, 0.0, 1.0)
         )
         self.all_sentences_summary_min_contradict_prob_for_contradictory = float(
             np.clip(
@@ -2341,6 +2414,23 @@ class RAGTruthEvaluator:
             and low_coverage_ratio >= task_low_coverage_ratio_threshold
             and len(claim_decisions) >= self.min_claims_for_lc_escalation
         )
+        summary_lc_after_single_contra_guard_block = False
+        if (
+            task_type == 'Summary'
+            and self.summary_lc_after_single_contra_guard_enabled
+            and low_confidence_coverage_trigger
+            and (summary_single_contra_block or summary_single_contra_low_cov_guard_block)
+            and max_contradict_prob
+            <= self.summary_lc_after_single_contra_guard_max_contradict_prob
+            and avg_coverage_score_all
+            >= self.summary_lc_after_single_contra_guard_min_avg_coverage_score_all
+            and avg_contradict_prob_low_conf
+            <= self.summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf
+            and avg_support_prob_low_conf
+            <= self.summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf
+        ):
+            summary_lc_after_single_contra_guard_block = True
+            low_confidence_coverage_trigger = False
         all_sentences_summary_lc_guard_block = False
         if (
             task_type == 'Summary'
@@ -2477,6 +2567,7 @@ class RAGTruthEvaluator:
             'all_sentences_summary_contradictory_structural_guard_block': all_sentences_summary_contradictory_structural_guard_block,
             'all_sentences_summary_lc_guard_block': all_sentences_summary_lc_guard_block,
             'all_sentences_summary_lc_residual_guard_block': all_sentences_summary_lc_residual_guard_block,
+            'summary_lc_after_single_contra_guard_block': summary_lc_after_single_contra_guard_block,
             'data2txt_low_confidence_structural_guard_block': data2txt_low_confidence_structural_guard_block,
             'summary_single_contra_block': summary_single_contra_block,
             'summary_single_contra_low_cov_guard_block': summary_single_contra_low_cov_guard_block,

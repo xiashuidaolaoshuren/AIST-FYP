@@ -616,7 +616,14 @@ evaluation:
       # Eval-22 candidate: second-tier guard for lower-coverage Summary single-contra overfire.
       summary_single_contra_low_cov_guard_enabled: true
       summary_single_contra_low_cov_guard_max_contradict_prob: 0.99
-      summary_single_contra_low_cov_guard_max_avg_coverage_score_all: 0.80
+      summary_single_contra_low_cov_guard_max_avg_coverage_score_all: 0.70
+      # Eval-23: prevent contradictory->LC route leakage after Summary single-contra suppression.
+      # This only blocks LC fallback on high-coverage samples with weak LC contradiction/support signals.
+      summary_lc_after_single_contra_guard_enabled: true
+      summary_lc_after_single_contra_guard_max_contradict_prob: 0.90
+      summary_lc_after_single_contra_guard_min_avg_coverage_score_all: 0.82
+      summary_lc_after_single_contra_guard_max_avg_contradict_prob_low_conf: 0.10
+      summary_lc_after_single_contra_guard_max_avg_support_prob_low_conf: 0.10
       # Optional additional guard for all_sentences mode only.
       # Helps suppress weak contradiction spikes from long-tail sentence pairs.
       all_sentences_summary_contradictory_override_enabled: false
