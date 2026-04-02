@@ -254,24 +254,19 @@ class ClaimFilter:
         logger.info(
             f"Found {len(contradictory_decisions)} contradictory claims to remove"
         )
-        
-        filtered_text, contradictory_removed = self._replace_decision_spans(
+        decisions_with_placeholders: List[Tuple[ClaimDecision, str]] = [
+            (decision, self.placeholder)
+            for decision in contradictory_decisions
+        ] + [
+            (decision, self.lc_placeholder)
+            for decision in qa_supported_override_decisions
+        ]
+
+        filtered_text, contradictory_removed, qa_override_removed = self._replace_decisions_combined(
             answer_text,
             claim_dict,
-            contradictory_decisions,
-            self.placeholder,
-            'Contradictory',
+            decisions_with_placeholders,
         )
-
-        qa_override_removed = 0
-        if qa_supported_override_decisions:
-            filtered_text, qa_override_removed = self._replace_decision_spans(
-                filtered_text,
-                claim_dict,
-                qa_supported_override_decisions,
-                self.lc_placeholder,
-                'QA Supported-override',
-            )
 
         removed_count = contradictory_removed + qa_override_removed
         
@@ -364,6 +359,71 @@ class ClaimFilter:
             )
 
         return filtered_text, replaced_count
+
+    def _replace_decisions_combined(
+        self,
+        answer_text: str,
+        claim_dict: Dict[str, Claim],
+        decisions_with_placeholders: List[Tuple[ClaimDecision, str]],
+    ) -> Tuple[str, int, int]:
+        """Replace mixed decision spans in one reverse pass to preserve original offsets."""
+        if not decisions_with_placeholders:
+            return answer_text, 0, 0
+
+        valid_items = [
+            (decision, placeholder)
+            for decision, placeholder in decisions_with_placeholders
+            if decision.claim_id in claim_dict
+        ]
+        if not valid_items:
+            return answer_text, 0, 0
+
+        sorted_items = sorted(
+            valid_items,
+            key=lambda item: claim_dict[item[0].claim_id].answer_char_span[0],
+            reverse=True,
+        )
+
+        filtered_text = answer_text
+        contradictory_removed = 0
+        qa_override_removed = 0
+
+        for decision, placeholder in sorted_items:
+            claim = claim_dict[decision.claim_id]
+            start, end = claim.answer_char_span
+            replacement_label = (
+                'QA Supported-override'
+                if decision.status == 'Supported'
+                else 'Contradictory'
+            )
+
+            if start < 0 or end > len(filtered_text) or start >= end:
+                logger.warning(
+                    "Invalid char_span [%d, %d] for %s claim %s. Text length: %d. Skipping.",
+                    start,
+                    end,
+                    replacement_label,
+                    claim.claim_id,
+                    len(filtered_text),
+                )
+                continue
+
+            filtered_text = filtered_text[:start] + placeholder + filtered_text[end:]
+            if decision.status == 'Contradictory':
+                contradictory_removed += 1
+            elif decision.status == 'Supported':
+                qa_override_removed += 1
+
+            logger.debug(
+                "Removed %s claim %s at span [%d, %d]: '%s...'",
+                replacement_label,
+                claim.claim_id,
+                start,
+                end,
+                claim.text[:50],
+            )
+
+        return filtered_text, contradictory_removed, qa_override_removed
 
     def _resolve_lc_soft_filter_threshold(
         self,

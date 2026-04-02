@@ -615,7 +615,7 @@ evaluation:
       summary_single_contra_min_coverage: 0.44         # require at least this coverage_score for the sole contradictory claim
       # Eval-22 candidate: second-tier guard for lower-coverage Summary single-contra overfire.
       summary_single_contra_low_cov_guard_enabled: true
-      summary_single_contra_low_cov_guard_max_contradict_prob: 0.99
+      summary_single_contra_low_cov_guard_max_contradict_prob: 0.65
       summary_single_contra_low_cov_guard_max_avg_coverage_score_all: 0.70
       # Eval-23: prevent contradictory->LC route leakage after Summary single-contra suppression.
       # This only blocks LC fallback on high-coverage samples with weak LC contradiction/support signals.
