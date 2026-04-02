@@ -300,6 +300,23 @@ class RAGTruthEvaluator:
                     self.min_claims_for_lc_escalation = int(raw_lc_claim_floor)
                 except (TypeError, ValueError):
                     self.min_claims_for_lc_escalation = 4
+                _raw_per_task_min_claims = getattr(
+                    benchmark_config,
+                    'per_task_min_claims_for_lc_escalation',
+                    None,
+                )
+                if isinstance(_raw_per_task_min_claims, dict):
+                    _per_task_min_claims = _raw_per_task_min_claims
+                elif hasattr(_raw_per_task_min_claims, 'to_dict'):
+                    _per_task_min_claims = _raw_per_task_min_claims.to_dict()
+                else:
+                    _per_task_min_claims = None
+                if isinstance(_per_task_min_claims, dict):
+                    self.per_task_min_claims_for_lc_escalation = {
+                        k: int(v) for k, v in _per_task_min_claims.items()
+                    }
+                else:
+                    self.per_task_min_claims_for_lc_escalation = {}
                 raw_data2txt_lc_count = getattr(benchmark_config, 'data2txt_min_lc_count', 6)
                 try:
                     self.data2txt_min_lc_count = int(raw_data2txt_lc_count)
@@ -774,6 +791,7 @@ class RAGTruthEvaluator:
                 self.lc_avg_contradict_ratio_threshold = 0.30
                 self.lc_avg_contradict_prob_threshold = 0.25
                 self.min_claims_for_lc_escalation = 4
+                self.per_task_min_claims_for_lc_escalation = {}
                 self.data2txt_min_lc_count = 6
                 self.data2txt_contradictory_override_enabled = False
                 self.data2txt_min_contradict_prob_for_contradictory = 0.0
@@ -831,6 +849,7 @@ class RAGTruthEvaluator:
             self.lc_avg_contradict_ratio_threshold = 0.30
             self.lc_avg_contradict_prob_threshold = 0.25
             self.min_claims_for_lc_escalation = 4
+            self.per_task_min_claims_for_lc_escalation = {}
             self.data2txt_min_lc_count = 6
             self.data2txt_contradictory_override_enabled = False
             self.data2txt_min_contradict_prob_for_contradictory = 0.0
@@ -929,6 +948,10 @@ class RAGTruthEvaluator:
             for k, v in self.per_task_low_coverage_ratio_threshold.items()
         }
         self.min_claims_for_lc_escalation = max(1, int(self.min_claims_for_lc_escalation))
+        self.per_task_min_claims_for_lc_escalation = {
+            k: max(1, int(v))
+            for k, v in self.per_task_min_claims_for_lc_escalation.items()
+        }
         self.data2txt_min_lc_count = max(1, int(self.data2txt_min_lc_count))
         self.data2txt_min_contradict_prob_for_contradictory = float(
             np.clip(self.data2txt_min_contradict_prob_for_contradictory, 0.0, 1.0)
@@ -1101,6 +1124,10 @@ class RAGTruthEvaluator:
             self.qa_pure_lc_block_ratio,
         )
         self.logger.info(
+            "Per-task min_claims_for_lc_escalation overrides: %s",
+            self.per_task_min_claims_for_lc_escalation,
+        )
+        self.logger.info(
             "Effective verification config: enabled=%s, modules=%s",
             self.verification_enabled,
             self.verification_module_flags,
@@ -1127,6 +1154,13 @@ class RAGTruthEvaluator:
                 "Mitigation enabled for evaluator (orchestrator=%s)",
                 bool(self.mitigation_orchestrator and self.mitigation_orchestrator.enabled)
             )
+
+    def _get_min_claims_for_lc_escalation(self, task_type: str) -> int:
+        """Return task-aware minimum claim count required for LC escalation paths."""
+        return self.per_task_min_claims_for_lc_escalation.get(
+            task_type,
+            self.min_claims_for_lc_escalation,
+        )
     
     def run_evaluation(
         self,
@@ -2290,6 +2324,7 @@ class RAGTruthEvaluator:
             task_type,
             self.min_contradictory_count,
         )
+        min_claims_for_lc_escalation = self._get_min_claims_for_lc_escalation(task_type)
         task_low_coverage_ratio_threshold = self.per_task_low_coverage_ratio_threshold.get(
             task_type,
             self.low_coverage_ratio_threshold,
@@ -2305,7 +2340,7 @@ class RAGTruthEvaluator:
             and contradictory_count < effective_min_contradictory
             and low_confidence_ratio >= self.lc_avg_contradict_ratio_threshold
             and avg_contradict_prob_low_conf >= self.lc_avg_contradict_prob_threshold
-            and len(claim_decisions) >= self.min_claims_for_lc_escalation
+            and len(claim_decisions) >= min_claims_for_lc_escalation
         )
         qa_pure_lc_block = (
             task_type == 'QA'
@@ -2412,7 +2447,7 @@ class RAGTruthEvaluator:
         low_confidence_coverage_trigger = (
             low_confidence_ratio >= self.low_confidence_ratio_threshold
             and low_coverage_ratio >= task_low_coverage_ratio_threshold
-            and len(claim_decisions) >= self.min_claims_for_lc_escalation
+            and len(claim_decisions) >= min_claims_for_lc_escalation
         )
         summary_lc_after_single_contra_guard_block = False
         if (
@@ -2883,6 +2918,7 @@ class RAGTruthEvaluator:
         effective_min_contradictory = self.per_task_min_contradictory.get(
             task_type, self.min_contradictory_count
         )
+        min_claims_for_lc_escalation = self._get_min_claims_for_lc_escalation(task_type)
         contradictory_count = sum(1 for d in claim_decisions if d.status == 'Contradictory')
         contradictory_trigger = contradictory_count >= effective_min_contradictory
         if contradictory_trigger:
@@ -2903,7 +2939,7 @@ class RAGTruthEvaluator:
         low_confidence_coverage_trigger = (
             low_confidence_ratio >= self.low_confidence_ratio_threshold
             and low_coverage_ratio >= task_low_coverage_ratio_threshold
-            and n >= self.min_claims_for_lc_escalation
+            and n >= min_claims_for_lc_escalation
         )
         if low_confidence_coverage_trigger:
             return 'low_confidence_coverage'
@@ -2926,7 +2962,7 @@ class RAGTruthEvaluator:
             and contradictory_count < effective_min_contradictory
             and low_confidence_ratio >= self.lc_avg_contradict_ratio_threshold
             and avg_contradict_prob_low_conf >= self.lc_avg_contradict_prob_threshold
-            and n >= self.min_claims_for_lc_escalation
+            and n >= min_claims_for_lc_escalation
         )
         if lc_avg_contradict_trigger:
             return 'lc_avg_contradict'

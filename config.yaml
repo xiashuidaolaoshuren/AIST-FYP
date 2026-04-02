@@ -599,6 +599,10 @@ evaluation:
       disable_lc_avg_contradict_for_tasks:
         - QA  # Eval-16: QA lc_avg_contradict is 6 FP / 0 TP, so disable this path for QA
       min_claims_for_lc_escalation: 3  # keep protection for 1-2 claim responses while recovering 3-claim QA misses
+      per_task_min_claims_for_lc_escalation:
+        QA: 2          # Final QA audit: allow LC escalation on short QA responses (2 claims)
+        Summary: 3
+        Data2txt: 3
       data2txt_min_lc_count: 6  # Data2txt-specific fallback: escalate only when many claims are Low Confidence and contradiction evidence is absent
       data2txt_contradictory_override_enabled: false  # optional safety gate for Data2txt contradictory trigger
       data2txt_min_contradict_prob_for_contradictory: 0.5  # when override is enabled, require max contradict_prob among contradictory claims to exceed this threshold
