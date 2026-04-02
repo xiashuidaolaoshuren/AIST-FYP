@@ -36,7 +36,9 @@ These signals converge into a **Rule-Based Aggregator** that issues a finalized 
 
 ### 2.1 Knowledge Base: The Wikipedia Corpus
 
-Our system utilizes a curated subset of the English Wikipedia (`enwiki-sample.xml`) as its primary knowledge base. To ensure high-quality retrieval, we implemented a rigorous data ingestion pipeline:
+Our system is designed to be knowledge-agnostic, supporting both static large-scale corpora and dynamic user-provided context. While our architecture natively supports **user-input context** as a temporary, high-relevance knowledge base (an optimization for specific workflows), we utilize a curated subset of the **English Wikipedia** (`enwiki-sample.xml`) as our primary, comprehensive knowledge base for general-purpose retrieval.
+
+To ensure high-quality retrieval across these sources, we implemented a rigorous data ingestion pipeline:
 
 *   **Parsing & Cleaning:** We developed a custom `WikipediaParser` to extract plain text from the XML dump, stripping out redirects, disambiguation pages, and complex wikitext elements (templates, HTML tags).
 *   **Semantic Chunking:** The cleaned text is segmented using spaCy's sentencizer into atomic units (chunks). We apply a length filter to ensure each chunk contains enough semantic context for the retriever without overwhelming the generator's context window.
