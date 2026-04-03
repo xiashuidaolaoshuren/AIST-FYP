@@ -8,7 +8,7 @@
 
 ## 1. System Design
 
-Our project aims to address the critical issue of factual hallucinations in Large Language Models (LLMs), particularly within Retrieval-Augmented Generation (RAG) frameworks. Building on the progress from the first term, we have successfully developed a complete **four-stage end-to-end pipeline** that acts as a post-hoc safety layer, combining a **trainless verifier** with a proactive **mitigation module**.
+Our project aims to address the critical issue of factual hallucinations in Large Language Models (LLMs), particularly within Retrieval-Augmented Generation (RAG) frameworks [2]. Building on the progress from the first term, we have successfully developed a complete **four-stage end-to-end pipeline** that acts as a post-hoc safety layer, combining a **trainless verifier** with a proactive **mitigation module**. This research is grounded in the taxonomies and challenges identified in contemporary surveys on the phenomenon [1].
 
 ![System Architecture](../../System_Architecture_Design%20_%20Mermaid%20Chart-2025-11-22-041757.png)
 
@@ -21,7 +21,7 @@ The system follows a structured pipeline designed to ensure that generating clai
 4.  **Mitigation:** Finally, the `MitigationOrchestrator` receives the verified claims and applies rule-based corrective actions—such as filtering unsupported claims, reprompting the generator, or reranking evidence—to construct a factually consistent final response.
 
 ### The Trainless Verifier and Mitigation Philosophy
-Unlike approaches that require training massive, opaque "LLM-as-a-Judge" models, our verifier aggregates multiple zero-shot signals. This approach minimizes latency and maintains computational efficiency:
+Unlike approaches that require training massive, opaque "LLM-as-a-Judge" models [9], our verifier aggregates multiple zero-shot signals. This approach minimizes latency and maintains computational efficiency:
 
 1.  **Intrinsic Uncertainty:** Measures the model's internal confidence using token-level statistics, specifically calculating **Shannon Entropy** ($H = -\sum p \log p$) over the vocabulary distribution. High entropy often strongly correlates with hallucination.
 2.  **Retrieval-Grounded Heuristics:** Quantifies the overlap between the generated claim and the evidence, encompassing **Entity Coverage**, **Number Coverage**, and **Token Overlap** (ROUGE-L).
@@ -115,7 +115,7 @@ Every sentence boundary is split, resulting in individual properties ("The Eiffe
 
 ## 3. The Trainless Verifier Module
 
-The Verifier Module is the core innovation of our project. It fundamentally shifts away from computationally expensive, black-box "LLM-as-a-Judge" frameworks towards a rigorous, transparent ensemble of zero-shot signals. By inspecting both the model's internal statistical confidence and the external linguistic overlap, the `VerifierHub` issues a highly contextualized verdict.
+The Verifier Module is the core innovation of our project. It fundamentally shifts away from computationally expensive, black-box "LLM-as-a-Judge" frameworks [9] towards a rigorous, transparent ensemble of zero-shot signals. By inspecting both the model's internal statistical confidence and the external linguistic overlap, the `VerifierHub` issues a highly contextualized verdict.
 
 ### 3.1 Core Data Structure: Claim-Evidence Pair
 The verifier operates strictly on atomic `ClaimEvidencePair` objects. This ensures sentence-level precision rather than paragraph-level ambiguity.
@@ -125,7 +125,7 @@ The verifier operates strictly on atomic `ClaimEvidencePair` objects. This ensur
 ### 3.2 Intrinsic Uncertainty Detector
 
 **Core Idea & Inspiration:**  
-This detector is inspired by the **SelfCheckGPT** framework, which posits that LLMs behave like "stochastic parrots" when they lack factual knowledge. The core hypothesis is that factual hallucinations are not random errors but are preceded by high internal model uncertainty. When a model "knows" a fact, it allocates nearly all probability mass to a single, correct token. Conversely, when fabricating information, the probability distribution becomes "flat" or "entropic" as the model essentially guesses between multiple plausible-sounding but incorrect tokens. By measuring this "intrinsic" signal, we can detect hallucinations even without external evidence.
+This detector is inspired by the **SelfCheckGPT** framework [3], which posits that LLMs behave like "stochastic parrots" when they lack factual knowledge. The core hypothesis is that factual hallucinations are not random errors but are preceded by high internal model uncertainty. When a model "knows" a fact, it allocates nearly all probability mass to a single, correct token. Conversely, when fabricating information, the probability distribution becomes "flat" or "entropic" as the model essentially guesses between multiple plausible-sounding but incorrect tokens. By measuring this "intrinsic" signal, we can detect hallucinations even without external evidence.
 
 *   **Technical Highlights:**
     *   **Sub-word Token Mapping:** Accurately aligning character-level claims to LLM tokens (e.g., Llama's SentencePiece) requires handling prefix spaces and special control tokens.
@@ -153,7 +153,7 @@ def _calculate_entropy(self, logits: np.ndarray) -> float:
 ### 3.3 Retrieval-Grounded Heuristics
 
 **Core Idea & Inspiration:**  
-Drawing inspiration from traditional fact-checking benchmarks like **FEVER**, this module operates on the principle of **lexical grounding**. The idea is that for a claim to be considered "faithful" to its source, it must preserve the core "anchors" of the evidence—specifically named entities and numeric values. Hallucinations often involve "entity-swapping" (mixing up names) or "numeric drift" (incorrect dates or quantities). By strictly enforcing coverage of these anchors, we provide a fast, interpretable heuristic that catches the most common types of RAG hallucinations where the model deviates from the provided context.
+Drawing inspiration from traditional fact-checking benchmarks like **FEVER** [4], this module operates on the principle of **lexical grounding**. The idea is that for a claim to be considered "faithful" to its source, it must preserve the core "anchors" of the evidence—specifically named entities and numeric values. Hallucinations often involve "entity-swapping" (mixing up names) or "numeric drift" (incorrect dates or quantities). By strictly enforcing coverage of these anchors, we provide a fast, interpretable heuristic that catches the most common types of RAG hallucinations before invoking more latent, compute-heavy semantic checks.
 
 *   **Technical Highlights:**
     *   **NER Fuzzy Matching:** Since surface forms can vary (e.g., "U.S." vs "United States"), we use a small Levenshtein distance threshold for matching.
@@ -183,7 +183,7 @@ def _calculate_entity_coverage(self, claim: Claim, evidence: EvidenceChunk) -> f
 ### 3.4 Zero-Shot Natural Language Inference (NLI)
 
 **Core Idea & Inspiration:**  
-While lexical overlap is a strong signal, it cannot capture logical contradictions (e.g., adding a "not" to a sentence preserves almost all tokens but flips the meaning). This module is inspired by the **SummaC** and **Self-RAG** research, which repurposes Natural Language Inference (NLI) for factuality verification. By treating the evidence as a "premise" and the claim as a "hypothesis," we can use a model trained on logical relationships to detect if the evidence *actually supports* the claim. This adds a critical layer of semantic understanding that simple word-matching lacks.
+While lexical overlap is a strong signal, it cannot capture logical contradictions (e.g., adding a "not" to a sentence preserves almost all tokens but flips the meaning). This module is inspired by the **SummaC** [6] and **Self-RAG** [7] research, which repurposes Natural Language Inference (NLI) for factuality verification. By treating the evidence as a "premise" and the claim as a "hypothesis," we can use a model trained on logical relationships to detect if the evidence *actually supports* the claim. This adds a critical layer of semantic understanding that simple word-matching lacks.
 
 *   **Technical Highlights:**
     *   **Cross-Encoding:** Unlike "bi-encoders" which score vectors, a Cross-Encoder passes both strings into the transformer simultaneously. This allows the model to capture deep semantic interactions (e.g., negations or coreference).
@@ -213,7 +213,7 @@ def detect(self, claim: str, evidence: str) -> Dict[str, float]:
 ### 3.5 Self-Agreement Detector
 
 **Core Idea & Inspiration:**  
-This detector is based on the **Self-Consistency (CoT-SC)** principle. The intuition is that for internal knowledge-based questions, an LLM that "knows" the answer will converge on the same factual claim regardless of slight variations in the prompt or decoding path. However, if the model is hallucinating (guessing), it will generate different, inconsistent stories across multiple independent runs. By checking if a claim "agrees" with other stochastic samples of the same model, we can verify its stability and reliability.
+This detector is based on the **Self-Consistency (CoT-SC)** principle [8]. The intuition is that for internal knowledge-based questions, an LLM that "knows" the answer will converge on the same factual claim regardless of slight variations in the prompt or decoding path. However, if the model is hallucinating (guessing), it will generate different, inconsistent stories across multiple independent runs. By checking if a claim "agrees" with other stochastic samples of the same model, we can verify its stability and reliability.
 
 *   **Technical Highlights:**
     *   **Stochastic Sampling:** We adjust the model's **temperature** ($\tau > 0.7$) to generate multiple distinct paths, rather than a single greedy sequence.
@@ -277,4 +277,32 @@ def aggregate(self, aggregate_input: Dict) -> Verdict:
 
 ---
 
-## 4. Final Conclusion & Future Work
+## References
+
+[1] Y. Zhang *et al.*, "A Survey on Hallucination in Large Language Models," *arXiv preprint arXiv:2311.03687*, 2023.
+
+[2] P. Lewis *et al.*, "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks," *Advances in Neural Information Processing Systems*, vol. 33, pp. 9459–9474, 2020.
+
+[3] P. Manakul *et al.*, "SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models," *arXiv preprint arXiv:2303.08896*, 2023.
+
+[4] J. Thorne *et al.*, "FEVER: a Large-scale Dataset for Fact Extraction and VERification," *NAACL-HLT*, 2018.
+
+[5] F. Petroni *et al.*, "KILT: a Benchmark for Knowledge Intensive Language Tasks," *NAACL-HLT*, 2021.
+
+[6] P. Laban *et al.*, "SummaC: Re-Visiting NLI-based Models for Inconsistency Detection in Summarization," *Transactions of the Association for Computational Linguistics*, vol. 10, pp. 163–177, 2022.
+
+[7] A. Asai *et al.*, "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection," *arXiv preprint arXiv:2310.11511*, 2023.
+
+[8] X. Wang *et al.*, "Self-Consistency Improves Chain of Thought Reasoning in Language Models," *arXiv preprint arXiv:2203.11171*, 2022.
+
+[9] L. Zheng *et al.*, "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena," *arXiv preprint arXiv:2306.05685*, 2023.
+
+[10] Y. Chen *et al.*, "RAGTruth: A Hallucination Benchmark for Retrieval-Augmented Generation," *arXiv preprint arXiv:2401.00396*, 2024.
+
+[11] S. Lin *et al.*, "TruthfulQA: Measuring How Models Mimic Human Falsehoods," *ACL*, 2022.
+
+[12] H. Gao *et al.*, "Chain-of-Verification Reduces Hallucination in Large Language Models," *arXiv preprint arXiv:2309.11495*, 2023.
+
+[13] O. Honovich *et al.*, "TRUE: Re-evaluating Factual Consistency Evaluation," *NAACL*, 2022.
+
+[14] "CiteEval: Principle-Driven Citation Evaluation for Source Attribution," *arXiv preprint*, 2024.
