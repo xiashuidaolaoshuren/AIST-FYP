@@ -194,6 +194,22 @@ While lexical overlap is a strong signal, it cannot capture logical contradictio
 *   **Method:** Utilizing a **DeBERTa-v3 Cross-Encoder**, the system performs a zero-shot classification of the logical relationship (entailment/contradiction) between the evidence and the claim.
 *   **Output:** A probability distribution over three classes: `{'entailment': float, 'contradiction': float, 'neutral': float}`.
 
+**Code Example (`src/verification/nli_detector.py`):**
+```python
+def detect(self, claim: str, evidence: str) -> Dict[str, float]:
+    # Cross-encoding: premise and hypothesis are passed together
+    inputs = self.tokenizer(evidence, claim, return_tensors='pt', truncation=True)
+    logits = self.model(**inputs).logits
+    
+    # Softmax to get class probabilities
+    probs = torch.softmax(logits, dim=1).detach().numpy()[0]
+    return {
+        'entailment': float(probs[self.label_map['entailment']]),
+        'contradiction': float(probs[self.label_map['contradiction']]),
+        'neutral': float(probs[self.label_map['neutral']])
+    }
+```
+
 ### 3.5 Self-Agreement Detector
 
 **Core Idea & Inspiration:**  
@@ -208,6 +224,24 @@ This detector is based on the **Self-Consistency (CoT-SC)** principle. The intui
 *   **Method:** The module uses **Stochastic Sampling** to generate $N$ alternative responses. It determines the semantic consensus using a **Majority Vote Strategy** across clustered claims to verify the factual stability of the original response.
 *   **Output:** An agreement score `{'agreement_ratio': float}` based on semantic consensus.
 
+**Code Example (`src/verification/self_agreement.py`):**
+```python
+def check_agreement(self, claim: str, query: str, num_samples: int = 5) -> float:
+    # 1. Stochastic Sampling with high temperature
+    samples = self.generator.sample(query, n=num_samples, temperature=0.8)
+    
+    # 2. Extract claims from samples and compute semantic support
+    supports = 0
+    for sample in samples:
+        # Cross-check if sample text semantically supports the original claim
+        nli_score = self.nli_model.predict(sample, claim)
+        if nli_score['entailment'] > self.support_threshold:
+            supports += 1
+            
+    # 3. Agreement ratio: proportion of samples supporting the original claim
+    return supports / num_samples
+```
+
 ### 3.6 Rule-Based Aggregation
 The four independent signals are passed to the `VerifierHub`'s aggregation engine. 
 
@@ -218,3 +252,29 @@ The four independent signals are passed to the `VerifierHub`'s aggregation engin
 *   **Input:** All preceding detector outputs (`mean_entropy`, grounding scores, NLI distribution, agreement ratio).
 *   **Method:** The engine normalizes the signals and applies **Veto Logic** to determine if any catastrophic failures exist. If no vetoes are triggered, it computes a weighted aggregation of the scores to issue a final verdict.
 *   **Output:** A finalized `VerifiedClaim` with a categorical verdict: **Supported**, **Contradictory**, or **Low Confidence**.
+
+**Code Example (`src/verification/verifier_hub.py`):**
+```python
+def aggregate(self, aggregate_input: Dict) -> Verdict:
+    # 1. Catastrophic Veto Logic: NLI Contradiction or Extreme Entropy
+    if aggregate_input['nli_contradiction'] > self.contradiction_veto_threshold:
+        return Verdict.CONTRADICTORY
+        
+    if aggregate_input['mean_entropy'] > self.critical_uncertainty_threshold:
+        return Verdict.LOW_CONFIDENCE
+
+    # 2. Heuristic Grounding: Entities and Numbers must intersect at least partially
+    if aggregate_input['entity_coverage'] < 0.2 or aggregate_input['number_coverage'] < 0.5:
+        return Verdict.LOW_CONFIDENCE
+
+    # 3. Weighted Score Fusion: Entropy (40%) + NLI (40%) + Heuristics (20%)
+    final_score = (0.4 * aggregate_input['uncertainty_signal']) + \
+                  (0.4 * aggregate_input['nli_signal']) + \
+                  (0.2 * aggregate_input['grounding_signal'])
+                  
+    return Verdict.SUPPORTED if final_score > 0.6 else Verdict.LOW_CONFIDENCE
+```
+
+---
+
+## 4. Final Conclusion & Future Work
