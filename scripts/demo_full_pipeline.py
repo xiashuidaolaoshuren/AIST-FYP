@@ -19,7 +19,7 @@ from src.pipelines import BaselineRAGPipeline
 from src.verification.verifier_hub import VerifierHub
 from src.verification.rule_based_aggregator import RuleBasedAggregator
 from src.mitigation.reprompt import RePrompter
-from src.ui import ConfidenceUI, ControlledPipelineUI
+from src.ui import ConfidenceUI
 from src.utils.config import Config
 from src.utils.logger import setup_logger
 
@@ -220,6 +220,16 @@ def main():
     """
     args = parse_args()
     in_colab = is_running_in_colab()
+    controlled_ui_available = True
+
+    try:
+        from src.ui import ControlledPipelineUI
+    except Exception as exc:
+        controlled_ui_available = False
+        if args.ui_mode == "controlled":
+            print("⚠️  Controlled UI dependencies are unavailable; falling back to legacy UI mode.")
+            print(f"   Root cause: {exc}")
+            args.ui_mode = "legacy"
 
     print("=" * 80)
     print("HALLUCINATION DETECTION - FULL PIPELINE DEMO")
@@ -361,6 +371,8 @@ def main():
                 repromptr=repromptr
             )
         else:
+            if not controlled_ui_available:
+                raise RuntimeError("Controlled UI requested but unavailable in this environment")
             ui = ControlledPipelineUI(
                 rag_pipeline=pipeline,
                 verifier_hub=verifier_hub,
