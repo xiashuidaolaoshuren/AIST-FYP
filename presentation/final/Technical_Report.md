@@ -110,3 +110,111 @@ def generate_with_metadata(self, prompt: str, evidence_chunks: List) -> Dict:
 Working with entire paragraphs drastically degrades verification reliability. Post-generation, the system employs spaCy Dependency Parsing to intelligently fragment raw LLM text outputs into `Claim` objects. 
 
 Every sentence boundary is split, resulting in individual properties ("The Eiffel Tower was built in 1889", "It is located in Paris"). These claims are joined with the full array of retrieved `$k$` instances to assemble `ClaimEvidencePair` objects. This structural decomposition transforms unstructured responses into formal, verifiable propositions for the Trainless Verifier.
+
+---
+
+## 3. The Trainless Verifier Module
+
+The Verifier Module is the core innovation of our project. It fundamentally shifts away from computationally expensive, black-box "LLM-as-a-Judge" frameworks towards a rigorous, transparent ensemble of zero-shot signals. By inspecting both the model's internal statistical confidence and the external linguistic overlap, the `VerifierHub` issues a highly contextualized verdict.
+
+### 3.1 Core Data Structure: Claim-Evidence Pair
+The verifier operates strictly on atomic `ClaimEvidencePair` objects. This ensures sentence-level precision rather than paragraph-level ambiguity.
+*   **Input:** `ClaimEvidencePair(claim: Claim, evidence_candidates: List[EvidenceChunk], generator_metadata: dict)`
+*   **Output:** `VerifiedClaim` (includes confidence scores of the 4 independent signals and a final categorical verdict: Supported, Contradictory, or Low Confidence).
+
+### 3.2 Intrinsic Uncertainty Detector
+
+**Core Idea & Inspiration:**  
+This detector is inspired by the **SelfCheckGPT** framework, which posits that LLMs behave like "stochastic parrots" when they lack factual knowledge. The core hypothesis is that factual hallucinations are not random errors but are preceded by high internal model uncertainty. When a model "knows" a fact, it allocates nearly all probability mass to a single, correct token. Conversely, when fabricating information, the probability distribution becomes "flat" or "entropic" as the model essentially guesses between multiple plausible-sounding but incorrect tokens. By measuring this "intrinsic" signal, we can detect hallucinations even without external evidence.
+
+*   **Technical Highlights:**
+    *   **Sub-word Token Mapping:** Accurately aligning character-level claims to LLM tokens (e.g., Llama's SentencePiece) requires handling prefix spaces and special control tokens.
+    *   **Logit Stability:** We utilize **Log-Sum-Exp** normalization to prevent numerical overflow when processing raw model outputs.
+    *   **Shannon Entropy ($H$):** A robust measure from Information Theory; $H=0$ implies total certainty, while higher values indicate "flat" distributions typical of guessing.
+
+*   **Input:** Extracted `Claim` object and the `generator_metadata` (containing token-level logits).
+*   **Method:** Utilizing **Log-Sum-Exp** for numerical stability, the system maps the claim's character span back to the original **Sub-word Tokens**. It then calculates the mean **Shannon Entropy** ($H$) over the probability distribution of the tokens:
+    $$ H(x) = - \sum p(x) \log p(x) $$
+*   **Output:** A scalar entropy score `{'mean_entropy': float}`. High mean entropy strongly correlates with fabricated facts.
+
+**Code Example (`src/verification/intrinsic_uncertainty.py`):**
+```python
+def _calculate_entropy(self, logits: np.ndarray) -> float:
+    # Applying Softmax with log-sum-exp stability
+    max_logit = np.max(logits)
+    exp_logits = np.exp(logits - max_logit)
+    probs = exp_logits / np.sum(exp_logits)
+    
+    # Calculate Shannon Entropy
+    entropy = -np.sum(probs * np.log(probs + self.epsilon))
+    return float(entropy)
+```
+
+### 3.3 Retrieval-Grounded Heuristics
+
+**Core Idea & Inspiration:**  
+Drawing inspiration from traditional fact-checking benchmarks like **FEVER**, this module operates on the principle of **lexical grounding**. The idea is that for a claim to be considered "faithful" to its source, it must preserve the core "anchors" of the evidence—specifically named entities and numeric values. Hallucinations often involve "entity-swapping" (mixing up names) or "numeric drift" (incorrect dates or quantities). By strictly enforcing coverage of these anchors, we provide a fast, interpretable heuristic that catches the most common types of RAG hallucinations where the model deviates from the provided context.
+
+*   **Technical Highlights:**
+    *   **NER Fuzzy Matching:** Since surface forms can vary (e.g., "U.S." vs "United States"), we use a small Levenshtein distance threshold for matching.
+    *   **Anchor Point Analysis:** Numbers and Proper Nouns are treated as "Anchors"—non-negotiable factual units that must intersect with source text for a claim to be considered faithful.
+    *   **ROUGE-L (Longest Common Subsequence):** Unlike simple n-gram overlap, ROUGE-L accounts for sentence structure by measuring the longest sequence of words appearing in both claim and evidence in the same relative order.
+
+*   **Input:** `Claim` text and `EvidenceChunk` object (retrieved document snippet).
+*   **Method:**
+    *   **Anchor Point Analysis (Entity/Number):** Uses **spaCy NER** and rule-based extractors to identify anchor points. Validates their presence in the evidence via **Fuzzy Matching** (Levenshtein distance).
+    *   **Structural Lexical Overlap:** Computes the **ROUGE-L F1** score based on the Longest Common Subsequence between the strings.
+*   **Output:** A dictionary of grounding scores `{entities: float, numbers: float, tokens_overlap: float}`.
+
+**Code Example (`src/verification/retrieval_grounded.py`):**
+```python
+def _calculate_entity_coverage(self, claim: Claim, evidence: EvidenceChunk) -> float:
+    # 1. Extract Named Entities using spaCy Dependency
+    doc_claim = self.nlp(claim.text)
+    entities = [ent.text for ent in doc_claim.ents]
+    
+    # 2. Validate presence in evidence
+    matched = sum(1 for e in entities if self._fuzzy_match(e, evidence.text))
+    
+    # 3. Calculate coverage percentage (defaulting to 1.0 if no entities exist)
+    return matched / len(entities) if entities else 1.0
+```
+
+### 3.4 Zero-Shot Natural Language Inference (NLI)
+
+**Core Idea & Inspiration:**  
+While lexical overlap is a strong signal, it cannot capture logical contradictions (e.g., adding a "not" to a sentence preserves almost all tokens but flips the meaning). This module is inspired by the **SummaC** and **Self-RAG** research, which repurposes Natural Language Inference (NLI) for factuality verification. By treating the evidence as a "premise" and the claim as a "hypothesis," we can use a model trained on logical relationships to detect if the evidence *actually supports* the claim. This adds a critical layer of semantic understanding that simple word-matching lacks.
+
+*   **Technical Highlights:**
+    *   **Cross-Encoding:** Unlike "bi-encoders" which score vectors, a Cross-Encoder passes both strings into the transformer simultaneously. This allows the model to capture deep semantic interactions (e.g., negations or coreference).
+    *   **Veto Principle:** In our rule-based aggregator, the `contradiction` score from the NLI model acts as a "hard veto" that can override high lexical overlap scores.
+    *   **DeBERTa-v3 Architecture:** A state-of-the-art encoder with "Disentangled Attention," significantly better at logical reasoning than standard BERT/RoBERTa models.
+
+*   **Input:** `Claim` text (Hypothesis) and `EvidenceChunk` text (Premise).
+*   **Method:** Utilizing a **DeBERTa-v3 Cross-Encoder**, the system performs a zero-shot classification of the logical relationship (entailment/contradiction) between the evidence and the claim.
+*   **Output:** A probability distribution over three classes: `{'entailment': float, 'contradiction': float, 'neutral': float}`.
+
+### 3.5 Self-Agreement Detector
+
+**Core Idea & Inspiration:**  
+This detector is based on the **Self-Consistency (CoT-SC)** principle. The intuition is that for internal knowledge-based questions, an LLM that "knows" the answer will converge on the same factual claim regardless of slight variations in the prompt or decoding path. However, if the model is hallucinating (guessing), it will generate different, inconsistent stories across multiple independent runs. By checking if a claim "agrees" with other stochastic samples of the same model, we can verify its stability and reliability.
+
+*   **Technical Highlights:**
+    *   **Stochastic Sampling:** We adjust the model's **temperature** ($\tau > 0.7$) to generate multiple distinct paths, rather than a single greedy sequence.
+    *   **Majority Vote Strategy:** We determine if the claim follows the "centroid" of the model's internal knowledge; a claim appearing in $<30\%$ of samples is flagged as highly unreliable.
+    *   **Semantic Consistency:** Not restricted to exact string matching; semantic clustering is used to group similar claims before voting.
+
+*   **Input:** Original `Claim` text and $N$ stochastic `response_samples` generated with high temperature.
+*   **Method:** The module uses **Stochastic Sampling** to generate $N$ alternative responses. It determines the semantic consensus using a **Majority Vote Strategy** across clustered claims to verify the factual stability of the original response.
+*   **Output:** An agreement score `{'agreement_ratio': float}` based on semantic consensus.
+
+### 3.6 Rule-Based Aggregation
+The four independent signals are passed to the `VerifierHub`'s aggregation engine. 
+
+*   **Technical Highlights:**
+    *   **Veto Logic:** Specific critical failure signals (e.g., NLI Contradiction or Extreme Uncertainty) can unilaterally override positive signals.
+    *   **Signal Normalization:** Raw telemetry from heterogeneous detectors (probabilities, ratios, entropy) are scaled to a unified 0-1 range before fusion.
+
+*   **Input:** All preceding detector outputs (`mean_entropy`, grounding scores, NLI distribution, agreement ratio).
+*   **Method:** The engine normalizes the signals and applies **Veto Logic** to determine if any catastrophic failures exist. If no vetoes are triggered, it computes a weighted aggregation of the scores to issue a final verdict.
+*   **Output:** A finalized `VerifiedClaim` with a categorical verdict: **Supported**, **Contradictory**, or **Low Confidence**.
