@@ -1083,10 +1083,18 @@ class BaselineRAGPipeline:
         
         # Load configuration
         config = Config(config_path)
+
+        config_base_dir = Path(config_path).resolve().parent
+
+        def _resolve_config_path(path_like: str) -> Path:
+            candidate = Path(path_like)
+            if candidate.is_absolute():
+                return candidate
+            return config_base_dir / candidate
         
         # Get paths with strategy substitution
-        index_path = Path(config.data.faiss_index.format(strategy=strategy))
-        metadata_path = Path(config.data.index_metadata.format(strategy=strategy))
+        index_path = _resolve_config_path(config.data.faiss_index.format(strategy=strategy))
+        metadata_path = _resolve_config_path(config.data.index_metadata.format(strategy=strategy))
         
         # Check if index exists
         if not index_path.exists():
@@ -1122,10 +1130,10 @@ class BaselineRAGPipeline:
         
         elif retrieval_mode == 'bm25':
             # BM25 sparse retrieval only
-            corpus_path = Path('data/processed') / f'wiki_chunks_{strategy}.jsonl'
-            bm25_index_path = Path('data/indexes') / strategy / 'bm25_index.pkl'
+            corpus_path = _resolve_config_path(f'data/processed/wiki_chunks_{strategy}.jsonl')
+            bm25_index_path = _resolve_config_path(f'data/indexes/{strategy}/bm25_index.pkl')
             
-            logger.info(f"Initializing BM25Retriever")
+            logger.info("Initializing BM25Retriever")
             retriever = BM25Retriever(
                 corpus_path=str(corpus_path),
                 index_path=str(bm25_index_path),
@@ -1136,7 +1144,7 @@ class BaselineRAGPipeline:
         elif retrieval_mode == 'hybrid':
             # Hybrid: combine dense and BM25
             # Initialize dense retriever
-            logger.info(f"Initializing DenseRetriever for hybrid mode")
+            logger.info("Initializing DenseRetriever for hybrid mode")
             dense_retriever = DenseRetriever(
                 index_path=str(index_path),
                 metadata_path=str(metadata_path),
@@ -1145,10 +1153,10 @@ class BaselineRAGPipeline:
             )
             
             # Initialize BM25 retriever
-            corpus_path = Path('data/processed') / f'wiki_chunks_{strategy}.jsonl'
-            bm25_index_path = Path('data/indexes') / strategy / 'bm25_index.pkl'
+            corpus_path = _resolve_config_path(f'data/processed/wiki_chunks_{strategy}.jsonl')
+            bm25_index_path = _resolve_config_path(f'data/indexes/{strategy}/bm25_index.pkl')
             
-            logger.info(f"Initializing BM25Retriever for hybrid mode")
+            logger.info("Initializing BM25Retriever for hybrid mode")
             bm25_retriever = BM25Retriever(
                 corpus_path=str(corpus_path),
                 index_path=str(bm25_index_path),
@@ -1157,7 +1165,7 @@ class BaselineRAGPipeline:
             )
             
             # Initialize hybrid retriever
-            logger.info(f"Initializing HybridRetriever")
+            logger.info("Initializing HybridRetriever")
             retriever = HybridRetriever(
                 dense_retriever=dense_retriever,
                 bm25_retriever=bm25_retriever,
