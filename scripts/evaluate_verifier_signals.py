@@ -66,6 +66,11 @@ def _variant_patch(name: str) -> dict[str, Any]:
     if name in {"baseline", "full_verifier"}:
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
 
+    if name == "full_verifier_lettuce":
+        patch = _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
+        patch.setdefault("verification", {}).setdefault("nli", {})["backend"] = "lettucedetect"
+        return patch
+
     if name == "verifier_intrinsic_only":
         return {
             "verification": {
@@ -107,6 +112,22 @@ def _variant_patch(name: str) -> dict[str, Any]:
             },
             **deepcopy(all_mitigation_disabled),
         }
+
+    if name == "verifier_nli_only_lettuce":
+        patch = {
+            "verification": {
+                "enabled": True,
+                "modules": {
+                    "intrinsic": False,
+                    "grounded": False,
+                    "nli": True,
+                    "self_agreement": False,
+                },
+            },
+            **deepcopy(all_mitigation_disabled),
+        }
+        patch.setdefault("verification", {}).setdefault("nli", {})["backend"] = "lettucedetect"
+        return patch
 
     if name == "verifier_self_agreement_only":
         return {
@@ -457,17 +478,21 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=[
             "full_verifier",
+            "full_verifier_lettuce",
             "verifier_intrinsic_only",
             "verifier_grounded_only",
             "verifier_nli_only",
+            "verifier_nli_only_lettuce",
             "verifier_self_agreement_only",
         ],
         choices=[
             "baseline",
             "full_verifier",
+            "full_verifier_lettuce",
             "verifier_intrinsic_only",
             "verifier_grounded_only",
             "verifier_nli_only",
+            "verifier_nli_only_lettuce",
             "verifier_self_agreement_only",
         ],
         help="Evaluation variants to run"
