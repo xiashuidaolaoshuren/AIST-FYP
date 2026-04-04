@@ -1085,16 +1085,55 @@ class BaselineRAGPipeline:
         config = Config(config_path)
 
         config_base_dir = Path(config_path).resolve().parent
+        project_root_dir = Path(__file__).resolve().parents[2]
 
-        def _resolve_config_path(path_like: str) -> Path:
+        def _resolve_config_path(path_like: str, *, label: str = "path") -> Path:
             candidate = Path(path_like)
             if candidate.is_absolute():
+                logger.info(f"Resolved {label} (absolute): {candidate}")
                 return candidate
-            return config_base_dir / candidate
+
+            search_candidates = [
+                Path.cwd() / candidate,
+                project_root_dir / candidate,
+                config_base_dir / candidate,
+            ]
+
+            # Deduplicate while preserving priority order.
+            deduped: List[Path] = []
+            seen: set[str] = set()
+            for item in search_candidates:
+                key = str(item.resolve(strict=False))
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(item)
+
+            for item in deduped:
+                if item.exists():
+                    logger.info(f"Resolved {label}: {item}")
+                    return item
+
+            # Keep backwards-compatible default behavior rooted at cwd/project root
+            # while still supporting config-directory fallback when present.
+            fallback = deduped[0]
+            logger.warning(
+                "Could not find existing %s from candidates: %s. Falling back to %s",
+                label,
+                [str(p) for p in deduped],
+                str(fallback),
+            )
+            return fallback
         
         # Get paths with strategy substitution
-        index_path = _resolve_config_path(config.data.faiss_index.format(strategy=strategy))
-        metadata_path = _resolve_config_path(config.data.index_metadata.format(strategy=strategy))
+        index_path = _resolve_config_path(
+            config.data.faiss_index.format(strategy=strategy),
+            label="faiss_index",
+        )
+        metadata_path = _resolve_config_path(
+            config.data.index_metadata.format(strategy=strategy),
+            label="index_metadata",
+        )
         
         # Check if index exists
         if not index_path.exists():
@@ -1130,8 +1169,14 @@ class BaselineRAGPipeline:
         
         elif retrieval_mode == 'bm25':
             # BM25 sparse retrieval only
-            corpus_path = _resolve_config_path(f'data/processed/wiki_chunks_{strategy}.jsonl')
-            bm25_index_path = _resolve_config_path(f'data/indexes/{strategy}/bm25_index.pkl')
+            corpus_path = _resolve_config_path(
+                f'data/processed/wiki_chunks_{strategy}.jsonl',
+                label='bm25_corpus',
+            )
+            bm25_index_path = _resolve_config_path(
+                f'data/indexes/{strategy}/bm25_index.pkl',
+                label='bm25_index',
+            )
             
             logger.info("Initializing BM25Retriever")
             retriever = BM25Retriever(
@@ -1153,8 +1198,14 @@ class BaselineRAGPipeline:
             )
             
             # Initialize BM25 retriever
-            corpus_path = _resolve_config_path(f'data/processed/wiki_chunks_{strategy}.jsonl')
-            bm25_index_path = _resolve_config_path(f'data/indexes/{strategy}/bm25_index.pkl')
+            corpus_path = _resolve_config_path(
+                f'data/processed/wiki_chunks_{strategy}.jsonl',
+                label='hybrid_bm25_corpus',
+            )
+            bm25_index_path = _resolve_config_path(
+                f'data/indexes/{strategy}/bm25_index.pkl',
+                label='hybrid_bm25_index',
+            )
             
             logger.info("Initializing BM25Retriever for hybrid mode")
             bm25_retriever = BM25Retriever(
