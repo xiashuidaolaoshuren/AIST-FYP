@@ -289,6 +289,9 @@ verification:
   
   # NLI (Natural Language Inference) Detector Configuration (Month 4, Task 3)
   nli:
+    # NLI backend implementation. Options: "deberta" | "lettucedetect"
+    backend: "deberta"
+
     # Pre-trained NLI model from Hugging Face
     # DeBERTa-v3-large fine-tuned on MNLI, FEVER, ANLI, LingNLI, and WANLI datasets
     model_name: "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"

@@ -23,6 +23,7 @@ from src.utils.logger import setup_logger
 from src.verification.intrinsic_uncertainty import IntrinsicUncertaintyDetector
 from src.verification.retrieval_grounded import RetrievalGroundedDetector
 from src.verification.nli_detector import NLIDetector
+from src.verification.lettuce_detector import LettuceDetectDetector
 from src.verification.self_agreement import SelfAgreementDetector
 
 
@@ -143,6 +144,7 @@ class VerifierHub:
             )
             nli_cfg = getattr(config.verification, 'nli', None)
             self.bidirectional_nli = bool(getattr(nli_cfg, 'bidirectional', False))
+            self.nli_backend = str(getattr(nli_cfg, 'backend', 'deberta')).strip().lower()
         else:
             self.verify_all_evidence = False
             self.aggregation_method = 'max'
@@ -160,6 +162,7 @@ class VerifierHub:
             self.min_dense_score_for_contradiction = 0.0
             self.strict_logits = False
             self.bidirectional_nli = False
+            self.nli_backend = 'deberta'
 
         # Per-module enable flags (default: all enabled)
         self.module_flags = self._resolve_module_flags()
@@ -195,8 +198,12 @@ class VerifierHub:
             # Initialize NLI Detector (Month 4, Task 3)
             if self.module_flags['nli']:
                 try:
-                    self.nli_detector = NLIDetector(config)
-                    self.logger.info("✓ NLIDetector initialized")
+                    if self.nli_backend == 'lettucedetect':
+                        self.nli_detector = LettuceDetectDetector(config)
+                        self.logger.info("✓ LettuceDetectDetector initialized")
+                    else:
+                        self.nli_detector = NLIDetector(config)
+                        self.logger.info("✓ NLIDetector initialized")
                 except Exception as e:
                     self.logger.warning(f"NLIDetector initialization failed: {str(e)}")
                     self.logger.warning("Continuing without NLI detector")

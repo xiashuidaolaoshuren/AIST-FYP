@@ -33,6 +33,7 @@ evaluation = [
   "numpy==1.26.4",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
+  "lettucedetect>=0.2.0",
   "openai==1.16.2",
   "httpx>=0.23.0,<0.28.0",
   "configobj==5.0.9",

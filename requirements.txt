@@ -60,6 +60,7 @@ pyarrow==21.0.0
 
 # Month 5: Environment and API support
 python-dotenv>=1.0.0
+lettucedetect>=0.2.0
 
 # CiteEval single-venv support
 configobj==5.0.9

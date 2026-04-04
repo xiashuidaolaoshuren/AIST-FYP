@@ -20,6 +20,7 @@ Aggregation components:
 from src.verification.intrinsic_uncertainty import IntrinsicUncertaintyDetector
 from src.verification.retrieval_grounded import RetrievalGroundedDetector
 from src.verification.nli_detector import NLIDetector
+from src.verification.lettuce_detector import LettuceDetectDetector
 from src.verification.self_agreement import SelfAgreementDetector
 from src.verification.verifier_hub import VerifierHub
 from src.verification.rule_based_aggregator import SignalNormalizer, RuleBasedAggregator
@@ -28,6 +29,7 @@ __all__ = [
     'IntrinsicUncertaintyDetector',
     'RetrievalGroundedDetector',
     'NLIDetector',
+    'LettuceDetectDetector',
     'SelfAgreementDetector',
     'VerifierHub',
     'SignalNormalizer',

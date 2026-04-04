@@ -78,6 +78,11 @@ def _variant_patch(name: str) -> dict[str, Any]:
     if name == "mitigation_all":
         return _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_enabled))
 
+    if name == "lettuce_hybrid":
+        patch = _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
+        patch.setdefault("verification", {}).setdefault("nli", {})["backend"] = "lettucedetect"
+        return patch
+
     if name in {"mitigation_filter_only", "filter_only"}:
         return {
             **deepcopy(all_verifiers_enabled),
@@ -665,6 +670,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=[
             "verifier_only",
+            "lettuce_hybrid",
             "filter_only",
             "rerank_only",
             "reprompt_only",
@@ -674,6 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
             "baseline",
             "verifier_only",
             "full_verifier",
+            "lettuce_hybrid",
             "mitigation_all",
             "mitigation_filter_only",
             "mitigation_rerank_only",
