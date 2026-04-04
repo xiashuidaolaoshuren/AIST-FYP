@@ -9,6 +9,7 @@ Modules:
 """
 
 from .ragtruth_evaluator import RAGTruthEvaluator
+from .composite_scorer import CompositeScorer
 
 class RagasEvaluator:
     """Compatibility stub for removed Ragas integration."""
@@ -20,4 +21,4 @@ class RagasEvaluator:
         )
 
 
-__all__ = ['RagasEvaluator', 'RAGTruthEvaluator']
+__all__ = ['RagasEvaluator', 'RAGTruthEvaluator', 'CompositeScorer']

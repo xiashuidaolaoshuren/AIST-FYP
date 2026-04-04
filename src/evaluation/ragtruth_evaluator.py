@@ -64,6 +64,7 @@ from src.utils.data_structures import ClaimDecision, Claim, EvidenceChunk
 from src.generation.claim_extractor import extract_claims
 from src.mitigation.orchestrator import MitigationOrchestrator
 from src.data_processing.text_chunker import chunk_data2txt
+from .composite_scorer import CompositeScorer
 
 
 QA_EPISTEMIC_HEDGE_PATTERN = re.compile(
@@ -250,6 +251,7 @@ class RAGTruthEvaluator:
         self.mitigation_orchestrator = None
         
         # Get benchmark directory from config
+        benchmark_config = None
         if hasattr(config, 'evaluation') and hasattr(config.evaluation, 'benchmarks'):
             if hasattr(config.evaluation.benchmarks, 'ragtruth'):
                 benchmark_config = config.evaluation.benchmarks.ragtruth
@@ -1102,6 +1104,54 @@ class RAGTruthEvaluator:
         self.lc_avg_contradict_prob_threshold = float(
             np.clip(self.lc_avg_contradict_prob_threshold, 0.0, 1.0)
         )
+
+        # Optional composite scorer override policy (disabled by default).
+        self.composite_scorer_enabled = False
+        self.composite_scorer_policy = 'replace_data2txt'
+        self.composite_scorer = None
+        self.composite_scorer_model_path = None
+        if benchmark_config is not None:
+            self.composite_scorer_enabled = bool(
+                getattr(benchmark_config, 'composite_scorer_enabled', False)
+            )
+            raw_policy = getattr(benchmark_config, 'composite_scorer_policy', 'replace_data2txt')
+            if isinstance(raw_policy, str):
+                self.composite_scorer_policy = raw_policy.strip().lower()
+            raw_model_path = getattr(benchmark_config, 'composite_scorer_model_path', '')
+            if isinstance(raw_model_path, str) and raw_model_path.strip():
+                self.composite_scorer_model_path = Path(raw_model_path.strip())
+
+        valid_composite_policies = {
+            'replace_data2txt',
+            'replace_summary',
+            'replace_both',
+            'or_data2txt',
+            'and_data2txt',
+        }
+        if self.composite_scorer_policy not in valid_composite_policies:
+            self.logger.warning(
+                "Invalid composite_scorer_policy '%s'; defaulting to replace_data2txt",
+                self.composite_scorer_policy,
+            )
+            self.composite_scorer_policy = 'replace_data2txt'
+
+        if self.composite_scorer_enabled:
+            if self.composite_scorer_model_path is None:
+                self.logger.warning(
+                    'composite_scorer_enabled=true but composite_scorer_model_path is empty; disabling composite scorer.'
+                )
+                self.composite_scorer_enabled = False
+            else:
+                try:
+                    self.composite_scorer = CompositeScorer.from_json(self.composite_scorer_model_path)
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to load composite scorer model '%s': %s. Composite scorer disabled.",
+                        self.composite_scorer_model_path,
+                        exc,
+                    )
+                    self.composite_scorer_enabled = False
+                    self.composite_scorer = None
             
         # Validate benchmark directory exists
         if not self.benchmark_dir.exists():
@@ -1137,6 +1187,12 @@ class RAGTruthEvaluator:
             self.mitigation_enabled,
             self.mitigation_module_flags,
         )
+        self.logger.info(
+            "Composite scorer: enabled=%s policy=%s model_path=%s",
+            self.composite_scorer_enabled,
+            self.composite_scorer_policy,
+            self.composite_scorer_model_path,
+        )
 
         if self.mitigation_enabled:
             try:
@@ -1161,6 +1217,55 @@ class RAGTruthEvaluator:
             task_type,
             self.min_claims_for_lc_escalation,
         )
+
+    def _apply_composite_policy(
+        self,
+        task_type: str,
+        detected_hallucination: bool,
+        sample_signals: Dict[str, Any],
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Apply optional composite scorer decision policy for selected tasks."""
+        meta = {
+            'enabled': bool(self.composite_scorer_enabled),
+            'policy': self.composite_scorer_policy,
+            'applied': False,
+            'score': None,
+            'threshold': None,
+            'predicted_hallucination': None,
+        }
+        if not self.composite_scorer_enabled or self.composite_scorer is None:
+            return detected_hallucination, meta
+
+        comp = self.composite_scorer.predict_sample(task_type, sample_signals)
+        if comp is None:
+            return detected_hallucination, meta
+
+        comp_detected = bool(comp.get('predicted_hallucination', False))
+        meta.update({
+            'applied': True,
+            'score': comp.get('score'),
+            'threshold': comp.get('threshold'),
+            'predicted_hallucination': comp_detected,
+        })
+
+        policy = self.composite_scorer_policy
+        replace_map = {
+            'replace_data2txt': {'Data2txt'},
+            'replace_summary': {'Summary'},
+            'replace_both': {'Data2txt', 'Summary'},
+        }
+        if policy in replace_map:
+            return (comp_detected if task_type in replace_map[policy] else detected_hallucination), meta
+
+        if task_type == 'Data2txt' and policy in {'or_data2txt', 'and_data2txt'}:
+            decision = (
+                (detected_hallucination or comp_detected)
+                if policy == 'or_data2txt'
+                else (detected_hallucination and comp_detected)
+            )
+            return decision, meta
+
+        return detected_hallucination, meta
     
     def run_evaluation(
         self,
@@ -2530,6 +2635,23 @@ class RAGTruthEvaluator:
         )
         detected_hallucination = pre_block_detected_hallucination and not qa_pure_lc_block
 
+        composite_signals = {
+            'max_contradict_prob': max_contradict_prob,
+            'avg_coverage_score_all': avg_coverage_score_all,
+            'low_confidence_ratio': low_confidence_ratio,
+            'avg_contradict_prob_low_conf': avg_contradict_prob_low_conf,
+            'avg_support_prob_low_conf': avg_support_prob_low_conf,
+            'contradictory_count': contradictory_count,
+            'num_claims': len(claim_decisions),
+            'low_coverage_ratio': low_coverage_ratio,
+            'low_confidence_count': low_confidence_count,
+        }
+        detected_hallucination, composite_meta = self._apply_composite_policy(
+            task_type=task_type,
+            detected_hallucination=detected_hallucination,
+            sample_signals=composite_signals,
+        )
+
         trigger_paths: List[str] = []
         if contradictory_trigger:
             trigger_paths.append('contradictory')
@@ -2539,6 +2661,11 @@ class RAGTruthEvaluator:
             trigger_paths.append('data2txt_low_confidence')
         if lc_avg_contradict_trigger:
             trigger_paths.append('lc_avg_contradict')
+        if (
+            composite_meta.get('applied')
+            and composite_meta.get('predicted_hallucination')
+        ):
+            trigger_paths.append('composite')
         if not trigger_paths:
             trigger_paths.append('none')
 
@@ -2608,6 +2735,12 @@ class RAGTruthEvaluator:
             'summary_single_contra_low_cov_guard_block': summary_single_contra_low_cov_guard_block,
             'lc_avg_contradict_task_block': task_type.upper() in self.disable_lc_avg_contradict_for_tasks,
             'detected_pre_qa_block': pre_block_detected_hallucination,
+            'composite_scorer_enabled': composite_meta.get('enabled', False),
+            'composite_scorer_policy': composite_meta.get('policy'),
+            'composite_scorer_applied': composite_meta.get('applied', False),
+            'composite_scorer_score': composite_meta.get('score'),
+            'composite_scorer_threshold': composite_meta.get('threshold'),
+            'composite_scorer_predicted_hallucination': composite_meta.get('predicted_hallucination'),
             'detection_trigger_paths': trigger_paths,
             'detection_trigger_path': primary_trigger_path,
             'mitigation_enabled': mitigation_runtime_enabled,
