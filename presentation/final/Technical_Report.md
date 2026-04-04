@@ -277,6 +277,170 @@ def aggregate(self, aggregate_input: Dict) -> Verdict:
 
 ---
 
+## 4. The Mitigation Module
+
+Once the `VerifierHub` has classified the claims within a generated response, the system enters its active correction phase. Our architecture fundamentally differs from traditional "generate-and-hope" RAG systems by implementing a robust `MitigationOrchestrator`. This module enforces safety policies without requiring computationally expensive model retraining or reinforcement learning, relying instead on programmatic feedback loops and objective-aware routing.
+
+### 4.1 Mitigation Policy Router
+
+**Core Idea & Inspiration:**  
+Not all factual errors require the same level of intervention. The **Mitigation Policy Router** acts as an intelligent gating system that dictates *which* corrective actions to take based on the density and severity of the detected hallucinations. Inspired by cascading fallback mechanisms in production ML systems, it evaluates the proportion of contradictory or low-confidence claims to trigger appropriate responses (e.g., if a response is slightly unsure, reranking might suffice; if it actively contradicts the source, hard filtering is required).
+
+*   **Technical Highlights:**
+    *   **Objective-Aware Routing:** Configurable thresholds based on current evaluation goals (e.g., a "balanced" user experience vs. absolute factual safety for the RAGTruth benchmark [10]).
+    *   **Cascading Priorities:** Actions are resolved hierarchically. Low confidence primarily triggers reranking to improve the context, whereas high contradiction triggers the reprompter or hard filter.
+
+*   **Input:** A list of `ClaimDecision` objects (the output from the aggregator).
+*   **Method:** The engine calculates statistical ratios of `Contradictory` and `Low Confidence` occurrences against predefined thresholds in `config.yaml` to authorize specific mitigation actions (`"rerank"`, `"reprompt"`, `"filter"`).
+*   **Output:** A resolved `Set[str]` of active mitigation policies to apply.
+
+**Code Example (`src/mitigation/policy_router.py`):**
+```python
+def resolve_actions(self, decisions: List[ClaimDecision]) -> Set[str]:
+    # Calculate failure ratios
+    total = len(decisions)
+    contradictory_ratio = len([d for d in decisions if d.status == "Contradictory"]) / total
+    low_conf_ratio = len([d for d in decisions if d.status == "Low Confidence"]) / total
+
+    allowed_actions = set()
+    
+    # 1. Rerank if confidence is too low overall
+    if low_conf_ratio >= self.thresholds.rerank_low_confidence_ratio:
+        allowed_actions.add("rerank")
+        
+    # 2. Filter if contradiction ratio is too critically high to salvage
+    if contradictory_ratio >= self.thresholds.filter_contradiction_ratio:
+        allowed_actions.add("filter")
+        
+    # 3. Otherwise, try reprompting the LLM to self-correct
+    elif contradictory_ratio > 0 or low_conf_ratio > 0:
+        allowed_actions.add("reprompt")
+        
+    return allowed_actions
+```
+
+### 4.2 Evidence Re-Ranker
+
+**Core Idea & Inspiration:**  
+Often, hallucination occurs not because the knowledge base lacks the fact, but because the retriever positioned the critical evidence chunk too low for the generator to attend to it properly. Re-ranking combines the initial semantic retrieval score with the **backward-flowing verification score** to surface the most factually supportive context for subsequent generation attempts.
+
+*   **Technical Highlights:**
+    *   **Feedback Integration:** Uses specific verifier feedback—such as the NLI entailment signal and entity grounding metrics—to construct a $Score_{verification}$.
+    *   **Weighted Fusion:** It updates ranking using the formula: $Score_{final} = \alpha \times Score_{retrieval} + \beta \times Score_{verification}$.
+
+*   **Input:** Original `EvidenceChunk`s and their corresponding verification `signal_map`.
+*   **Method:** The module iterates through the evidence, calculating a new unified score that heavily weights chunks which proved logically supportive (high NLI score) or linguistically dense (high entity overlap) during the verification phase.
+*   **Output:** A re-ordered list of `EvidenceChunk`s, pushing factually critical information to the top.
+
+**Code Example (`src/mitigation/re_ranker.py`):**
+```python
+def rerank(self, evidence_list: List[EvidenceChunk], verification_signals: Dict[str, VerifierSignal]) -> List[EvidenceChunk]:
+    # 1. Compute final weighted scores for each chunk
+    scored_evidence = []
+    for chunk in evidence_list:
+        # Retrieval quality (Dense FAISS score)
+        retrieval_score = chunk.score_dense
+        
+        # Verification feedback (from NLI and Entity Coverage)
+        signal = verification_signals.get(f"{chunk.doc_id}#{chunk.sent_id}")
+        if signal:
+            verification_score = (signal.coverage['entities'] + signal.nli['entailment']) / 2
+        else:
+            verification_score = self.fallback_score
+            
+        # Weighted Fusion: final_score = α × retrieval + β × verification
+        final_score = (self.alpha * retrieval_score) + (self.beta * verification_score)
+        scored_evidence.append((chunk, final_score))
+    
+    # 2. Sort evidence by final_score (highest first)
+    scored_evidence.sort(key=lambda x: x[1], reverse=True)
+    return [item[0] for item in scored_evidence]
+```
+
+### 4.3 Generator Re-prompting
+
+**Core Idea & Inspiration:**  
+Drawing direct inspiration from **Chain-of-Verification (CoVe)** [12] and **Self-RAG** [7], the Re-prompter leverages the LLM's own capacity for self-correction. If an LLM is made explicitly aware of its specific logical contradictions through a systemic feedback loop, it can often rewrite its answer correctly. We feed the verifier's explicit, claim-by-claim critique back into the LLM context.
+
+*   **Technical Highlights:**
+    *   **Critique Injection:** The new feedback prompt explicitly lists which previous claims were defined as `Supported`, `Contradictory`, or `Low Confidence`.
+    *   **Conservative Decoding:** For the regeneration pass, the generator suppresses its temperature parameter (e.g., $\tau=0.3$) to force stricter adherence and lower token-level entropy.
+
+*   **Input:** The original `query`, the flawed `answer_text`, and the detailed verification `decisions`.
+*   **Method:** Constructs a `feedback_prompt` detailing the exact reasoning errors and asks the LLM to regenerate the answer by omitting or repairing the contradicted claims.
+*   **Output:** A newly generated, factually improved text response.
+
+**Code Example (`src/mitigation/reprompt.py`):**
+```python
+def reprompt(self, query: str, answer: str, decisions: List[ClaimDecision]) -> Dict:
+    # Formulate explicit critique
+    critique = "\n".join([f"- Claim: '{d.claim.text}' | Status: {d.status}" 
+                          for d in decisions])
+    
+    feedback_prompt = f"""
+    Previous Output: {answer}
+    Verification Feedback:
+    {critique}
+    
+    Please rewrite the answer to the query '{query}' by removing Contradictory 
+    claims and relying STRICTLY on the retrieved context.
+    """
+    
+    # Generate new response with conservative temperature
+    corrected = self.generator.generate(
+        prompt=feedback_prompt, 
+        temperature=0.3, # Stricter adherence
+        max_new_tokens=512
+    )
+    return {'final_answer': corrected['text'], 'improved': True}
+```
+
+### 4.4 Claim Filtering (The Final Safeguard)
+
+**Core Idea & Inspiration:**  
+As a final, absolute safeguard against misinformation reaching the user, any claim that survives reranking and reprompting but is still rigorously classified as `Contradictory` must be programmatically excised from the text. This guarantees factual alignment above narrative fluency. 
+
+*   **Technical Highlights:**
+    *   **Span String Removal:** Operates on the exact character indices captured during the initial claim extraction phase.
+    *   **Reverse-Order Deletion:** Suspicious claims are processed and deleted from the end of the text to the beginning to prevent character-index shift corruption in the string buffer.
+
+*   **Input:** The final generated text, the list of string boundaries, and their respective `decisions`.
+*   **Method:** Iterates backwards through the claims array. If a decision is `Contradictory`, the script replaces the exact character span with an omission placeholder (e.g., `[Claim removed: Contradictory]`) or removes it seamlessly.
+*   **Output:** The final, guaranteed-safe `final_answer` text string and metadata tracking the filtered counts.
+
+**Code Example (`src/mitigation/claim_filter.py`):**
+```python
+def filter_answer(self, answer_text: str, claims: List[Claim], decisions: List[ClaimDecision]) -> Tuple[str, int]:
+    # 1. Identity contradictory claims
+    contradictory_ids = [d.claim_id for d in decisions if d.status == 'Contradictory']
+    
+    # 2. Process in REVERSE order to avoid index corruption
+    # Sort claims by their start index in the answer string
+    sorted_claims = sorted(claims, key=lambda c: c.answer_char_span[0], reverse=True)
+    
+    filtered_text = answer_text
+    removed_count = 0
+    
+    for claim in sorted_claims:
+        if claim.claim_id in contradictory_ids:
+            start, end = claim.answer_char_span
+            # Replace span with transparent placeholder
+            filtered_text = filtered_text[:start] + self.placeholder + filtered_text[end:]
+            removed_count += 1
+            
+    return filtered_text, removed_count
+```
+
+---
+
+## 5. Final Conclusion & Future Work
+
+Our four-stage system proves that hallucination mitigation does not require constant fine-tuning of massive generator models. By pairing open-source retrieval (FAISS/BM25) with a rigorous, trainless verifier (combining Intrinsic Entropy, NLI Cross-Encoders, and Self-Consistency), and coupling that with a proactive Mitigation Orchestrator (Reranking, Reprompting, and Filtering), we have established a highly interpretable, reliable, and grounded NLP pipeline.
+
+Future iterations of this project will explore substituting zero-shot components with task-specific supervised verifiers (via the CiteEval benchmark [14]) and designing an optimized end-user UI for reviewing generated citations and claim verdicts interactively.
+
+---
+
 ## References
 
 [1] Y. Zhang *et al.*, "A Survey on Hallucination in Large Language Models," *arXiv preprint arXiv:2311.03687*, 2023.
