@@ -8,9 +8,9 @@ dependencies = [
   "tqdm==4.67.1",
   "requests==2.32.5",
   "python-dotenv>=1.0.0",
-  "torch==2.5.1+cu121",
-  "torchvision==0.20.1+cu121",
-  "torchaudio==2.5.1+cu121",
+  "torch==2.9.0+cu126",
+  "torchvision==0.24.0+cu126",
+  "torchaudio==2.9.0+cu126",
   "transformers==4.56.2",
   "spacy==3.7.2",
 ]
@@ -21,7 +21,7 @@ preprocessing = [
   "sentence-transformers==5.1.1",
   "faiss-cpu==1.12.0",
   "rank-bm25==0.2.2",
-  "numpy==1.26.4",
+  "numpy>=2.2.2",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
   "wikiextractor==3.0.6",
@@ -30,11 +30,11 @@ preprocessing = [
 ]
 
 evaluation = [
-  "numpy==1.26.4",
+  "numpy>=2.2.2",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
-  "lettucedetect>=0.2.0",
-  "openai==1.16.2",
+  "lettucedetect>=0.1.6",
+  "openai>=1.66.3",
   "httpx>=0.23.0,<0.28.0",
   "configobj==5.0.9",
   "nltk==3.9.1",
@@ -42,10 +42,10 @@ evaluation = [
 
 mitigation = [
   "sentence-transformers==5.1.1",
-  "numpy==1.26.4",
+  "numpy>=2.2.2",
   "pandas==2.3.3",
   "scikit-learn==1.7.2",
-  "openai==1.16.2",
+  "openai>=1.66.3",
   "httpx>=0.23.0,<0.28.0",
   "configobj==5.0.9",
   "nltk==3.9.1",
@@ -55,11 +55,11 @@ mitigation = [
 index-strategy = "unsafe-best-match"
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu121" }]
-torchvision = [{ index = "pytorch-cu121" }]
-torchaudio = [{ index = "pytorch-cu121" }]
+torch = [{ index = "pytorch-cu126" }]
+torchvision = [{ index = "pytorch-cu126" }]
+torchaudio = [{ index = "pytorch-cu126" }]
 
 [[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
