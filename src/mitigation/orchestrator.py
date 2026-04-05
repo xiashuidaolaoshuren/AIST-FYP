@@ -31,6 +31,17 @@ class MitigationOrchestrator:
         self.enabled = bool(mitigation_cfg.get("enabled", False))
         self.router = MitigationPolicyRouter.from_config(config)
 
+        # When True, a claim marked Contradictory by the original (pre-rerank)
+        # verification will stay Contradictory even if re-ranking later promotes
+        # more entailing evidence.  This prevents the filter from collapsing when
+        # reranking inadvertently reduces apparent contradiction scores.
+        reranker_cfg = mitigation_cfg.get("reranker", {})
+        if not isinstance(reranker_cfg, dict):
+            reranker_cfg = {}
+        self.preserve_prerank_contradictions = bool(
+            reranker_cfg.get("preserve_prerank_contradictions", True)
+        )
+
         self.claim_filter = None
         self.evidence_reranker = None
         self.reprompter = None
@@ -77,6 +88,10 @@ class MitigationOrchestrator:
 
         planned_actions = self.router.resolve_actions(decisions, objective_override)
 
+        # Snapshot decisions before any re-ranking so we can restore Contradictory
+        # verdicts post-rerank (see preserve_prerank_contradictions).
+        prerank_decisions = list(decisions)
+
         if (
             "rerank" in planned_actions
             and self.evidence_reranker
@@ -108,6 +123,21 @@ class MitigationOrchestrator:
             if reranked_any:
                 actions.append("rerank")
             signals, decisions = self._verify_and_decide(claim_records)
+
+            # Preserve pre-rerank Contradictory verdicts: re-ranking can reduce
+            # apparent NLI contradiction scores by surfacing more-entailing evidence,
+            # but claims truly contradicted by the original evidence should still be
+            # filtered.  Only merge when lengths match (safety guard).
+            if (
+                self.preserve_prerank_contradictions
+                and prerank_decisions
+                and len(prerank_decisions) == len(decisions)
+            ):
+                decisions = [
+                    prerank_d if prerank_d.status == "Contradictory" else new_d
+                    for prerank_d, new_d in zip(prerank_decisions, decisions)
+                ]
+
             planned_actions = self.router.resolve_actions(decisions, objective_override)
 
         if (

@@ -455,6 +455,14 @@ mitigation:
     # Used for evidence chunks without verification signals
     # 0.5 = neutral (neither good nor bad)
     fallback_score: 0.5
+
+    # When true, a claim flagged as Contradictory by the original (pre-rerank)
+    # verification retains that verdict even if re-ranking later surfaces more
+    # entailing evidence.  This prevents the filter from collapsing when
+    # re-ranking reduces apparent NLI contradiction scores for genuinely
+    # contradictory claims.  Set to false to restore the original behaviour
+    # where post-rerank verification fully controls filtering decisions.
+    preserve_prerank_contradictions: true
   
   # Claim Filter Configuration
   filter:

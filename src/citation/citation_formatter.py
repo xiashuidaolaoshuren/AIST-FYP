@@ -140,9 +140,21 @@ class CitationFormatter:
 
         if verifier_signals:
             for signal in verifier_signals:
-                nli_scores = getattr(signal, "nli", {}) or {}
+                # Support both VerifierSignal dataclass objects and plain dicts
+                # (dicts occur when signals are serialised via .to_dict() before
+                # being stored in pipeline_output["verifier_signals"]).
+                if isinstance(signal, dict):
+                    nli_scores = signal.get("nli", {}) or {}
+                    signal_claim_id = signal.get("claim_id", "")
+                    signal_doc_id = signal.get("doc_id", "")
+                    signal_sent_id = signal.get("sent_id", 0)
+                else:
+                    nli_scores = getattr(signal, "nli", {}) or {}
+                    signal_claim_id = signal.claim_id
+                    signal_doc_id = signal.doc_id
+                    signal_sent_id = signal.sent_id
                 entailment_score = nli_scores.get("entailment", nli_scores.get("entail", 0.0))
-                nli_lookup[(signal.claim_id, signal.doc_id, signal.sent_id)] = float(entailment_score)
+                nli_lookup[(signal_claim_id, signal_doc_id, signal_sent_id)] = float(entailment_score)
         
         for claim in sorted_claims:
             claim_id = claim.claim_id

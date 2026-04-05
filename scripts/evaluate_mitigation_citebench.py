@@ -589,6 +589,13 @@ def _apply_mitigation_with_optional_precomputed(
 
     signals = mitigation_result.get("signals") or []
     claim_records = mitigation_result.get("claim_records") or []
+
+    # Propagate verifier signals so format_with_citations can rank per-claim
+    # evidence by NLI entailment rather than falling back to score_dense.
+    # This fixes the CR regression caused by re-ranking discarding NLI information.
+    if signals:
+        pipeline_output["verifier_signals"] = signals
+
     nli_values: list[float] = []
     entropy_values: list[float] = []
     for signal in signals:
