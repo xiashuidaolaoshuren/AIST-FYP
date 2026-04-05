@@ -12,6 +12,7 @@ import sys
 import json
 from datetime import datetime
 from pathlib import Path
+from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -273,37 +274,43 @@ def main():
         strategy = ask_user_to_choose_strategy(available_strategies)
     
     # Step 1: Load configuration
-    print("\n📋 Loading configuration...")
+    setup_steps = [
+        "Loading configuration",
+        "Initializing RAG Pipeline",
+        "Initializing VerifierHub",
+        "Initializing RuleBasedAggregator",
+        "Setting up RePrompter",
+        "Creating Gradio UI",
+    ]
+    pbar = tqdm(total=len(setup_steps), desc="🔧 Setup progress", ascii=False, unit="step")
+    
     try:
         config = Config("config.yaml")
-        print("✓ Configuration loaded successfully\n")
+        pbar.update(1)
+        pbar.set_description_str("🔧 Setup progress | ✓ Config loaded")
         
         if 'aggregator' not in config.get('verification', {}):
             print("\n⚠️  WARNING: verification.aggregator section missing in config.yaml")
             print("   The full pipeline requires aggregator configuration.")
+            pbar.close()
             return
-        
-        print("✓ Verification configuration validated\n")
     except Exception as e:
+        pbar.close()
         print(f"❌ ERROR loading configuration: {e}")
         print("\nPlease ensure config.yaml exists in the project root.")
         return
     
     # Step 2: Initialize RAG pipeline
-    print("🔧 Initializing RAG Pipeline...")
-    print("   This includes:")
-    print("   - DenseRetriever (loading FAISS index and embeddings)")
-    print("   - GeneratorWrapper (loading language model)")
-    print("   - VerifierHub (loading all detectors)")
-    print()
-    
+    pbar.set_description_str("🔧 Setup progress | Loading RAG Pipeline")
     try:
         pipeline = BaselineRAGPipeline.from_config(
             config_path="config.yaml",
             strategy=strategy
         )
-        print("✓ RAG Pipeline initialized successfully\n")
+        pbar.update(1)
+        pbar.set_description_str("🔧 Setup progress | ✓ RAG Pipeline loaded")
     except FileNotFoundError as e:
+        pbar.close()
         print(f"❌ ERROR: {e}")
         print("\nPlease ensure you have:")
         print("  1. Processed Wikipedia data (scripts/prepare_wikipedia_chunks.py)")
@@ -311,57 +318,61 @@ def main():
         print("  3. Built FAISS index (scripts/build_faiss_index.py)")
         return
     except Exception as e:
+        pbar.close()
         print(f"❌ ERROR initializing pipeline: {e}")
         import traceback
         traceback.print_exc()
         return
     
     # Step 3: Initialize VerifierHub (if not already initialized in pipeline)
-    print("🔍 Initializing VerifierHub...")
+    pbar.set_description_str("🔧 Setup progress | Loading VerifierHub")
     try:
         if not hasattr(pipeline, 'verifier_hub') or pipeline.verifier_hub is None:
             verifier_hub = VerifierHub(config, pipeline.generator)
-            print("✓ VerifierHub initialized successfully\n")
         else:
             verifier_hub = pipeline.verifier_hub
-            print("✓ Using VerifierHub from pipeline\n")
+        pbar.update(1)
+        pbar.set_description_str("🔧 Setup progress | ✓ VerifierHub loaded")
     except Exception as e:
+        pbar.close()
         print(f"❌ ERROR initializing VerifierHub: {e}")
         import traceback
         traceback.print_exc()
         return
     
     # Step 4: Initialize RuleBasedAggregator
-    print("⚙️ Initializing RuleBasedAggregator...")
+    pbar.set_description_str("🔧 Setup progress | Setting up Aggregator")
     try:
         aggregator = RuleBasedAggregator(config)
-        print("✓ RuleBasedAggregator initialized successfully\n")
+        pbar.update(1)
+        pbar.set_description_str("🔧 Setup progress | ✓ Aggregator loaded")
     except Exception as e:
+        pbar.close()
         print(f"❌ ERROR initializing RuleBasedAggregator: {e}")
         import traceback
         traceback.print_exc()
         return
     
     # Step 4.5: Initialize RePrompter (if enabled in config)
+    pbar.set_description_str("🔧 Setup progress | Setting up RePrompter")
     repromptr = None
     reprompt_config = config.get('mitigation', {}).get('reprompt', {})
     if reprompt_config.get('enabled', False):
-        print("🔄 Initializing RePrompter for hallucination mitigation...")
         try:
             repromptr = RePrompter(config, pipeline.generator)
-            print("✓ RePrompter initialized successfully")
-            print(f"   - Threshold: {repromptr.threshold:.2%}")
-            print(f"   - Max iterations: {repromptr.max_iterations}")
-            print(f"   - Strategy: {repromptr.strategy}\n")
+            pbar.update(1)
+            pbar.set_description_str("🔧 Setup progress | ✓ RePrompter loaded")
         except Exception as e:
+            pbar.update(1)
             print(f"⚠️  WARNING: Could not initialize RePrompter: {e}")
-            print("   Continuing without re-prompting...\n")
+            print("   Continuing without re-prompting...")
             repromptr = None
     else:
-        print("ℹ️  Re-prompting disabled in config (mitigation.reprompt.enabled: false)\n")
+        pbar.update(1)
+        pbar.set_description_str("🔧 Setup progress | ℹ️  RePrompter skipped")
     
     # Step 5: Create selected UI mode with logging
-    print("🎨 Creating Gradio UI with logging...")
+    pbar.set_description_str("🔧 Setup progress | Creating Gradio UI")
     try:
         if args.ui_mode == "legacy":
             ui = ConfidenceUI(
@@ -386,9 +397,14 @@ def main():
         logging_ui = LoggingUIWrapper(ui, log_filepath)
         demo = logging_ui.create_interface()
         
+        pbar.update(1)
+        pbar.close()
+        print("\n" + "=" * 80)
         print(f"✓ Gradio UI created successfully (mode={args.ui_mode})")
-        print(f"✓ Query logging enabled -> {log_filepath}\n")
+        print(f"✓ Query logging enabled -> {log_filepath}")
+        print("=" * 80 + "\n")
     except Exception as e:
+        pbar.close()
         print(f"❌ ERROR creating UI: {e}")
         import traceback
         traceback.print_exc()
