@@ -101,6 +101,7 @@ dependencies = [
     { name = "numpy" },
     { name = "openai" },
     { name = "pandas" },
+    { name = "pip" },
     { name = "pyarrow" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -110,6 +111,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "seaborn" },
     { name = "sentence-transformers" },
+    { name = "setuptools" },
     { name = "spacy" },
     { name = "tokenizers" },
     { name = "torch" },
@@ -117,6 +119,7 @@ dependencies = [
     { name = "torchvision" },
     { name = "tqdm" },
     { name = "transformers" },
+    { name = "wheel" },
     { name = "wikiextractor" },
 ]
 
@@ -160,6 +163,7 @@ requires-dist = [
     { name = "numpy", specifier = "==2.3.3" },
     { name = "openai", specifier = "==1.16.2" },
     { name = "pandas", specifier = "==2.3.3" },
+    { name = "pip", specifier = ">=26.0.1" },
     { name = "pyarrow", specifier = "==21.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = "==6.0.3" },
@@ -169,6 +173,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = "==1.7.2" },
     { name = "seaborn", specifier = "==0.13.2" },
     { name = "sentence-transformers", specifier = "==5.1.1" },
+    { name = "setuptools", specifier = ">=82.0.0" },
     { name = "spacy", specifier = "==3.8.7" },
     { name = "tokenizers", specifier = "==0.22.1" },
     { name = "torch", specifier = "==2.9.0+cu126", index = "https://download.pytorch.org/whl/cu126" },
@@ -176,6 +181,7 @@ requires-dist = [
     { name = "torchvision", specifier = "==0.24.0+cu126", index = "https://download.pytorch.org/whl/cu126" },
     { name = "tqdm", specifier = "==4.67.1" },
     { name = "transformers", specifier = "==4.56.2" },
+    { name = "wheel", specifier = ">=0.46.3" },
     { name = "wikiextractor", specifier = "==3.0.6" },
 ]
 
@@ -1352,6 +1358,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pip"
+version = "26.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/83/0d7d4e9efe3344b8e2fe25d93be44f64b65364d3c8d7bc6dc90198d5422e/pip-26.0.1.tar.gz", hash = "sha256:c4037d8a277c89b320abe636d59f91e6d0922d08a05b60e85e53b296613346d8", size = 1812747, upload-time = "2026-02-05T02:20:18.702Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/f0/c81e05b613866b76d2d1066490adf1a3dbc4ee9d9c839961c3fc8a6997af/pip-26.0.1-py3-none-any.whl", hash = "sha256:bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b", size = 1787723, upload-time = "2026-02-05T02:20:16.416Z" },
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2244,6 +2259,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/09/d7/edd9c24e60cf8e5de130aa2e8af3b01521f4d0216c371d01212f580d0d8e/weasel-0.4.3.tar.gz", hash = "sha256:f293d6174398e8f478c78481e00c503ee4b82ea7a3e6d0d6a01e46a6b1396845", size = 38733, upload-time = "2025-11-13T23:52:28.193Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a4/74/a148b41572656904a39dfcfed3f84dd1066014eed94e209223ae8e9d088d/weasel-0.4.3-py3-none-any.whl", hash = "sha256:08f65b5d0dbded4879e08a64882de9b9514753d9eaa4c4e2a576e33666ac12cf", size = 50757, upload-time = "2025-11-13T23:52:26.982Z" },
+]
+
+[[package]]
+name = "wheel"
+version = "0.46.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/89/24/a2eb353a6edac9a0303977c4cb048134959dd2a51b48a269dfc9dde00c8a/wheel-0.46.3.tar.gz", hash = "sha256:e3e79874b07d776c40bd6033f8ddf76a7dad46a7b8aa1b2787a83083519a1803", size = 60605, upload-time = "2026-01-22T12:39:49.136Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/22/b76d483683216dde3d67cba61fb2444be8d5be289bf628c13fc0fd90e5f9/wheel-0.46.3-py3-none-any.whl", hash = "sha256:4b399d56c9d9338230118d705d9737a2a468ccca63d5e813e2a4fc7815d8bc4d", size = 30557, upload-time = "2026-01-22T12:39:48.099Z" },
 ]
 
 [[package]]
