@@ -5,8 +5,8 @@ This module centralizes rule-based mitigation action selection so evaluators,
 scripts, and runtime pipeline share one source of truth.
 """
 
-from dataclasses import dataclass
-from typing import List, Set
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Set
 
 from src.utils.data_structures import ClaimDecision
 
@@ -65,12 +65,37 @@ class MitigationPolicyRouter:
         decisions: List[ClaimDecision],
         objective_override: str | None = None,
     ) -> Set[str]:
+        allowed, _ = self._resolve_with_diagnostics(decisions, objective_override)
+        return allowed
+
+    def explain_actions(
+        self,
+        decisions: List[ClaimDecision],
+        objective_override: str | None = None,
+    ) -> Dict[str, Any]:
+        """Return both allowed actions and a diagnostics dict explaining the routing decision.
+
+        Diagnostics keys:
+            objective, total_claims, contradictory_count, low_confidence_count,
+            contradiction_ratio, low_confidence_ratio, lc_avg_contradict_signal,
+            filter_fired, filter_blocked_reason, reprompt_fired, rerank_fired,
+            filter_threshold (effective), filter_min_claims (effective).
+        """
+        allowed, diagnostics = self._resolve_with_diagnostics(decisions, objective_override)
+        diagnostics["allowed_actions"] = sorted(allowed)
+        return diagnostics
+
+    def _resolve_with_diagnostics(
+        self,
+        decisions: List[ClaimDecision],
+        objective_override: str | None = None,
+    ):
         default_actions = {"rerank", "reprompt", "filter"}
         if not self.enabled:
-            return default_actions
+            return default_actions, {"router_enabled": False}
 
         if not decisions:
-            return set()
+            return set(), {"router_enabled": True, "total_claims": 0}
 
         objective = self._normalize_objective(objective_override or self.objective)
         total = len(decisions)
@@ -124,7 +149,41 @@ class MitigationPolicyRouter:
             ):
                 allowed.add("filter")
 
-        return allowed
+        # Build diagnostics for callers that want to audit routing decisions.
+        effective_filter_threshold = self.thresholds.filter_contradiction_ratio
+        if objective == "citation":
+            effective_filter_threshold = max(effective_filter_threshold, 0.6)
+
+        filter_fired = "filter" in allowed
+        filter_blocked_reason: str | None = None
+        if not filter_fired and contradictory_count >= self.thresholds.filter_min_contradictory_claims:
+            if objective == "ragtruth":
+                filter_blocked_reason = None  # ragtruth always fires when contradictions > 0
+            else:
+                filter_blocked_reason = (
+                    f"ratio {contradiction_ratio:.3f} < threshold {effective_filter_threshold:.3f}"
+                )
+        elif not filter_fired and contradictory_count == 0:
+            filter_blocked_reason = "no_contradictory_claims"
+
+        diagnostics: Dict[str, Any] = {
+            "router_enabled": True,
+            "objective": objective,
+            "total_claims": total,
+            "contradictory_count": contradictory_count,
+            "low_confidence_count": low_confidence_count,
+            "contradiction_ratio": round(contradiction_ratio, 4),
+            "low_confidence_ratio": round(low_confidence_ratio, 4),
+            "lc_avg_contradict_signal": lc_avg_contradict_signal,
+            "avg_contradict_prob_low_conf": round(avg_contradict_prob_low_conf, 4),
+            "effective_filter_threshold": effective_filter_threshold,
+            "filter_min_claims": self.thresholds.filter_min_contradictory_claims,
+            "filter_fired": filter_fired,
+            "filter_blocked_reason": filter_blocked_reason,
+            "reprompt_fired": "reprompt" in allowed,
+            "rerank_fired": "rerank" in allowed,
+        }
+        return allowed, diagnostics
 
     def _normalize_objective(self, objective: str) -> str:
         value = str(objective).strip().lower()

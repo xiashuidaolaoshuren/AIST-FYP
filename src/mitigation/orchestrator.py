@@ -140,6 +140,10 @@ class MitigationOrchestrator:
 
             planned_actions = self.router.resolve_actions(decisions, objective_override)
 
+        # Capture final routing diagnostics (after any rerank/reprompt mutations).
+        # Use explain_actions so callers can audit why filter did/did not fire.
+        router_diagnostics = self.router.explain_actions(decisions, objective_override)
+
         if (
             "reprompt" in planned_actions
             and self.reprompter
@@ -198,6 +202,7 @@ class MitigationOrchestrator:
             "actions": actions,
             "filtered_claim_count": filtered_claim_count,
             "filter_metadata": filter_metadata,
+            "router_diagnostics": router_diagnostics,
         }
 
     def _verify_and_decide(self, claim_records: List[Dict[str, Any]]):
@@ -360,6 +365,7 @@ class MitigationOrchestrator:
                 signals, decisions = self._verify_and_decide(claim_records)
                 planned_actions = self.router.resolve_actions(decisions, objective_override)
 
+        router_diagnostics = self.router.explain_actions(decisions, objective_override)
         filtered_claim_count = 0
         filter_metadata: Dict[str, Any] = {}
         if (
@@ -386,6 +392,7 @@ class MitigationOrchestrator:
             "actions": actions,
             "filtered_claim_count": filtered_claim_count,
             "filter_metadata": filter_metadata,
+            "router_diagnostics": router_diagnostics,
         }
 
     def apply_run_reprompt_collect_nli(

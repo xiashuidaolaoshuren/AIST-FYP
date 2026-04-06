@@ -533,8 +533,12 @@ mitigation:
     # Trigger re-prompting when contradiction ratio exceeds this threshold
     reprompt_contradiction_ratio: 0.35
 
-    # Trigger filtering when contradiction ratio exceeds this threshold
-    filter_contradiction_ratio: 0.5
+    # Trigger filtering when contradiction ratio exceeds this threshold.
+    # With ~2-3 claims per response on ASQA, 0.5 only fires when ≥50% of
+    # claims are contradicted (e.g. 1-of-2).  Lowering to 0.20 catches a
+    # single contradictory claim in responses up to 5 claims long, which
+    # better matches the observed per-response claim distribution.
+    filter_contradiction_ratio: 0.20
 
     # Minimum contradictory claims required before filtering is allowed
     filter_min_contradictory_claims: 1

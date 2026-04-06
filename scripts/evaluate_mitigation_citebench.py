@@ -621,6 +621,7 @@ def _apply_mitigation_with_optional_precomputed(
         "nli_entailment_count": len(nli_values),
         "entropy_sum": float(sum(entropy_values)),
         "entropy_count": len(entropy_values),
+        "router_diagnostics": mitigation_result.get("router_diagnostics") or {},
     }
 
     return pipeline_output
