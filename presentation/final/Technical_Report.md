@@ -99,9 +99,13 @@ def generate_with_metadata(self, prompt: str, evidence_chunks: List) -> Dict:
         max_new_tokens=150
     )
     
+    # Extract rich metadata for the verifier
     return {
         'text': self.tokenizer.decode(outputs.sequences[0], skip_special_tokens=True),
-        'metadata': outputs.scores  # Vital dataset for the Intrinsic Uncertainty Detector
+        'tokens': self._get_token_list(outputs.sequences[0]),
+        'logits': outputs.scores,
+        'token_entropies': self._calculate_entropies(outputs.scores),
+        'probs': self._calculate_probs(outputs.scores)
     }
 ```
 
@@ -186,12 +190,12 @@ def _calculate_entity_coverage(self, claim: Claim, evidence: EvidenceChunk) -> f
 While lexical overlap is a strong signal, it cannot capture logical contradictions (e.g., adding a "not" to a sentence preserves almost all tokens but flips the meaning). This module is inspired by the **SummaC** [6] and **Self-RAG** [7] research, which repurposes Natural Language Inference (NLI) for factuality verification. By treating the evidence as a "premise" and the claim as a "hypothesis," we can use a model trained on logical relationships to detect if the evidence *actually supports* the claim. This adds a critical layer of semantic understanding that simple word-matching lacks.
 
 *   **Technical Highlights:**
-    *   **Cross-Encoding:** Unlike "bi-encoders" which score vectors, a Cross-Encoder passes both strings into the transformer simultaneously. This allows the model to capture deep semantic interactions (e.g., negations or coreference).
+    *   **Cross-Encoding Logic:** While implemented via standard sequence classification, the model functions as a cross-encoder, passing both strings into the transformer simultaneously. This allows the model to capture deep semantic interactions (e.g., negations or coreference).
     *   **Veto Principle:** In our rule-based aggregator, the `contradiction` score from the NLI model acts as a "hard veto" that can override high lexical overlap scores.
-    *   **DeBERTa-v3 Architecture:** A state-of-the-art encoder with "Disentangled Attention," significantly better at logical reasoning than standard BERT/RoBERTa models.
+    *   **DeBERTa-v3 LARGE:** Utilizing the `MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli` model, which is fine-tuned on five distinct datasets for superior logical reasoning compared to standard variants.
 
 *   **Input:** `Claim` text (Hypothesis) and `EvidenceChunk` text (Premise).
-*   **Method:** Utilizing a **DeBERTa-v3 Cross-Encoder**, the system performs a zero-shot classification of the logical relationship (entailment/contradiction) between the evidence and the claim.
+*   **Method:** Utilizing a **DeBERTa-v3 Cross-Encoder** (Sequence Classification), the system performs a zero-shot classification of the logical relationship (entailment/contradiction) between the evidence and the claim.
 *   **Output:** A probability distribution over three classes: `{'entailment': float, 'contradiction': float, 'neutral': float}`.
 
 **Code Example (`src/verification/nli_detector.py`):**
@@ -287,36 +291,31 @@ Once the `VerifierHub` has classified the claims within a generated response, th
 Not all factual errors require the same level of intervention. The **Mitigation Policy Router** acts as an intelligent gating system that dictates *which* corrective actions to take based on the density and severity of the detected hallucinations. Inspired by cascading fallback mechanisms in production ML systems, it evaluates the proportion of contradictory or low-confidence claims to trigger appropriate responses (e.g., if a response is slightly unsure, reranking might suffice; if it actively contradicts the source, hard filtering is required).
 
 *   **Technical Highlights:**
-    *   **Objective-Aware Routing:** Configurable thresholds based on current evaluation goals (e.g., a "balanced" user experience vs. absolute factual safety for the RAGTruth benchmark [10]).
-    *   **Cascading Priorities:** Actions are resolved hierarchically. Low confidence primarily triggers reranking to improve the context, whereas high contradiction triggers the reprompter or hard filter.
+    *   **Objective-Aware Routing:** The system implements three distinct routing modes (`balanced`, `ragtruth`, `citation`) to tailor thresholds based on the project's current safety requirements.
+    *   **Cascading Priorities:** Actions are resolved hierarchically. Low confidence primarily triggers rerank to improve the context, whereas high contradiction ratios trigger reprompt or hard filtering.
+    *   **Veto Logic:** Specific critical failure signals (e.g., high NLI Contradiction or Extreme Entropy) can unilaterally override positive signals to ensure factual integrity.
 
 *   **Input:** A list of `ClaimDecision` objects (the output from the aggregator).
-*   **Method:** The engine calculates statistical ratios of `Contradictory` and `Low Confidence` occurrences against predefined thresholds in `config.yaml` to authorize specific mitigation actions (`"rerank"`, `"reprompt"`, `"filter"`).
-*   **Output:** A resolved `Set[str]` of active mitigation policies to apply.
+*   **Method:** The engine calculates statistical ratios of `Contradictory` and `Low Confidence` occurrences against predefined thresholds in `config.yaml` to authorize specific mitigation actions.
+*   **Output:** A resolved `Set[str]` of active mitigation policies.
 
 **Code Example (`src/mitigation/policy_router.py`):**
 ```python
-def resolve_actions(self, decisions: List[ClaimDecision]) -> Set[str]:
-    # Calculate failure ratios
+def resolve_actions(self, decisions: List[ClaimDecision], objective_override: str = None) -> Set[str]:
+    objective = objective_override or self.objective # balanced, ragtruth, or citation
     total = len(decisions)
-    contradictory_ratio = len([d for d in decisions if d.status == "Contradictory"]) / total
-    low_conf_ratio = len([d for d in decisions if d.status == "Low Confidence"]) / total
-
-    allowed_actions = set()
     
-    # 1. Rerank if confidence is too low overall
+    # 1. Rerank if too many claims are Low Confidence
+    low_conf_ratio = len([d for d in decisions if d.status == "Low Confidence"]) / total
     if low_conf_ratio >= self.thresholds.rerank_low_confidence_ratio:
-        allowed_actions.add("rerank")
+        allowed.add("rerank")
         
-    # 2. Filter if contradiction ratio is too critically high to salvage
-    if contradictory_ratio >= self.thresholds.filter_contradiction_ratio:
-        allowed_actions.add("filter")
+    # 2. Filter if contradiction ratio is critically high (e.g., > 0.5)
+    contradiction_ratio = len([d for d in decisions if d.status == "Contradictory"]) / total
+    if contradiction_ratio >= self.thresholds.filter_contradiction_ratio:
+        allowed.add("filter")
         
-    # 3. Otherwise, try reprompting the LLM to self-correct
-    elif contradictory_ratio > 0 or low_conf_ratio > 0:
-        allowed_actions.add("reprompt")
-        
-    return allowed_actions
+    return allowed
 ```
 
 ### 4.2 Evidence Re-Ranker
@@ -406,29 +405,20 @@ As a final, absolute safeguard against misinformation reaching the user, any cla
 
 *   **Input:** The final generated text, the list of string boundaries, and their respective `decisions`.
 *   **Method:** Iterates backwards through the claims array. If a decision is `Contradictory`, the script replaces the exact character span with an omission placeholder (e.g., `[Claim removed: Contradictory]`) or removes it seamlessly.
-*   **Output:** The final, guaranteed-safe `final_answer` text string and metadata tracking the filtered counts.
+*   **Output:** A tuple `(filtered_text, removed_count, metadata_dict)` containing the finalized safe text and detailed filter telemetry.
 
 **Code Example (`src/mitigation/claim_filter.py`):**
 ```python
-def filter_answer(self, answer_text: str, claims: List[Claim], decisions: List[ClaimDecision]) -> Tuple[str, int]:
-    # 1. Identity contradictory claims
+def filter_answer(self, answer_text: str, claims: List[Claim], decisions: List[ClaimDecision]) -> Tuple[str, int, Dict[str, Any]]:
+    # 1. Identify contradictory claims and metadata requirements
     contradictory_ids = [d.claim_id for d in decisions if d.status == 'Contradictory']
     
     # 2. Process in REVERSE order to avoid index corruption
-    # Sort claims by their start index in the answer string
     sorted_claims = sorted(claims, key=lambda c: c.answer_char_span[0], reverse=True)
     
-    filtered_text = answer_text
-    removed_count = 0
+    # ... logic for string span replacement ...
     
-    for claim in sorted_claims:
-        if claim.claim_id in contradictory_ids:
-            start, end = claim.answer_char_span
-            # Replace span with transparent placeholder
-            filtered_text = filtered_text[:start] + self.placeholder + filtered_text[end:]
-            removed_count += 1
-            
-    return filtered_text, removed_count
+    return filtered_text, len(contradictory_ids), {"mode": "contradictory", "removed": len(contradictory_ids)}
 ```
 
 ---
