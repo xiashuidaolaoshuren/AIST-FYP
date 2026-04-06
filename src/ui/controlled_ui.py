@@ -67,6 +67,26 @@ class ControlledPipelineUI(ConfidenceUI):
             sentences.append((text, start, end))
         return sentences
 
+    def _get_user_context_encoder(self):
+        """Resolve a sentence encoder for user-context retrieval across retriever modes."""
+        retriever = self.rag_pipeline.retriever
+
+        # Dense mode exposes encoder directly.
+        encoder = getattr(retriever, "encoder", None)
+        if encoder is not None:
+            return encoder
+
+        # Hybrid mode stores dense retriever separately.
+        dense_retriever = getattr(retriever, "dense_retriever", None)
+        encoder = getattr(dense_retriever, "encoder", None)
+        if encoder is not None:
+            return encoder
+
+        raise AttributeError(
+            "Retriever does not expose a sentence encoder for user-context retrieval. "
+            f"Retriever type: {type(retriever).__name__}"
+        )
+
     def _build_user_context_evidence(self, query: str, context_text: str, top_k: int = 5) -> List[EvidenceChunk]:
         """
         Build an in-memory dense index for user context and retrieve top-k chunks.
@@ -78,7 +98,7 @@ class ControlledPipelineUI(ConfidenceUI):
         if not sentences:
             return []
 
-        encoder = self.rag_pipeline.retriever.encoder
+        encoder = self._get_user_context_encoder()
         sentence_texts = [item[0] for item in sentences]
 
         sentence_embeddings = encoder.encode(
