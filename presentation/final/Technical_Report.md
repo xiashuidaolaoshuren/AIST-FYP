@@ -192,7 +192,7 @@ While lexical overlap is a strong signal, it cannot capture logical contradictio
 *   **Technical Highlights:**
     *   **Cross-Encoding Logic:** While implemented via standard sequence classification, the model functions as a cross-encoder, passing both strings into the transformer simultaneously. This allows the model to capture deep semantic interactions (e.g., negations or coreference).
     *   **Veto Principle:** In our rule-based aggregator, the `contradiction` score from the NLI model acts as a "hard veto" that can override high lexical overlap scores.
-    *   **DeBERTa-v3 LARGE:** Utilizing the `MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli` model, which is fine-tuned on five distinct datasets for superior logical reasoning compared to standard variants.
+    *   **DeBERTa-v3 LARGE:** Utilizing the `MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli` model. This model utilizes **Disentangled Attention**—processing content and relative position via separate vectors—to excel at capturing complex logical structures and "long-range" dependencies. Furthermore, it is fine-tuned on five distinct datasets for superior factual reasoning compared to standard variants.
 
 *   **Input:** `Claim` text (Hypothesis) and `EvidenceChunk` text (Premise).
 *   **Method:** Utilizing a **DeBERTa-v3 Cross-Encoder** (Sequence Classification), the system performs a zero-shot classification of the logical relationship (entailment/contradiction) between the evidence and the claim.
@@ -291,7 +291,7 @@ Once the `VerifierHub` has classified the claims within a generated response, th
 Not all factual errors require the same level of intervention. The **Mitigation Policy Router** acts as an intelligent gating system that dictates *which* corrective actions to take based on the density and severity of the detected hallucinations. Inspired by cascading fallback mechanisms in production ML systems, it evaluates the proportion of contradictory or low-confidence claims to trigger appropriate responses (e.g., if a response is slightly unsure, reranking might suffice; if it actively contradicts the source, hard filtering is required).
 
 *   **Technical Highlights:**
-    *   **Objective-Aware Routing:** The system implements three distinct routing modes (`balanced`, `ragtruth`, `citation`) to tailor thresholds based on the project's current safety requirements.
+    *   **Goal-Oriented Routing:** The system implements three distinct routing modes ('Balanced', 'Accuracy-Focused', 'Attribution-Safety') to tailor thresholds based on the project's current safety requirements.
     *   **Cascading Priorities:** Actions are resolved hierarchically. Low confidence primarily triggers rerank to improve the context, whereas high contradiction ratios trigger reprompt or hard filtering.
     *   **Veto Logic:** Specific critical failure signals (e.g., high NLI Contradiction or Extreme Entropy) can unilaterally override positive signals to ensure factual integrity.
 
@@ -301,8 +301,8 @@ Not all factual errors require the same level of intervention. The **Mitigation 
 
 **Code Example (`src/mitigation/policy_router.py`):**
 ```python
-def resolve_actions(self, decisions: List[ClaimDecision], objective_override: str = None) -> Set[str]:
-    objective = objective_override or self.objective # balanced, ragtruth, or citation
+def resolve_actions(self, decisions: List[ClaimDecision], goal_override: str = None) -> Set[str]:
+    goal = goal_override or self.goal # Balanced, Accuracy-Focused, or Attribution-Safety
     total = len(decisions)
     
     # 1. Rerank if too many claims are Low Confidence

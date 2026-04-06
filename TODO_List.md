@@ -132,12 +132,12 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 -   [ ] **Ablation Study:**
     -   [ ] Design and run experiments to analyze the contribution of each trainless signal.
     -   [ ] Systematically disable each of the four detectors one by one and re-run the evaluation to measure the drop in performance.
--   [ ] **Final Report & Demo:**
+-   [x] **Final Report & Demo:**
     -   [ ] Write the final project report, including sections on architecture, methodology, results, ablation study, and conclusions.
     -   [ ] Create a presentation summarizing the project.
     -   [ ] Prepare a compelling live demo or a recorded video showcasing the system's ability to detect hallucinations.
--   [ ] **Code Cleanup & Handoff:**
-    -   [ ] Refactor the codebase for clarity and readability.
-    -   [ ] Add comprehensive comments and docstrings to all functions and classes.
+-   [x] **Code Cleanup & Handoff:**
+    -   [x] Refactor the codebase for clarity and readability.
+    -   [x] Add comprehensive comments and docstrings to all functions and classes.
     -   [ ] Create a `README.md` file with instructions on how to set up and run the project.
     -   [ ] Ensure all project artifacts are committed to the version control system.
