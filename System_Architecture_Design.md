@@ -31,15 +31,28 @@ graph TD
         D5 --> D_Aggregator;
     end
     D --> E["Verified Claims with Confidence Breakdown"];
-    E --> F["Goal-Oriented Mitigation (Balanced/Accuracy/Safety)"];
-    F --> F1["Citation Formatter (CiteEval)"];
-    F1 --> H[Final Verified Response];
+    subgraph F["Mitigation Orchestrator (Policy Router)"]
+        direction TB
+        F_Router{"Goal-Oriented Router"}
+        F1["Evidence Re-Ranking"]
+        F2["Generator Re-Prompting"]
+        F3["Claim Filtering (Safe Safeguard)"]
+        
+        F_Router -- "Low Confidence Ratio > T1" --> F1
+        F_Router -- "Factual Ambiguity/Gaps" --> F2
+        F_Router -- "Contradiction Ratio > T2" --> F3
+    end
+    E --> F;
+    F1 --> G["Citation Formatter (CiteEval)"];
+    F2 --> G
+    F3 --> G
+    G --> H[Final Verified Response];
     H --> I((Final Output));
 
     style B fill:#f9f,stroke:#333,stroke-width:2px
     style D fill:#ccf,stroke:#333,stroke-width:2px
     style F fill:#fcf,stroke:#333,stroke-width:2px
-    style F1 fill:#dfd,stroke:#333,stroke-width:2px
+    style G fill:#dfd,stroke:#333,stroke-width:2px
     style I fill:#bdf,stroke:#333,stroke-width:4px
 ```
 
