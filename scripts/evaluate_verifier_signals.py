@@ -68,7 +68,9 @@ def _variant_patch(name: str) -> dict[str, Any]:
 
     if name == "full_verifier_lettuce":
         patch = _deep_update(deepcopy(all_verifiers_enabled), deepcopy(all_mitigation_disabled))
-        patch.setdefault("verification", {}).setdefault("nli", {})["backend"] = "lettucedetect"
+        nli_patch = patch.setdefault("verification", {}).setdefault("nli", {})
+        nli_patch["backend"] = "lettucedetect"
+        nli_patch["model_name"] = "KRLabsOrg/lettucedect-base-modernbert-en-v1"
         return patch
 
     if name == "verifier_intrinsic_only":
@@ -103,6 +105,7 @@ def _variant_patch(name: str) -> dict[str, Any]:
         return {
             "verification": {
                 "enabled": True,
+                "contradiction_first_fusion": True,
                 "modules": {
                     "intrinsic": False,
                     "grounded": False,
@@ -117,6 +120,7 @@ def _variant_patch(name: str) -> dict[str, Any]:
         patch = {
             "verification": {
                 "enabled": True,
+                "contradiction_first_fusion": True,
                 "modules": {
                     "intrinsic": False,
                     "grounded": False,
@@ -126,7 +130,9 @@ def _variant_patch(name: str) -> dict[str, Any]:
             },
             **deepcopy(all_mitigation_disabled),
         }
-        patch.setdefault("verification", {}).setdefault("nli", {})["backend"] = "lettucedetect"
+        nli_patch = patch.setdefault("verification", {}).setdefault("nli", {})
+        nli_patch["backend"] = "lettucedetect"
+        nli_patch["model_name"] = "KRLabsOrg/lettucedect-base-modernbert-en-v1"
         return patch
 
     if name == "verifier_self_agreement_only":
@@ -306,6 +312,8 @@ def _build_expected_resume_fingerprint(
         "ragtruth_eval_mode": ragtruth_eval_mode,
         "dataset_path": dataset_path,
         "verification_enabled": bool(verification_cfg.get("enabled", True)),
+        "nli_backend": str(verification_cfg.get("nli", {}).get("backend", "deberta")),
+        "nli_model_name": str(verification_cfg.get("nli", {}).get("model_name", "")),
         "verification_modules": {
             "intrinsic": module_flag(verification_modules.get("intrinsic", False)),
             "grounded": module_flag(verification_modules.get("grounded", False)),

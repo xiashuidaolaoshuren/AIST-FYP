@@ -205,9 +205,12 @@ class VerifierHub:
                         self.nli_detector = NLIDetector(config)
                         self.logger.info("✓ NLIDetector initialized")
                 except Exception as e:
-                    self.logger.warning(f"NLIDetector initialization failed: {str(e)}")
-                    self.logger.warning("Continuing without NLI detector")
-                    self.nli_detector = None
+                    error_msg = (
+                        "NLI detector initialization failed for backend "
+                        f"'{self.nli_backend}': {str(e)}"
+                    )
+                    self.logger.error(error_msg)
+                    raise RuntimeError(error_msg) from e
             else:
                 self.logger.info("NLIDetector disabled by config")
             
