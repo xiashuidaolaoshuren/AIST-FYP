@@ -4,40 +4,42 @@ This document outlines a redesigned architecture focused on a **trainless, multi
 
 ## High-Level Pipeline Flowchart
 
-This diagram illustrates the updated data flow, emphasizing the parallel, trainless signals within the Verifier and the simplified mitigation and UI components.
+This diagram illustrates the updated data flow, emphasizing the hybrid retrieval foundation, the parallel verifier signals, the citation post-processor, and the goal-oriented mitigation components.
 
 ```mermaid
 graph TD
     A[User Query] --> B;
     subgraph B[Baseline RAG Module]
         direction LR
-        B1{Retriever} --> B2{Generator};
+        B1["Hybrid Retriever (FAISS + BM25)"] --> B2{Generator};
     end
-    B --> C["Draft Response + Claim-Evidence Pairs"];
-    C --> D;
+    B --> C["Draft Response + Metadata"];
+    C --> C1["ClaimExtractor (Dependency Parsing)"];
+    C1 --> D;
     subgraph D["Verifier Module (Trainless Signals)"]
         direction TB
         D1["Intrinsic Uncertainty (Entropy)"]
         D2["Self-Agreement (Consistency)"]
-        D3["Retrieval Heuristics (Coverage)"]
-        D4["Zero-Shot NLI (Contradiction)"]
+        D3["Retrieval Overlap (Heuristics)"]
+        D4["Zero-Shot NLI (DeBERTa-v3)"]
+        D5["Entity Alias Matcher"]
         D_Aggregator{"Rule-Based Aggregator"}
         D1 --> D_Aggregator;
         D2 --> D_Aggregator;
         D3 --> D_Aggregator;
         D4 --> D_Aggregator;
+        D5 --> D_Aggregator;
     end
     D --> E["Verified Claims with Confidence Breakdown"];
-    E --> F["Active Mitigation Module (Filter/Re-rank/Re-prompt)"];
-    E --> G["Minimal Confidence UI (Table/Badges)"];
-    F --> H[Final Verified Response];
-    G --> I((Final Output));
-    H --> I;
+    E --> F["Goal-Oriented Mitigation (Balanced/Accuracy/Safety)"];
+    F --> F1["Citation Formatter (CiteEval)"];
+    F1 --> H[Final Verified Response];
+    H --> I((Final Output));
 
     style B fill:#f9f,stroke:#333,stroke-width:2px
     style D fill:#ccf,stroke:#333,stroke-width:2px
     style F fill:#fcf,stroke:#333,stroke-width:2px
-    style G fill:#ffc,stroke:#333,stroke-width:2px
+    style F1 fill:#dfd,stroke:#333,stroke-width:2px
     style I fill:#bdf,stroke:#333,stroke-width:4px
 ```
 
@@ -46,38 +48,35 @@ graph TD
 ## Module-by-Module Design
 
 ### 1. Baseline RAG Module
-*(This module's core function remains the same, but it now passes token-level metadata to the Verifier.)*
+*(Fulfills standard RAG duties while remaining verifier-aware by capturing structural and probabilistic metadata.)*
 
--   **Inputs:**
-    -   `user_query`: (string) The input prompt from the user.
+-   **Knowledge Base Prep (Wikipedia):**
+    -   **Custom Parsing:** `WikipediaParser` cleans XML dumps (removing redirects and wikitext).
+    -   **Semantic Chunking:** Uses spaCy's sentencizer to fragment text into atomic units.
+    -   **Hybrid Indexing:** Pairs **FAISS** (Dense/Semantic) with **BM25Okapi** (Sparse/Lexical) for robust recall.
+
 -   **Process:**
-    1.  **Retrieve:** The retriever fetches relevant documents.
-    2.  **Generate:** The generator LLM produces a draft response, while capturing token-level metadata (e.g., logits for entropy calculation).
-    3.  **Decompose & Pair:** The draft is decomposed into atomic claims, creating direct `(claim, evidence)` pairs.
+    1.  **Hybrid Retrieve:** Executes parallel search across dense and sparse indices, fused via **Reciprocal Rank Fusion (RRF)**.
+    2.  **Metadata-Aware Generate:** Produces a response using `GeneratorWrapper` while intercepting **Token Logits** and **Entropy**.
+    3.  **Claim Extraction:** Uses `ClaimExtractor` (spaCy dependency parsing) to fragment the unified response into atomic, verifiable `Claim` objects.
 -   **Outputs:**
-    -   `draft_response`: (string) The full, unverified draft response.
-    -   `claim_evidence_pairs`: (List[dict]) A list where each dictionary contains the `claim`, the `evidence` document, and `generator_metadata`.
+    -   `draft_response`: (string) The full, unverified response.
+    -   `claim_evidence_pairs`: (List[dict]) Associates each `Claim` with its top-k `EvidenceChunk` candidates and generator metadata.
 
 ### 2. Verifier Module (Trainless Signal Hub)
 
-This module is redesigned as a hub for calculating multiple, parallel, trainless confidence signals.
+The Verifier Module aggregates a diverse ensemble of zero-shot signals to classify every claim.
 
--   **Inputs:**
-    -   `claim_evidence_pairs`: (List[dict]) The output from the Baseline RAG Module.
+-   **Parallel Signal Detectors:**
+    1.  **Intrinsic Uncertainty:** Measures internal confidence via **Shannon Entropy** ($H = -\sum p \log p$) over the token vocabulary during generation (SelfCheckGPT-style).
+    2.  **Self-Agreement:** Generates $N$ stochastic samples at high temperature to verify if the model converges on the same factual claim (Majority Vote).
+    3.  **Retrieval Overlap (Heuristics):** Calculates **Entity & Number Coverage** (lexical anchors) and **ROUGE-L** overlap between claim and evidence.
+    4.  **Zero-Shot NLI:** A **DeBERTa-v3 LARGE** cross-encoder classifies the logical status (Entailment/Contradiction/Neutral) between source context and claim.
+    5.  **Entity Alias Matcher:** Resolves surface-level name variations (e.g., "US" vs "United States") via fuzzy matching to prevent false-negative grounding checks.
 
--   **Process & Sub-components:**
-    1.  For each `(claim, evidence)` pair, the following sub-components run in parallel:
-        -   **Intrinsic Uncertainty:** Analyzes `generator_metadata`.
-            -   **Output:** `entropy_score` (e.g., length-normalized negative log-likelihood).
-        -   **Self-Agreement (Conditional):** If enabled, generates `k` response samples.
-            -   **Output:** `consistency_score` (e.g., variance or disagreement across samples).
-        -   **Retrieval-Grounded Heuristics:**
-            -   **Process:** Calculates `evidence_coverage` (percentage of claim entities in evidence) and `citation_integrity` (token overlap for cited spans).
-            -   **Output:** A dictionary of heuristic scores.
-        -   **Zero-Shot NLI:** Uses an off-the-shelf NLI model.
-            -   **Process:** Labels each `(claim, evidence_sentence)` pair as Entail/Contradict/Neutral.
-            -   **Output:** Aggregated NLI scores (e.g., `max_contradiction_prob`, `entailment_ratio`).
-    2.  **Rule-Based Aggregator:** Gathers all signals into a structured breakdown using explicit rules. No trainable fusion logic is used at this stage.
+-   **Rule-Based Aggregator:**
+    -   Implements **Veto Logic** (e.g., NLI Contradiction overrides high lexical overlap).
+    -   Computes a finalized **Verdict** (Supported, Contradictory, or Low Confidence) based on weighted normalization.
 
 -   **Outputs:**
     -   `verified_claims`: (List[dict]) A list where each dictionary contains:
@@ -86,44 +85,47 @@ This module is redesigned as a hub for calculating multiple, parallel, trainless
         -   `confidence_breakdown`: (dict) A structured dictionary containing all raw signals (e.g., `entropy_score`, `nli_results`, `coverage_score`).
         -   `final_verdict`: (string) A final verdict (e.g., "Supported", "Contradictory", "Low Confidence") derived from the rule-based aggregator.
 
-### 3. Active Mitigation Module (Simplified Mitigation)
+### 3. Mitigation Module (Goal-Oriented Correction)
 
-This module applies rule-based actions based on the final verdict from the verifier to improve the final output quality.
+This module applies rule-based corrective policies based on verifier feedback without retraining the generator.
 
--   **Inputs:**
-    -   `draft_response`: (string) The original draft.
-    -   `verified_claims`: (List[dict]) The output from the Verifier Module.
-    -   `retrieved_evidence`: (List[dict]) The original retrieved chunks (needed for re-ranking).
+-   **Goal-Oriented Routing:**
+    -   **Balanced Mode:** Equalizes precision/retention for general-purpose use.
+    -   **Accuracy-Focused (RAGTruth-style):** High sensitivity to contradictions.
+    -   **Attribution-Safety (Citation-style):** Prioritizes exact citation grounding.
+-   **Mitigation Policies:**
+    1.  **Filtering:** Programmatically excising contradictory claims using reverse-order span deletion.
+    2.  **Evidence Re-Ranking:** Repositions evidence chunks based on backward-flowing verification scores ($Score_{final} = \alpha \times Score_{retr} + \beta \times Score_{verif}$).
+    3.  **Generator Re-Prompting:** Feeds the logic critique back to the LLM context (e.g., via **Chain-of-Verification**) to rewrite the answer.
 
--   **Process:**
-    1.  **Strategy Selection:** Based on the aggregate confidence score and specific claim verdicts, one of the following strategies is applied:
-        -   **Filtering (Default):**
-            -   **If "Contradictory"**: The claim is suppressed or replaced with a warning (e.g., "[Warning: The following claim contradicts the source]").
-            -   **If "Low Confidence"**: The claim is flagged with a visual indicator.
-            -   **If "Supported"**: The claim is included as is.
-        -   **Re-ranking (Optional):**
-            -   If the verifier finds that lower-ranked evidence better supports the generated claims (e.g., via NLI entailment), the evidence list is re-ordered for the final citation output.
-        -   **Re-prompting (Optional/Advanced):**
-            -   If the overall hallucination rate exceeds a threshold (e.g., > 50% claims are contradictory), a new prompt is constructed containing the verification feedback, asking the LLM to self-correct.
+### 4. Hybrid UI Layer
 
--   **Outputs:**
-    -   `final_response`: (string) The final text with flags, suppressions, or the result of a re-generation.
-    -   `mitigation_log`: (dict) A record of actions taken (e.g., "filtered_claim_3", "re-ranked_evidence").
+Transparently exposes the system's reasoning via two specialized interfaces.
 
-### 4. Minimal Confidence UI (Table/Badges)
+-   **Interfaces:**
+    1.  **Confidence UI:** A simple view for standard users showing final verdicts, colored claim spans, and basic signal badges.
+    2.  **Controlled UI:** An advanced debugging environment allowing per-signal drill-downs (log probabilities, detailed NLI breakdowns, and raw entity matches).
+-   **Signal Bucketing:** Normalizes high-dimensional telemetry into qualitative "High/Medium/Low" buckets for readability.
 
-This module provides a simple, transparent view of the confidence signals.
+---
 
--   **Inputs:**
-    -   `verified_claims`: (List[dict]) The output from the Verifier Module.
+## Post-Processing & Evaluation Infrastructure
+
+### 5. Citation Formatter Module
+The system converts verified responses into human-readable, grounded text through a specialized mapping layer.
 
 -   **Process:**
-    1.  Displays the final response with clear visual cues (e.g., colored highlights or badges) for each claim based on its `final_verdict`.
-    2.  On hover or click, a simple table or list appears, showing the raw values from the `confidence_breakdown` for that claim (e.g., "Entropy: 0.85", "NLI Contradiction: 0.92", "Coverage: 0.65").
-    3.  No complex visualizations like radial or donut charts are used at this stage.
+    1.  **Index Mapping:** Ranks the $k$ evidence chunks for each claim.
+    2.  **Span Injection:** Injects bracketed citations `[i]` into the answer text according to character-level span boundaries.
+    3.  **CiteEval Adapting:** Formats the final answer into the `CiteEvalSystemExample` structure (id, query, passages, pred) for third-party evaluation.
 
--   **Outputs:**
-    -   An interactive user interface that allows users to inspect the raw, multi-dimensional evidence behind each claim's confidence level.
+### 6. Evaluation Framework
+Built-in modules measure the pipeline's effectiveness against known benchmarks.
+
+-   **Modules:**
+    -   **RAGTruth Evaluator:** Computes hallucination detection accuracy on the RAGTruth dataset.
+    -   **Composite Scorer:** Combines precision, recall, and NLI entailment scores into an overall performance index.
+    -   **Ablation Support:** Facility to disable individual verifier detectors to measure their relative contribution.
 
 ---
 *Interface for Future Training:* The `Verifier Module` is designed to be extensible. Each trainless signal component can be replaced by a trained model in the future. The `Rule-Based Aggregator` can be swapped with a trainable `Ensemble Fusion Logic` that learns to weigh the signals optimally, without changing the overall architecture.
@@ -181,9 +183,11 @@ Associates a claim with its corresponding retrieved evidence.
   "claim_id": "c_0007",
   "evidence_candidates": ["enwiki_12345#17","enwiki_77889#04"],
   "top_evidence": "enwiki_12345#17",
-  "evidence_spans": [
-    {"doc_id": "enwiki_12345", "sent_id": 17, "text": "The FEVER dataset was introduced in 2018...", "rank": 3}
-  ]
+  "generator_metadata": {
+    "tokens": ["The", "FE", "VER", " dataset", "..."],
+    "token_entropies": [0.12, 0.45, 0.23],
+    "probs": [0.99, 0.88, 0.95]
+  }
 }
 ```
 
