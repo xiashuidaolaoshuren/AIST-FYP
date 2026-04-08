@@ -53,6 +53,8 @@ The Baseline RAG Pipeline (`BaselineRAGPipeline`) is the critical starting point
 
 #### A. Hybrid Retrieval Strategy
 
+The **Hybrid Retrieval Strategy** is responsible for grounding the generation process in high-quality, relevant evidence by bridging the "lexical gap" between user queries and the knowledge base. It serves as the critical bridge between the raw Wikipedia corpus and the generator LLM, ensuring that the information provided to the model is both semantically relevant and lexically precise. 
+
 Our foundation relies on the synthesis of dense semantic matching and sparse lexical keyword search to minimize the "lexical gap" identified in the first term.
 
 *   **Dense Semantic Search (FAISS):** We continue to use high-dimensional Sentence-Transformers encoding into an `IndexFlatIP`. This guarantees excellent recall for conceptual and synonymous relationships.
@@ -81,7 +83,9 @@ def retrieve(self, query: str, top_k: int = 5) -> List[EvidenceChunk]:
 
 #### B. Generation with Metadata Harvesting
 
-The generator is responsible for drafting the preliminary response from the fused user query and context. Our custom wrapper (`GeneratorWrapper`) implements metadata harvesting during sequence decoding. 
+The **Generation Module** is responsible for synthesizing a coherent, context-aware preliminary response based on the query and the evidence retrieved in the previous stage. Beyond narrative construction, its secondary—and equally critical—responsibility is to act as a **telemetry source** for the Verifier. By exposing the LLM's internal probabilistic state (logits) during the decoding process, it provides the "intrinsic" signals needed to distinguish between a confident factual statement and a low-confidence "stochastic guess." This module ensures that the subsequent verification stages have access to the model's internal uncertainty, which is a key predictor of potential hallucination [3].
+
+Our custom wrapper (`GeneratorWrapper`) implements metadata harvesting during sequence decoding. 
 
 *   **Logit Extraction:** By forcing `output_scores=True` inside standard `generate` calls, we intercept the unnormalized output logs (logits) iteratively. 
 *   **Token Probabilities:** Our generator maintains exact indices and maps raw text characters to internal SubWord tokens, securing accurate references for verification algorithms. 
