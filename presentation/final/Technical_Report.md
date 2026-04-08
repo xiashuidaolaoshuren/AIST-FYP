@@ -10,7 +10,55 @@
 
 Our project aims to address the critical issue of factual hallucinations in Large Language Models (LLMs), particularly within Retrieval-Augmented Generation (RAG) frameworks [2]. Building on the progress from the first term, we have successfully developed a complete **four-stage end-to-end pipeline** that acts as a post-hoc safety layer, combining a **trainless verifier** with a proactive **mitigation module**. This research is grounded in the taxonomies and challenges identified in contemporary surveys on the phenomenon [1].
 
-![System Architecture](../../System_Architecture_Design%20_%20Mermaid%20Chart-2025-11-22-041757.png)
+```mermaid
+graph TD
+    A[User Query] --> B;
+    subgraph B[Baseline RAG Module]
+        direction LR
+        B1["Hybrid Retriever (FAISS + BM25)"] --> B2{Generator};
+    end
+    B --> C["Draft Response + Metadata"];
+    C --> C1["ClaimExtractor (Dependency Parsing)"];
+    C1 --> D;
+    subgraph D["Verifier Module (Trainless Signals)"]
+        direction TB
+        D1["Intrinsic Uncertainty (Entropy)"]
+        D2["Self-Agreement (Consistency)"]
+        D3["Retrieval Overlap (Heuristics)"]
+        D4["Zero-Shot NLI (DeBERTa-v3)"]
+        D5["Entity Alias Matcher"]
+        D_Aggregator{"Rule-Based Aggregator"}
+        D1 --> D_Aggregator;
+        D2 --> D_Aggregator;
+        D3 --> D_Aggregator;
+        D4 --> D_Aggregator;
+        D5 --> D_Aggregator;
+    end
+    D --> E["Verified Claims with Confidence Breakdown"];
+    subgraph F["Mitigation Orchestrator (Policy Router)"]
+        direction TB
+        F_Router{"Goal-Oriented Router"}
+        F1["Evidence Re-Ranking"]
+        F2["Generator Re-Prompting"]
+        F3["Claim Filtering (Safe Safeguard)"]
+        
+        F_Router -- "Low Confidence Ratio > T1" --> F1
+        F_Router -- "Factual Ambiguity/Gaps" --> F2
+        F_Router -- "Contradiction Ratio > T2" --> F3
+    end
+    E --> F;
+    F1 --> G["Citation Formatter (CiteEval)"];
+    F2 --> G
+    F3 --> G
+    G --> H[Final Verified Response];
+    H --> I((Final Output));
+
+    style B fill:#f9f,stroke:#333,stroke-width:2px
+    style D fill:#ccf,stroke:#333,stroke-width:2px
+    style F fill:#fcf,stroke:#333,stroke-width:2px
+    style G fill:#dfd,stroke:#333,stroke-width:2px
+    style I fill:#bdf,stroke:#333,stroke-width:4px
+```
 
 ### Core Architecture: Generator-Retriever-Verifier-Mitigator
 The system follows a structured pipeline designed to ensure that generating claims are grounded in retrieved evidence, verified for factuality, and automatically corrected if evidence proves contradictory:
@@ -53,7 +101,7 @@ The Baseline RAG Pipeline (`BaselineRAGPipeline`) is the critical starting point
 
 #### A. Hybrid Retrieval Strategy
 
-The **Hybrid Retrieval Strategy** is responsible for grounding the generation process in high-quality, relevant evidence by bridging the "lexical gap" between user queries and the knowledge base. It serves as the critical bridge between the raw Wikipedia corpus and the generator LLM, ensuring that the information provided to the model is both semantically relevant and lexically precise. 
+The **Hybrid Retrieval Strategy** is responsible for grounding the generation process in high-quality, relevant evidence by bridging the "lexical gap" between user queries and the knowledge base. Its primary role is to retrieve the most pertinent evidence documents from our Wikipedia corpus or user-provided context, serving as the critical bridge between the raw knowledge source and the generator LLM. Ensure that the information provided to the model is both semantically relevant and lexically precise. Correct retrieval at this stage directly correlates with higher verification scores in downstream modules.
 
 Our foundation relies on the synthesis of dense semantic matching and sparse lexical keyword search to minimize the "lexical gap" identified in the first term.
 
@@ -113,7 +161,7 @@ def generate_with_metadata(self, prompt: str, evidence_chunks: List) -> Dict:
     }
 ```
 
-#### C. Atomic Claim Extraction
+## 3. Atomic Claim Extraction
 
 Working with entire paragraphs drastically degrades verification reliability. Post-generation, the system employs spaCy Dependency Parsing to intelligently fragment raw LLM text outputs into `Claim` objects. 
 
@@ -121,16 +169,16 @@ Every sentence boundary is split, resulting in individual properties ("The Eiffe
 
 ---
 
-## 3. The Trainless Verifier Module
+## 4. The Trainless Verifier Module
 
 The Verifier Module is the core innovation of our project. It fundamentally shifts away from computationally expensive, black-box "LLM-as-a-Judge" frameworks [9] towards a rigorous, transparent ensemble of zero-shot signals. By inspecting both the model's internal statistical confidence and the external linguistic overlap, the `VerifierHub` issues a highly contextualized verdict.
 
-### 3.1 Core Data Structure: Claim-Evidence Pair
+### 4.1 Core Data Structure: Claim-Evidence Pair
 The verifier operates strictly on atomic `ClaimEvidencePair` objects. This ensures sentence-level precision rather than paragraph-level ambiguity.
 *   **Input:** `ClaimEvidencePair(claim: Claim, evidence_candidates: List[EvidenceChunk], generator_metadata: dict)`
 *   **Output:** `VerifiedClaim` (includes confidence scores of the 4 independent signals and a final categorical verdict: Supported, Contradictory, or Low Confidence).
 
-### 3.2 Intrinsic Uncertainty Detector
+### 4.2 Intrinsic Uncertainty Detector
 
 **Core Idea & Inspiration:**  
 This detector is inspired by the **SelfCheckGPT** framework [3], which posits that LLMs behave like "stochastic parrots" when they lack factual knowledge. The core hypothesis is that factual hallucinations are not random errors but are preceded by high internal model uncertainty. When a model "knows" a fact, it allocates nearly all probability mass to a single, correct token. Conversely, when fabricating information, the probability distribution becomes "flat" or "entropic" as the model essentially guesses between multiple plausible-sounding but incorrect tokens. By measuring this "intrinsic" signal, we can detect hallucinations even without external evidence.
@@ -158,7 +206,7 @@ def _calculate_entropy(self, logits: np.ndarray) -> float:
     return float(entropy)
 ```
 
-### 3.3 Retrieval-Grounded Heuristics
+### 4.3 Retrieval-Grounded Heuristics
 
 **Core Idea & Inspiration:**  
 Drawing inspiration from traditional fact-checking benchmarks like **FEVER** [4], this module operates on the principle of **lexical grounding**. The idea is that for a claim to be considered "faithful" to its source, it must preserve the core "anchors" of the evidence—specifically named entities and numeric values. Hallucinations often involve "entity-swapping" (mixing up names) or "numeric drift" (incorrect dates or quantities). By strictly enforcing coverage of these anchors, we provide a fast, interpretable heuristic that catches the most common types of RAG hallucinations before invoking more latent, compute-heavy semantic checks.
@@ -188,7 +236,7 @@ def _calculate_entity_coverage(self, claim: Claim, evidence: EvidenceChunk) -> f
     return matched / len(entities) if entities else 1.0
 ```
 
-### 3.4 Zero-Shot Natural Language Inference (NLI)
+### 4.4 Zero-Shot Natural Language Inference (NLI)
 
 **Core Idea & Inspiration:**  
 While lexical overlap is a strong signal, it cannot capture logical contradictions (e.g., adding a "not" to a sentence preserves almost all tokens but flips the meaning). This module is inspired by the **SummaC** [6] and **Self-RAG** [7] research, which repurposes Natural Language Inference (NLI) for factuality verification. By treating the evidence as a "premise" and the claim as a "hypothesis," we can use a model trained on logical relationships to detect if the evidence *actually supports* the claim. This adds a critical layer of semantic understanding that simple word-matching lacks.
@@ -218,7 +266,7 @@ def detect(self, claim: str, evidence: str) -> Dict[str, float]:
     }
 ```
 
-### 3.5 Self-Agreement Detector
+### 4.5 Self-Agreement Detector
 
 **Core Idea & Inspiration:**  
 This detector is based on the **Self-Consistency (CoT-SC)** principle [8]. The intuition is that for internal knowledge-based questions, an LLM that "knows" the answer will converge on the same factual claim regardless of slight variations in the prompt or decoding path. However, if the model is hallucinating (guessing), it will generate different, inconsistent stories across multiple independent runs. By checking if a claim "agrees" with other stochastic samples of the same model, we can verify its stability and reliability.
@@ -250,7 +298,7 @@ def check_agreement(self, claim: str, query: str, num_samples: int = 5) -> float
     return supports / num_samples
 ```
 
-### 3.6 Rule-Based Aggregation
+### 4.6 Rule-Based Aggregation
 The four independent signals are passed to the `VerifierHub`'s aggregation engine. 
 
 *   **Technical Highlights:**
@@ -285,11 +333,11 @@ def aggregate(self, aggregate_input: Dict) -> Verdict:
 
 ---
 
-## 4. The Mitigation Module
+## 5. The Mitigation Module
 
 Once the `VerifierHub` has classified the claims within a generated response, the system enters its active correction phase. Our architecture fundamentally differs from traditional "generate-and-hope" RAG systems by implementing a robust `MitigationOrchestrator`. This module enforces safety policies without requiring computationally expensive model retraining or reinforcement learning, relying instead on programmatic feedback loops and objective-aware routing.
 
-### 4.1 Mitigation Policy Router
+### 5.1 Mitigation Policy Router
 
 **Core Idea & Inspiration:**  
 Not all factual errors require the same level of intervention. The **Mitigation Policy Router** acts as an intelligent gating system that dictates *which* corrective actions to take based on the density and severity of the detected hallucinations. Inspired by cascading fallback mechanisms in production ML systems, it evaluates the proportion of contradictory or low-confidence claims to trigger appropriate responses (e.g., if a response is slightly unsure, reranking might suffice; if it actively contradicts the source, hard filtering is required).
@@ -322,7 +370,7 @@ def resolve_actions(self, decisions: List[ClaimDecision], goal_override: str = N
     return allowed
 ```
 
-### 4.2 Evidence Re-Ranker
+### 5.2 Evidence Re-Ranker
 
 **Core Idea & Inspiration:**  
 Often, hallucination occurs not because the knowledge base lacks the fact, but because the retriever positioned the critical evidence chunk too low for the generator to attend to it properly. Re-ranking combines the initial semantic retrieval score with the **backward-flowing verification score** to surface the most factually supportive context for subsequent generation attempts.
@@ -360,7 +408,7 @@ def rerank(self, evidence_list: List[EvidenceChunk], verification_signals: Dict[
     return [item[0] for item in scored_evidence]
 ```
 
-### 4.3 Generator Re-prompting
+### 5.3 Generator Re-prompting
 
 **Core Idea & Inspiration:**  
 Drawing direct inspiration from **Chain-of-Verification (CoVe)** [12] and **Self-RAG** [7], the Re-prompter leverages the LLM's own capacity for self-correction. If an LLM is made explicitly aware of its specific logical contradictions through a systemic feedback loop, it can often rewrite its answer correctly. We feed the verifier's explicit, claim-by-claim critique back into the LLM context.
@@ -398,7 +446,7 @@ def reprompt(self, query: str, answer: str, decisions: List[ClaimDecision]) -> D
     return {'final_answer': corrected['text'], 'improved': True}
 ```
 
-### 4.4 Claim Filtering (The Final Safeguard)
+### 5.4 Claim Filtering (The Final Safeguard)
 
 **Core Idea & Inspiration:**  
 As a final, absolute safeguard against misinformation reaching the user, any claim that survives reranking and reprompting but is still rigorously classified as `Contradictory` must be programmatically excised from the text. This guarantees factual alignment above narrative fluency. 
@@ -427,7 +475,7 @@ def filter_answer(self, answer_text: str, claims: List[Claim], decisions: List[C
 
 ---
 
-## 5. Final Conclusion & Future Work
+## 6. Final Conclusion & Future Work
 
 Our four-stage system proves that hallucination mitigation does not require constant fine-tuning of massive generator models. By pairing open-source retrieval (FAISS/BM25) with a rigorous, trainless verifier (combining Intrinsic Entropy, NLI Cross-Encoders, and Self-Consistency), and coupling that with a proactive Mitigation Orchestrator (Reranking, Reprompting, and Filtering), we have established a highly interpretable, reliable, and grounded NLP pipeline.
 
