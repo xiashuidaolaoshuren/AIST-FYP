@@ -496,7 +496,27 @@ def filter_answer(self, answer_text: str, claims: List[Claim], decisions: List[C
 
 ---
 
-## 3. Final Conclusion & Future Work
+## 3. Pipeline Demonstration Interface
+
+To practically demonstrate our hallucination detection and mitigation pipeline, we developed interactive web applications using the **Gradio** framework. The interface design and step-by-step interactive workflow were heavily inspired by the **LettuceDetect** framework [15], which advocates for a transparent, multi-stage inspection of LLM hallucinations.
+
+Our demonstration suite consists of two distinct UI modes tailored for different levels of analysis:
+
+#### 3.1 Confidence UI (Simple Mode)
+The **Confidence UI (`src/ui/confidence_ui.py`)** is designed for high-level, quick verification. Users input a query, and the system performs the entire RAG, generation, and verification process seamlessly in the background. The final output is rendered with a simple, intuitive color-coding scheme to highlight factual reliability at the sentence level:
+*   **Green:** Supported (High Confidence)
+*   **Red:** Contradictory (Factual Error)
+*   **Yellow/Orange:** Low Confidence (Stochastic Guess)
+
+#### 3.2 Controlled Pipeline UI (Advanced Mode)
+The **Controlled Pipeline UI (`src/ui/controlled_ui.py`)** serves as a laboratory environment, breaking the process down into a transparent, three-stage interactive workflow (Generate $\rightarrow$ Edit/Verify $\rightarrow$ Mitigate) reflecting the LettuceDetect paradigm:
+1.  **Stage 1 (Generation):** The user submits a query, and the baseline RAG module generates an unverified draft alongside retrieved evidence.
+2.  **Stage 2 (Verification & Editing):** The system extracts claims and runs the trainless verifier. Users can inspect the specific signals (Entropy, NLI, etc.) for each claim. Furthermore, researchers can manually edit the claims in this stage to test how the verifier reacts to injected errors.
+3.  **Stage 3 (Mitigation):** Based on the verification verdicts, the `MitigationOrchestrator` applies its goal-oriented routing policy (Rerank, Reprompt, or Filter). The UI displays the precise actions taken and the final, safe, mitigated response.
+
+---
+
+## 4. Final Conclusion & Future Work
 
 Our four-stage system proves that hallucination mitigation does not require constant fine-tuning of massive generator models. By pairing open-source retrieval (FAISS/BM25) with a rigorous, trainless verifier (combining Intrinsic Entropy, NLI Cross-Encoders, and Self-Consistency), and coupling that with a proactive Mitigation Orchestrator (Reranking, Reprompting, and Filtering), we have established a highly interpretable, reliable, and grounded NLP pipeline.
 
@@ -533,3 +553,5 @@ Future iterations of this project will explore substituting zero-shot components
 [13] O. Honovich *et al.*, "TRUE: Re-evaluating Factual Consistency Evaluation," *NAACL*, 2022.
 
 [14] "CiteEval: Principle-Driven Citation Evaluation for Source Attribution," *arXiv preprint*, 2024.
+
+[15] Á. Kovács and G. Recski, "LettuceDetect: A Hallucination Detection Framework," *arXiv preprint arXiv:2502.17125*, 2025.
