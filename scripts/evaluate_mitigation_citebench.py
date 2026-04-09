@@ -61,6 +61,64 @@ class VariantRuntime:
     sentence_retrieval_top_k: int = 5
 
 
+def _is_intrinsic_only_variant(runtime: VariantRuntime) -> bool:
+    """Return True when only intrinsic verifier module is enabled."""
+    verification_cfg = runtime.config.get("verification", {})
+    if not isinstance(verification_cfg, dict):
+        return False
+    modules = verification_cfg.get("modules", {})
+    if not isinstance(modules, dict):
+        return False
+
+    intrinsic_enabled = bool(modules.get("intrinsic", False))
+    grounded_enabled = bool(modules.get("grounded", False))
+    nli_enabled = bool(modules.get("nli", False))
+    self_agreement_enabled = bool(modules.get("self_agreement", False))
+
+    return intrinsic_enabled and not grounded_enabled and not nli_enabled and not self_agreement_enabled
+
+
+def _build_fallback_verification_metadata(
+    runtime: VariantRuntime,
+    *,
+    prompt: str,
+    target_text: str,
+    evidence_chunks: list[EvidenceChunk],
+) -> dict[str, Any]:
+    """Build robust verification metadata when sub-answer metadata is unavailable."""
+    fallback = {
+        "text": target_text,
+        "original_query": prompt,
+        "tokens": [],
+        "scores": [],
+    }
+
+    if not _is_intrinsic_only_variant(runtime):
+        return fallback
+
+    generator = getattr(runtime.pipeline, "generator", None)
+    if generator is None or not hasattr(generator, "score_target_with_metadata"):
+        return fallback
+
+    try:
+        scored = generator.score_target_with_metadata(
+            prompt=prompt,
+            target_text=target_text,
+            evidence_chunks=evidence_chunks,
+        )
+        if isinstance(scored, dict):
+            scored["original_query"] = prompt
+            scored["disable_intrinsic_uncertainty"] = False
+            return scored
+    except Exception as exc:
+        print(
+            f"[warn] teacher-forced intrinsic fallback scoring failed; using empty logits metadata: {exc}",
+            flush=True,
+        )
+
+    return fallback
+
+
 def _deep_update(target: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     for key, value in patch.items():
         if isinstance(value, dict) and isinstance(target.get(key), dict):
@@ -128,6 +186,13 @@ def _variant_patch(name: str) -> dict[str, Any]:
                     "nli": False,
                     "self_agreement": False,
                 },
+            },
+            "evaluation": {
+                "benchmarks": {
+                    "ragtruth": {
+                        "teacher_forced_intrinsic": True,
+                    }
+                }
             },
             "mitigation": {
                 "enabled": True,
@@ -497,12 +562,12 @@ def _run_with_oracle_context(runtime: VariantRuntime, query: str, row: dict[str,
                 verification_metadata.setdefault("original_query", entry["sub_query"])
                 break
         if verification_metadata is None:
-            verification_metadata = {
-                "text": draft_response,
-                "original_query": query,
-                "tokens": [],
-                "scores": [],
-            }
+            verification_metadata = _build_fallback_verification_metadata(
+                runtime,
+                prompt=query,
+                target_text=draft_response,
+                evidence_chunks=evidence_chunks,
+            )
         claim_records.append(
             {
                 "claim": claim,

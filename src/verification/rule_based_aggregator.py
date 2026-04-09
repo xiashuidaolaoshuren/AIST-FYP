@@ -32,6 +32,11 @@ from src.utils.logger import setup_logger
 from src.utils.data_structures import VerifierSignal, ClaimDecision
 
 
+STATUS_SUPPORTED = 'Supported'
+STATUS_CONTRADICTORY = 'Contradictory'
+STATUS_LOW_CONFIDENCE = 'Low Confidence'
+
+
 class SignalNormalizer:
     """
     Normalizes heterogeneous verification signals to unified 0-1 confidence scale.
@@ -447,6 +452,11 @@ class RuleBasedAggregator:
         
         # Initialize SignalNormalizer
         self.normalizer = SignalNormalizer(config)
+
+        # Resolve verifier module toggles so single-signal variants can run as
+        # true isolated ablations without inheriting unrelated gates.
+        self.module_flags = self._resolve_module_flags()
+        self.ablation_mode = self._resolve_ablation_mode(self.module_flags)
         
         # Load classification thresholds
         if (hasattr(config, 'verification') and 
@@ -497,8 +507,48 @@ class RuleBasedAggregator:
             )
         
         self.logger.info(
-            f"RuleBasedAggregator initialized with thresholds: {self.thresholds}"
+            "RuleBasedAggregator initialized with thresholds: %s (ablation_mode=%s, modules=%s)",
+            self.thresholds,
+            self.ablation_mode,
+            self.module_flags,
         )
+
+    def _resolve_module_flags(self) -> Dict[str, bool]:
+        """Load verification module flags from config, supporting ConfigSection."""
+        default_flags = {
+            'intrinsic': True,
+            'grounded': True,
+            'nli': True,
+            'self_agreement': True,
+        }
+        try:
+            verification = getattr(self.config, 'verification', None)
+            modules = getattr(verification, 'modules', None) if verification is not None else None
+            if modules is None:
+                return default_flags
+
+            if hasattr(modules, 'to_dict'):
+                modules_dict = modules.to_dict()
+            elif isinstance(modules, dict):
+                modules_dict = modules
+            else:
+                return default_flags
+
+            resolved = dict(default_flags)
+            for key in resolved:
+                if key in modules_dict:
+                    resolved[key] = bool(modules_dict[key])
+            return resolved
+        except Exception:
+            self.logger.warning("Failed to resolve module flags, falling back to all-enabled")
+            return default_flags
+
+    def _resolve_ablation_mode(self, module_flags: Dict[str, bool]) -> Optional[str]:
+        """Return isolated ablation mode when exactly one verifier module is enabled."""
+        enabled_modules = [name for name, enabled in module_flags.items() if enabled]
+        if len(enabled_modules) != 1:
+            return None
+        return f"{enabled_modules[0]}_only"
     
     def aggregate(self, signal: VerifierSignal) -> ClaimDecision:
         """
@@ -579,7 +629,7 @@ class RuleBasedAggregator:
             # Return safe fallback decision
             return ClaimDecision(
                 claim_id=signal.claim_id,
-                status='Low Confidence',
+                status=STATUS_LOW_CONFIDENCE,
                 rationale=f'Error during aggregation: {str(e)}',
                 primary_evidence=f"{signal.doc_id}#{signal.sent_id}",
                 signals_ref=[],
@@ -622,90 +672,175 @@ class RuleBasedAggregator:
         Returns:
             Tuple of (status: str, rationale: str)
         """
-        # Rule 1: Contradictory Detection (highest priority)
-        # Check NLI contradiction
-        neutral_conf = float(
-            signal.nli.get('neutral_contradiction_peak', signal.nli.get('neutral', 0.0))
-        ) if signal.nli else 0.0
-        if contradict_conf > self.thresholds['contradiction']:
-            if neutral_conf > self.thresholds['max_neutral_for_contradiction']:
-                self.logger.debug(
-                    "Suppressing contradictory decision due to high NLI neutral probability: "
-                    "neutral=%.3f, max_neutral=%.3f",
-                    neutral_conf,
-                    self.thresholds['max_neutral_for_contradiction'],
-                )
-            elif (
-                signal.primary_nli_mode == 'contradiction'
-                and support_conf >= self.thresholds['cross_chunk_entailment_guard_threshold']
-                and contradict_conf < self.thresholds['cross_chunk_min_contradiction_when_supported']
-            ):
-                self.logger.debug(
-                    "Suppressing contradictory decision due to strong cross-chunk entailment: "
-                    "support=%.3f, contradiction=%.3f, support_threshold=%.3f, contradiction_floor=%.3f",
-                    support_conf,
-                    contradict_conf,
-                    self.thresholds['cross_chunk_entailment_guard_threshold'],
-                    self.thresholds['cross_chunk_min_contradiction_when_supported'],
-                )
-            elif coverage_score < self.thresholds['min_coverage_for_contradiction']:
-                self.logger.debug(
-                    "Suppressing contradictory decision due to weak grounding: "
-                    "coverage=%.3f, min_coverage=%.3f",
-                    coverage_score,
-                    self.thresholds['min_coverage_for_contradiction'],
-                )
-            elif signal.primary_nli_mode in ('entailment', 'ambiguous'):
-                self.logger.debug(
-                    "Suppressing contradictory decision because primary NLI mode is %s",
-                    signal.primary_nli_mode,
-                )
-            # Guard against multi-evidence conflict where entailment and contradiction
-            # originate from different chunks. Strong entailment should suppress
-            # contradictory classification unless contradiction is competitive.
-            elif (
-                support_conf >= self.thresholds['entailment_override']
-                and (support_conf - contradict_conf) > self.thresholds['contradiction_margin']
-            ):
-                self.logger.debug(
-                    "Suppressing contradictory decision due to strong entailment: "
-                    "support=%.3f, contradiction=%.3f",
-                    support_conf,
-                    contradict_conf,
-                )
-            elif contradict_conf >= (support_conf - self.thresholds['contradiction_margin']):
-                return (
-                    'Contradictory',
-                    f"High NLI contradiction detected ({contradict_conf:.2f} > "
-                    f"{self.thresholds['contradiction']:.2f}). Evidence contradicts claim."
-                )
-        
-        # Check numeric mismatch (if claim contains numbers)
-        if self._has_numeric_claims(signal) and not signal.numeric_check:
-            numeric_contradiction_threshold = self.thresholds['contradiction'] * 0.6
-            if (
-                contradict_conf > numeric_contradiction_threshold
-                and contradict_conf >= (support_conf - self.thresholds['contradiction_margin'])
-            ):
-                return (
-                    'Contradictory',
-                    f"Numeric fact mismatch with contradiction corroboration "
-                    f"({contradict_conf:.2f} > {numeric_contradiction_threshold:.2f})."
-                )
+        if self.ablation_mode == 'nli_only':
+            return self._classify_nli_only(signal, contradict_conf, support_conf)
+        if self.ablation_mode == 'intrinsic_only':
+            return self._classify_intrinsic_only(entropy_conf)
+        if self.ablation_mode == 'self_agreement_only':
+            return self._classify_self_agreement_only(consistency_conf)
+
+        return self._classify_default_rules(
+            signal=signal,
+            contradict_conf=contradict_conf,
+            support_conf=support_conf,
+            coverage_score=coverage_score,
+            entropy_conf=entropy_conf,
+            consistency_conf=consistency_conf,
+        )
+
+    def _classify_default_rules(
+        self,
+        signal: VerifierSignal,
+        contradict_conf: float,
+        support_conf: float,
+        coverage_score: float,
+        entropy_conf: float,
+        consistency_conf: float,
+    ) -> Tuple[str, str]:
+        """Default multi-signal classification path used outside ablation-only modes."""
+        contradictory_result = self._classify_default_nli_contradiction(
+            signal=signal,
+            contradict_conf=contradict_conf,
+            support_conf=support_conf,
+            coverage_score=coverage_score,
+        )
+        if contradictory_result is not None:
+            return contradictory_result
+
+        numeric_result = self._classify_default_numeric_contradiction(
+            signal=signal,
+            contradict_conf=contradict_conf,
+            support_conf=support_conf,
+        )
+        if numeric_result is not None:
+            return numeric_result
         
         # Rule 2: Supported Detection (medium priority)
         if (support_conf > self.thresholds['entailment'] and 
             coverage_score > self.thresholds['coverage'] and
             not (self._has_numeric_claims(signal) and not signal.numeric_check)):
             return (
-                'Supported',
+                STATUS_SUPPORTED,
                 f"Strong NLI support ({support_conf:.2f} > {self.thresholds['entailment']:.2f}) "
                 f"with high evidence coverage ({coverage_score:.2f} > "
                 f"{self.thresholds['coverage']:.2f}). Claim well-grounded."
             )
-        
-        # Rule 3: Low Confidence (fallback)
-        # Build detailed rationale listing weak signals
+
+        rationale = self._build_default_low_confidence_rationale(
+            signal=signal,
+            support_conf=support_conf,
+            coverage_score=coverage_score,
+            entropy_conf=entropy_conf,
+            consistency_conf=consistency_conf,
+        )
+        return (STATUS_LOW_CONFIDENCE, rationale)
+
+    def _classify_default_nli_contradiction(
+        self,
+        signal: VerifierSignal,
+        contradict_conf: float,
+        support_conf: float,
+        coverage_score: float,
+    ) -> Optional[Tuple[str, str]]:
+        """Return contradiction decision for default path, or None when suppressed."""
+        neutral_conf = float(
+            signal.nli.get('neutral_contradiction_peak', signal.nli.get('neutral', 0.0))
+        ) if signal.nli else 0.0
+
+        if contradict_conf <= self.thresholds['contradiction']:
+            return None
+
+        if neutral_conf > self.thresholds['max_neutral_for_contradiction']:
+            self.logger.debug(
+                "Suppressing contradictory decision due to high NLI neutral probability: "
+                "neutral=%.3f, max_neutral=%.3f",
+                neutral_conf,
+                self.thresholds['max_neutral_for_contradiction'],
+            )
+            return None
+
+        if (
+            signal.primary_nli_mode == 'contradiction'
+            and support_conf >= self.thresholds['cross_chunk_entailment_guard_threshold']
+            and contradict_conf < self.thresholds['cross_chunk_min_contradiction_when_supported']
+        ):
+            self.logger.debug(
+                "Suppressing contradictory decision due to strong cross-chunk entailment: "
+                "support=%.3f, contradiction=%.3f, support_threshold=%.3f, contradiction_floor=%.3f",
+                support_conf,
+                contradict_conf,
+                self.thresholds['cross_chunk_entailment_guard_threshold'],
+                self.thresholds['cross_chunk_min_contradiction_when_supported'],
+            )
+            return None
+
+        if coverage_score < self.thresholds['min_coverage_for_contradiction']:
+            self.logger.debug(
+                "Suppressing contradictory decision due to weak grounding: "
+                "coverage=%.3f, min_coverage=%.3f",
+                coverage_score,
+                self.thresholds['min_coverage_for_contradiction'],
+            )
+            return None
+
+        if signal.primary_nli_mode in ('entailment', 'ambiguous'):
+            self.logger.debug(
+                "Suppressing contradictory decision because primary NLI mode is %s",
+                signal.primary_nli_mode,
+            )
+            return None
+
+        if (
+            support_conf >= self.thresholds['entailment_override']
+            and (support_conf - contradict_conf) > self.thresholds['contradiction_margin']
+        ):
+            self.logger.debug(
+                "Suppressing contradictory decision due to strong entailment: "
+                "support=%.3f, contradiction=%.3f",
+                support_conf,
+                contradict_conf,
+            )
+            return None
+
+        if contradict_conf >= (support_conf - self.thresholds['contradiction_margin']):
+            return (
+                STATUS_CONTRADICTORY,
+                f"High NLI contradiction detected ({contradict_conf:.2f} > "
+                f"{self.thresholds['contradiction']:.2f}). Evidence contradicts claim."
+            )
+        return None
+
+    def _classify_default_numeric_contradiction(
+        self,
+        signal: VerifierSignal,
+        contradict_conf: float,
+        support_conf: float,
+    ) -> Optional[Tuple[str, str]]:
+        """Return numeric contradiction decision for default path, or None."""
+        if not self._has_numeric_claims(signal) or signal.numeric_check:
+            return None
+
+        numeric_contradiction_threshold = self.thresholds['contradiction'] * 0.6
+        if (
+            contradict_conf > numeric_contradiction_threshold
+            and contradict_conf >= (support_conf - self.thresholds['contradiction_margin'])
+        ):
+            return (
+                STATUS_CONTRADICTORY,
+                f"Numeric fact mismatch with contradiction corroboration "
+                f"({contradict_conf:.2f} > {numeric_contradiction_threshold:.2f})."
+            )
+        return None
+
+    def _build_default_low_confidence_rationale(
+        self,
+        signal: VerifierSignal,
+        support_conf: float,
+        coverage_score: float,
+        entropy_conf: float,
+        consistency_conf: float,
+    ) -> str:
+        """Build low-confidence rationale for default multi-signal path."""
         reasons = []
         
         if entropy_conf < self.thresholds['entropy_conf']:
@@ -739,10 +874,95 @@ class RuleBasedAggregator:
             reasons.append(
                 "signals do not meet thresholds for 'Supported' classification"
             )
-        
-        rationale = "Low confidence: " + "; ".join(reasons) + "."
-        
-        return ('Low Confidence', rationale)
+
+        return "Low confidence: " + "; ".join(reasons) + "."
+
+    def _classify_nli_only(
+        self,
+        signal: VerifierSignal,
+        contradict_conf: float,
+        support_conf: float,
+    ) -> Tuple[str, str]:
+        """Isolated NLI-only decision path without grounding-dependent gates."""
+        neutral_conf = float(
+            signal.nli.get('neutral_contradiction_peak', signal.nli.get('neutral', 0.0))
+        ) if signal.nli else 0.0
+
+        if contradict_conf > self.thresholds['contradiction']:
+            if neutral_conf > self.thresholds['max_neutral_for_contradiction']:
+                self.logger.debug(
+                    "[nli_only] Suppressing contradictory due to high neutral probability: %.3f",
+                    neutral_conf,
+                )
+            elif signal.primary_nli_mode in ('entailment', 'ambiguous'):
+                self.logger.debug(
+                    "[nli_only] Suppressing contradictory because primary NLI mode is %s",
+                    signal.primary_nli_mode,
+                )
+            elif (
+                support_conf >= self.thresholds['entailment_override']
+                and (support_conf - contradict_conf) > self.thresholds['contradiction_margin']
+            ):
+                self.logger.debug(
+                    "[nli_only] Suppressing contradictory due to strong entailment: support=%.3f contradiction=%.3f",
+                    support_conf,
+                    contradict_conf,
+                )
+            elif contradict_conf >= (support_conf - self.thresholds['contradiction_margin']):
+                return (
+                    STATUS_CONTRADICTORY,
+                    f"NLI-only contradiction ({contradict_conf:.2f} > "
+                    f"{self.thresholds['contradiction']:.2f})."
+                )
+
+        if support_conf > self.thresholds['entailment']:
+            return (
+                STATUS_SUPPORTED,
+                f"NLI-only support ({support_conf:.2f} > {self.thresholds['entailment']:.2f})."
+            )
+
+        return (
+            STATUS_LOW_CONFIDENCE,
+            "Low confidence: NLI-only signal does not pass support/contradiction thresholds."
+        )
+
+    def _classify_intrinsic_only(self, entropy_conf: float) -> Tuple[str, str]:
+        """Isolated intrinsic uncertainty decision path."""
+        high_conf_floor = max(self.thresholds['entailment'], 0.65)
+        if entropy_conf < self.thresholds['entropy_conf']:
+            return (
+                STATUS_CONTRADICTORY,
+                f"Intrinsic-only high uncertainty (entropy_conf={entropy_conf:.2f} < "
+                f"{self.thresholds['entropy_conf']:.2f})."
+            )
+        if entropy_conf >= high_conf_floor:
+            return (
+                STATUS_SUPPORTED,
+                f"Intrinsic-only confidence is high (entropy_conf={entropy_conf:.2f} >= {high_conf_floor:.2f})."
+            )
+        return (
+            STATUS_LOW_CONFIDENCE,
+            "Low confidence: intrinsic-only uncertainty is in an ambiguous middle band."
+        )
+
+    def _classify_self_agreement_only(self, consistency_conf: float) -> Tuple[str, str]:
+        """Isolated self-agreement decision path."""
+        high_conf_floor = max(self.thresholds['entailment'], 0.65)
+        if consistency_conf < self.thresholds['consistency_conf']:
+            return (
+                STATUS_CONTRADICTORY,
+                f"Self-agreement-only inconsistency (consistency_conf={consistency_conf:.2f} < "
+                f"{self.thresholds['consistency_conf']:.2f})."
+            )
+        if consistency_conf >= high_conf_floor:
+            return (
+                STATUS_SUPPORTED,
+                f"Self-agreement-only consistency is high (consistency_conf={consistency_conf:.2f} >= {high_conf_floor:.2f})."
+            )
+        return (
+            STATUS_LOW_CONFIDENCE,
+            "Low confidence: self-agreement-only consistency is in an ambiguous middle band."
+        )
     
     def _compute_confidence_breakdown(
         self,

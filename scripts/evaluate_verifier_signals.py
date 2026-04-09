@@ -84,6 +84,13 @@ def _variant_patch(name: str) -> dict[str, Any]:
                     "self_agreement": False,
                 },
             },
+            "evaluation": {
+                "benchmarks": {
+                    "ragtruth": {
+                        "teacher_forced_intrinsic": True,
+                    }
+                }
+            },
             **deepcopy(all_mitigation_disabled),
         }
 
@@ -300,6 +307,14 @@ def _build_expected_resume_fingerprint(
     if not isinstance(mitigation_cfg, dict):
         mitigation_cfg = {}
 
+    ragtruth_cfg = (
+        config_payload.get("evaluation", {})
+        .get("benchmarks", {})
+        .get("ragtruth", {})
+    )
+    if not isinstance(ragtruth_cfg, dict):
+        ragtruth_cfg = {}
+
     def module_flag(raw_value: Any) -> bool:
         if isinstance(raw_value, dict):
             return bool(raw_value.get("enabled", False))
@@ -311,6 +326,7 @@ def _build_expected_resume_fingerprint(
         "samples_per_task": samples_per_task,
         "ragtruth_eval_mode": ragtruth_eval_mode,
         "dataset_path": dataset_path,
+        "teacher_forced_intrinsic": bool(ragtruth_cfg.get("teacher_forced_intrinsic", True)),
         "verification_enabled": bool(verification_cfg.get("enabled", True)),
         "nli_backend": str(verification_cfg.get("nli", {}).get("backend", "deberta")),
         "nli_model_name": str(verification_cfg.get("nli", {}).get("model_name", "")),
