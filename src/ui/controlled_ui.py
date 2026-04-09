@@ -280,17 +280,70 @@ class ControlledPipelineUI(ConfidenceUI):
                 self.logger.error("Generate stage failed: %s", exc, exc_info=True)
                 return "", {"error": str(exc)}, f"Generate failed: {exc}", pd.DataFrame(columns=self.evidence_columns)
 
-        def handle_verify(draft_text: str, bundle: Dict[str, Any]):
+        def handle_verify(
+            draft_text: str,
+            bundle: Dict[str, Any],
+            query_input: str,
+            user_context_input: str,
+        ):
             empty_highlight: List[Tuple[str, Optional[str]]] = []
-            if not bundle or bundle.get("error"):
-                msg = bundle.get("error", "Please generate a draft first.") if isinstance(bundle, dict) else "Please generate a draft first."
-                return empty_highlight, pd.DataFrame(), pd.DataFrame(), {}, msg
-
             text = (draft_text or "").strip()
             if not text:
                 return empty_highlight, pd.DataFrame(), pd.DataFrame(), {}, "Draft answer is empty."
 
             try:
+                bundle = bundle if isinstance(bundle, dict) else {}
+                if not bundle or bundle.get("error"):
+                    query_clean = (query_input or "").strip()
+                    context_clean = (user_context_input or "").strip()
+                    if not query_clean:
+                        msg = bundle.get("error", "Query is required before verification.") if bundle else "Query is required before verification."
+                        return empty_highlight, pd.DataFrame(), pd.DataFrame(), {}, msg
+
+                    if context_clean:
+                        evidence_chunks = self._build_user_context_evidence(query_clean, context_clean, top_k=5)
+                        source_mode = "user_context"
+                    else:
+                        retrieval_result = self.rag_pipeline.run(query_clean, top_k=5)
+                        evidence_chunks = self._extract_evidence_chunks(retrieval_result.get("claim_evidence_pairs", []))
+                        source_mode = "wikipedia"
+
+                    claims = extract_claims(text=text, method="auto")
+                    metadata = self.rag_pipeline.generator.score_target_with_metadata(
+                        prompt=query_clean,
+                        target_text=text,
+                        evidence_chunks=evidence_chunks,
+                    )
+                    metadata.update({
+                        "text": text,
+                        "original_query": query_clean,
+                    })
+                    sub_answers = [{
+                        "text": text,
+                        "char_span": [0, len(text)],
+                        "sub_answer_id": 0,
+                        "sub_query": query_clean,
+                    }]
+                    claims_by_sub_answer = [{
+                        "sub_answer_id": 0,
+                        "sub_text": text,
+                        "sub_query": query_clean,
+                        "claims": claims,
+                    }]
+                    claim_evidence_pairs = self._build_pairs_for_claims(claims, evidence_chunks)
+
+                    bundle = {
+                        "query": query_clean,
+                        "source_mode": source_mode,
+                        "generated_text": text,
+                        "claims": claims,
+                        "evidence_chunks": evidence_chunks,
+                        "claim_evidence_pairs": claim_evidence_pairs,
+                        "generator_metadata": metadata,
+                        "sub_answers": sub_answers,
+                        "claims_by_sub_answer": claims_by_sub_answer,
+                    }
+
                 query = bundle.get("query", "")
                 generated_text = bundle.get("generated_text", "")
                 evidence_chunks: List[EvidenceChunk] = bundle.get("evidence_chunks", [])
@@ -412,7 +465,7 @@ class ControlledPipelineUI(ConfidenceUI):
                     working_evidence = self.evidence_reranker.rerank(working_evidence, signal_map)
 
                 if enable_filter and self.claim_filter:
-                    filtered_text, _ = self.claim_filter.filter_answer(
+                    filtered_text, _, _ = self.claim_filter.filter_answer(
                         answer_text=working_answer,
                         claims=working_claims,
                         decisions=working_decisions,
@@ -559,7 +612,7 @@ class ControlledPipelineUI(ConfidenceUI):
 
             verify_btn.click(
                 fn=handle_verify,
-                inputs=[draft_box, generation_state],
+                inputs=[draft_box, generation_state, query_box, context_box],
                 outputs=[highlighted_output, details_df, evidence_df, verification_state, status_box],
             )
 

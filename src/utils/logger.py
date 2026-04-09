@@ -7,6 +7,8 @@ both file and console handlers, suitable for long-running operations.
 
 import json
 import logging
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -76,6 +78,18 @@ def setup_logger(
         >>> logger.info("Processing started")
         >>> logger.error("An error occurred")
     """
+    # Support env override so notebook launchers can surface logs without code changes.
+    env_console_level = os.getenv('AIST_STDOUT_LOG_LEVEL', '').strip().upper()
+    if env_console_level:
+        level_map = {
+            'CRITICAL': logging.CRITICAL,
+            'ERROR': logging.ERROR,
+            'WARNING': logging.WARNING,
+            'INFO': logging.INFO,
+            'DEBUG': logging.DEBUG,
+        }
+        console_level = level_map.get(env_console_level, console_level)
+
     # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)  # Capture all levels, handlers will filter
@@ -116,9 +130,9 @@ def setup_logger(
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    # Console handler (ERROR level)
+    # Console handler (defaults to stderr in stdlib; force stdout for Colab visibility)
     if not has_console_handler():
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(stream=sys.stdout)
         console_handler.setLevel(console_level)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)

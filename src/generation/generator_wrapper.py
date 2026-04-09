@@ -380,10 +380,12 @@ class GeneratorWrapper:
         """
         system_instruction = (
             "You are a factual assistant. If context is provided, answer using only supported facts "
-            "from the provided passages. Write short, atomic sentences with one factual claim per sentence. "
+            "from the provided passages. Write complete sentences with one factual claim per sentence. "
+            "Include relevant supporting details from the passages when available. "
             "Prefer concrete wording from the passages for entities, numbers, dates, and named facts. "
             "Do not guess or add unsupported details; if support is insufficient, omit the claim. "
-            "Answer directly and concisely in plain prose. Do not include meta commentary, self-evaluation, "
+            "Provide a complete answer in plain prose with supporting context. "
+            "Do not include meta commentary, self-evaluation, "
             "note sections, or statements about passage selection. Respond in English only."
         )
 

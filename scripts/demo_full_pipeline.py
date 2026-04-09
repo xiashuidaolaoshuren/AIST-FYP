@@ -221,6 +221,11 @@ def main():
     """
     args = parse_args()
     in_colab = is_running_in_colab()
+
+    # In Colab, make all setup_logger()-based module logs visible in notebook stdout.
+    if in_colab and not os.getenv("AIST_STDOUT_LOG_LEVEL"):
+        os.environ["AIST_STDOUT_LOG_LEVEL"] = "INFO"
+
     controlled_ui_available = True
 
     try:

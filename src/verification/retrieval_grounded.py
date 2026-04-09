@@ -153,12 +153,26 @@ class RetrievalGroundedDetector:
                     "event": "detector_retrieval_grounded",
                     "data": {
                         "claim_id": claim.claim_id,
+                        "claim_text": claim.text,
                         "entities": entities_score,
                         "numbers": numbers_score,
-                        "tokens_overlap": overlap_score
+                        "tokens_overlap": overlap_score,
+                        "evidence_len": len(evidence.text or ""),
+                        "evidence_preview": (evidence.text or "")[:220],
                     }
                 }
             )
+
+            if entities_score <= 1e-6 and overlap_score <= 1e-6:
+                self.logger.warning(
+                    "Grounded signal collapsed to near-zero coverage components for claim %s. "
+                    "numbers=%.2f evidence_len=%d claim='%s' evidence_preview='%s'",
+                    claim.claim_id,
+                    numbers_score,
+                    len(evidence.text or ""),
+                    claim.text[:180],
+                    (evidence.text or "")[:180],
+                )
             
             return {
                 'entities': entities_score,
