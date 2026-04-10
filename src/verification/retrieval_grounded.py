@@ -141,6 +141,30 @@ class RetrievalGroundedDetector:
             entities_score = self._calculate_entity_coverage(claim, evidence)
             numbers_score = self._calculate_number_coverage(claim, evidence)
             overlap_score = self._calculate_token_overlap(claim, evidence)
+
+            doc_claim = self.nlp(claim.text)
+            claim_entities = [
+                ent.text
+                for ent in doc_claim.ents
+                if ent.label_ in self.entity_types
+            ]
+            claim_numbers = [
+                token.text
+                for token in doc_claim
+                if token.like_num
+            ]
+
+            evidence_text = evidence.text
+            matched_entities = [
+                entity
+                for entity in claim_entities
+                if self.entity_matcher.match_entity(entity, evidence_text)
+            ]
+            matched_numbers = [
+                number
+                for number in claim_numbers
+                if number in evidence_text
+            ]
             
             self.logger.debug(
                 f"Claim {claim.claim_id}: entities={entities_score:.2f}, "
@@ -186,7 +210,11 @@ class RetrievalGroundedDetector:
             return {
                 'entities': entities_score,
                 'numbers': numbers_score,
-                'tokens_overlap': overlap_score
+                'tokens_overlap': overlap_score,
+                'claim_entities': claim_entities,
+                'matched_entities': matched_entities,
+                'claim_numbers': claim_numbers,
+                'matched_numbers': matched_numbers,
             }
         
         except Exception as e:
