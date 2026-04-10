@@ -103,3 +103,36 @@ Modules: `ca`, `ce`, `cr_itercoe`, `cr_editdist`
 3. `mitigation_rerank_only` improves citation quality over `full_verifier_filter`, but it trails the other mitigation variants on answer-level citation recall.
 4. `mitigation_all` is competitive, but it does not beat `mitigation_reprompt_only`, which suggests the combined mitigation stack does not add enough complementary benefit over reprompting alone in this run.
 5. All mitigation variants are substantially stronger than `full_verifier_filter`, so verifier-only filtering is not sufficient to maximize CiteBench quality; the mitigation-stage intervention matters.
+
+## Analysis
+
+### Full Verifier vs Mitigation All
+
+When comparing the `full_verifier_filter` baseline (which relies strictly on the verification stage to filter unsupported claims) to the `mitigation_all` variant (which employs the full suite of filtering, reranking, and reprompting), there is a stark performance gap across all major quality metrics. 
+
+- **Statement Rating:** `mitigation_all` achieves **0.8158**, compared to just **0.5934** for `full_verifier_filter`.
+- **CE Mean Sentence Rating:** `mitigation_all` reaches **4.0402**, far surpassing the baseline's **2.7504**.
+- **Citation Recall (IterCoE / EditDist):** `mitigation_all` leads with **0.7824 / 0.8457**, whereas the baseline struggles at **0.5798 / 0.7849**.
+
+Interestingly, both variants delete a similar amount of content (`mitigation_all` filters 24 claims; `full_verifier_filter` filters 22). This indicates that the massive quality increase in `mitigation_all` does not come from simply deleting more hallucinations. Instead, it proves that **active mitigation strategies (like reprompting and reranking) are required to repair the final generated text** and properly align the citations, solving issues that a purely subtractive verification filter cannot fix.
+
+### Mitigation Variant Analysis
+
+A closer look at the isolated mitigation modules reveals how each intervention shapes the final response:
+
+1. **`mitigation_reprompt_only` (The Top Performer):** 
+   This variant achieves the highest overall quality (Statement Rating: **0.8216**, CE Mean Sentence Rating: **4.0640**, CR IterCoE: **0.7899**). Because it asks the LLM to actively rewrite the answer using the verification signals, it can gracefully correct weakly-supported statements and re-weave the narrative, rather than abruptly cutting sentences out or just shifting evidence.
+2. **`mitigation_filter_only` (The Aggressive Subtractor):** 
+   This is the most aggressive variant, filtering 30 claims (a 0.0413 filter rate). While it successfully removes bad claims (improving citation quality over the baseline), it naturally reduces answer length and coverage. It cannot repair surviving weak claims, making it fundamentally limited compared to reprompting.
+3. **`mitigation_rerank_only` (The Context Organizer):** 
+   This variant improves evidence alignment and citation density (**0.8836**) by reordering the context provided to the model. However, because it doesn't remove unsupported content or actively rewrite the model's past mistakes, its gains in raw citation recall are moderate (CR IterCoE: **0.7698**).
+4. **`mitigation_all` (The Ensemble):** 
+   While extremely strong, it slightly underperforms `reprompt_only` on key metrics. This suggests that combining all interventions concurrently might introduce slight redundancies or over-corrections (e.g., aggressively filtering a claim that the reprompt module might have otherwise successfully rewritten and salvaged).
+
+### Brief Conclusion for Report Writing
+
+For the FYP report, the following key narratives can be elaborated by the team:
+
+- **Detection is Not Correction:** Verifier-only labeling and basic filtering (`full_verifier_filter`) are insufficient for high-quality citation generation. CiteBench strictly evaluates the final text, verifying that an active *mitigation* phase is mandatory.
+- **Rewriting beats Deletion:** The `reprompt_only` strategy proved to be the most effective mitigation technique. Allowing the LLM to holistically rewrite its answer based on verification signals yields more coherent and better-cited text than simply deleting (`filter_only`) isolated bad claims.
+- **Ensemble Interference:** Stacking all mitigations (`mitigation_all`) doesn't strictly yield the best result. The interplay between aggressive filtering and reprompting can cause slight degradation compared to relying on reprompting alone. Future work may require dynamic routing (e.g., only using filtering if reprompting fails) rather than a static pipeline.
