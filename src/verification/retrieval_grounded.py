@@ -148,6 +148,15 @@ class RetrievalGroundedDetector:
             )
 
             self.logger.info(
+                "Grounded signal for claim %s: entities=%.2f numbers=%.2f token_overlap=%.2f evidence_len=%d",
+                claim.claim_id,
+                entities_score,
+                numbers_score,
+                overlap_score,
+                len(evidence.text or ""),
+            )
+
+            self.logger.info(
                 "detector_retrieval_grounded",
                 extra={
                     "event": "detector_retrieval_grounded",

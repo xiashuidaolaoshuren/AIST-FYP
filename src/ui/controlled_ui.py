@@ -292,6 +292,7 @@ class ControlledPipelineUI(ConfidenceUI):
                 return empty_highlight, pd.DataFrame(), pd.DataFrame(), {}, "Draft answer is empty."
 
             try:
+                print("[verify] callback start", flush=True)
                 bundle = bundle if isinstance(bundle, dict) else {}
                 if not bundle or bundle.get("error"):
                     query_clean = (query_input or "").strip()
@@ -423,9 +424,12 @@ class ControlledPipelineUI(ConfidenceUI):
                     f"Low Confidence={stats['low_conf']}, "
                     f"Contradictory={stats['contradictory']}."
                 )
+                self.logger.info("[verify] %s", status)
+                print(f"[verify] {status}", flush=True)
                 return highlighted, details_df, evidence_df, verify_state, status
             except Exception as exc:
                 self.logger.error("Verify stage failed: %s", exc, exc_info=True)
+                print(f"[verify] failed: {exc}", flush=True)
                 return empty_highlight, pd.DataFrame(), pd.DataFrame(), {}, f"Verify failed: {exc}"
 
         def handle_mitigate(
@@ -439,6 +443,7 @@ class ControlledPipelineUI(ConfidenceUI):
                 return empty, empty, "Run verification before mitigation.", pd.DataFrame(), {}
 
             try:
+                print("[mitigate] callback start", flush=True)
                 query = verify_state.get("query", "")
                 base_answer = verify_state.get("answer_text", "")
                 claims: List[Claim] = verify_state.get("claims", [])
@@ -535,9 +540,25 @@ class ControlledPipelineUI(ConfidenceUI):
                     "decisions": working_decisions,
                     "metadata": working_metadata,
                 }
+                self.logger.info(
+                    "[mitigate] before: Supported=%d Low=%d Contradictory=%d | after: Supported=%d Low=%d Contradictory=%d",
+                    before_stats['supported'],
+                    before_stats['low_conf'],
+                    before_stats['contradictory'],
+                    after_stats['supported'],
+                    after_stats['low_conf'],
+                    after_stats['contradictory'],
+                )
+                print(
+                    "[mitigate] "
+                    f"before(S={before_stats['supported']},L={before_stats['low_conf']},C={before_stats['contradictory']}) "
+                    f"after(S={after_stats['supported']},L={after_stats['low_conf']},C={after_stats['contradictory']})",
+                    flush=True,
+                )
                 return before_highlight, after_highlight, stats_md, evidence_df, updated_state
             except Exception as exc:
                 self.logger.error("Mitigation stage failed: %s", exc, exc_info=True)
+                print(f"[mitigate] failed: {exc}", flush=True)
                 return empty, empty, f"Mitigation failed: {exc}", pd.DataFrame(), verify_state
 
         with gr.Blocks(title="Controlled Hallucination Detection Demo") as demo:

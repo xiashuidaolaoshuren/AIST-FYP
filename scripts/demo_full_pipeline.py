@@ -160,6 +160,10 @@ def ask_user_to_choose_strategy(strategies: list) -> str:
 
 def is_running_in_colab() -> bool:
     """Return True when running inside a Google Colab runtime."""
+    runtime_hint = (os.getenv("AIST_RUNTIME") or "").strip().lower()
+    if runtime_hint == "colab":
+        return True
+
     try:
         import google.colab  # type: ignore  # noqa: F401
         return True
@@ -222,9 +226,9 @@ def main():
     args = parse_args()
     in_colab = is_running_in_colab()
 
-    # In Colab, make all setup_logger()-based module logs visible in notebook stdout.
-    if in_colab and not os.getenv("AIST_STDOUT_LOG_LEVEL"):
-        os.environ["AIST_STDOUT_LOG_LEVEL"] = "INFO"
+    # Default to DEBUG when unset so claim-level diagnostics surface in streamed stdout.
+    if not os.getenv("AIST_STDOUT_LOG_LEVEL"):
+        os.environ["AIST_STDOUT_LOG_LEVEL"] = "DEBUG"
 
     controlled_ui_available = True
 
@@ -240,6 +244,9 @@ def main():
     print("=" * 80)
     print("HALLUCINATION DETECTION - FULL PIPELINE DEMO")
     print("=" * 80)
+    print()
+    print(f"Runtime detected as Colab: {in_colab}")
+    print(f"AIST_STDOUT_LOG_LEVEL: {os.getenv('AIST_STDOUT_LOG_LEVEL', 'unset')}")
     print()
     
     # Step 0: Detect available strategies

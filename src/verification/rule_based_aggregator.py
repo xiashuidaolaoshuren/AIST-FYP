@@ -581,7 +581,7 @@ class RuleBasedAggregator:
             coverage_score = self.normalizer.normalize_coverage(signal.coverage)
             support_conf, contradict_conf = self.normalizer.normalize_nli(signal.nli)
             
-            self.logger.debug(
+            self.logger.info(
                 f"Claim {signal.claim_id} normalized signals: "
                 f"entropy={entropy_conf:.3f}, consistency={consistency_conf:.3f}, "
                 f"coverage={coverage_score:.3f}, support={support_conf:.3f}, "
