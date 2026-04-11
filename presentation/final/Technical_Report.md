@@ -344,11 +344,12 @@ def check_agreement(self, claim: str, query: str, num_samples: int = 5) -> float
 ```
 
 #### 2.4.6 Rule-Based Aggregation
-The four independent signals are passed to the `VerifierHub`'s aggregation engine. 
 
-*   **Technical Highlights:**
-    *   **Veto Logic:** Specific critical failure signals (e.g., NLI Contradiction or Extreme Uncertainty) can unilaterally override positive signals.
-    *   **Signal Normalization:** Raw telemetry from heterogeneous detectors (probabilities, ratios, entropy) are scaled to a unified 0-1 range before fusion.
+The final verdict for each claim is determined by the **Rule-Based Aggregation** engine. This module is governed by three architectural principles designed to ensure transparency, reliability, and safety:
+
+1.  **Heterogeneous Signal Normalization**: Raw telemetry from diverse detectors—including semantic probability distributions (NLI), information-theoretic uncertainty (Entropy), and lexical overlap ratios (Grounded Heuristics)—are first transformed into a unified 0-1 confidence scale. This ensures that a "high" entropy signal is mathematically comparable to a "low" NLI support score.
+2.  **Hierarchical Veto Logic (Safety-First)**: The aggregator employs a strict priority-based classification system. "Negative" signals, such as strong NLI contradictions or numeric mismatches, serve as a **hard veto** that can unilaterally override positive signals. A claim is only classified as *Supported* if it passes all safety gates and meets high thresholds for both semantic entailment and lexical grounding.
+3.  **Conservative Fallback (Low Confidence)**: In scenarios where signals are ambiguous, conflicting, or neutral (e.g., the NLI model is unsure), the system defaults to a `Low Confidence` status. This "safe-fail" design prevents the pipeline from erroneously confirming a claim when the evidence is insufficient or the model's internal state is unstable.
 
 *   **Input:** All preceding detector outputs (`mean_entropy`, grounding scores, NLI distribution, agreement ratio).
 *   **Method:** The engine normalizes the signals and applies **Veto Logic** to determine if any catastrophic failures exist. If no vetoes are triggered, it computes a weighted aggregation of the scores to issue a final verdict.
