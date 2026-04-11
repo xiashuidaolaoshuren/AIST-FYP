@@ -392,7 +392,7 @@ Not all factual errors require the same level of intervention. The **Mitigation 
 *   **Technical Highlights:**
     *   **Goal-Oriented Routing:** The system implements three distinct routing modes ('Balanced', 'Accuracy-Focused', 'Attribution-Safety') to tailor thresholds based on the project's current safety requirements.
     *   **Cascading Priorities:** Actions are resolved hierarchically. Low confidence primarily triggers rerank to improve the context, whereas high contradiction ratios trigger reprompt or hard filtering.
-    *   **Veto Logic:** Specific critical failure signals (e.g., high NLI Contradiction or Extreme Entropy) can unilaterally override positive signals to ensure factual integrity.
+    *   **Statistical Feedback Loop:** Unlike the claim-level Veto Logic in the verifier, the Router operates on **aggregate response statistics** (e.g., Contradiction Ratio). By analyzing the distribution of verdicts across the entire draft, it determines if the generation is "conceptually unstable" enough to require a full reprompt rather than a simple edit.
 
 *   **Input:** A list of `ClaimDecision` objects (the output from the aggregator).
 *   **Method:** The engine calculates statistical ratios of `Contradictory` and `Low Confidence` occurrences against predefined thresholds in `config.yaml` to authorize specific mitigation actions.
