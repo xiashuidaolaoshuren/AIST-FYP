@@ -97,7 +97,7 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 
 -   **Member 1 (Research & Presentation Focus):**
     -   [ ] Analyze the results from the end-to-end evaluation, focusing on the performance of each individual signal.
-    -   [ ] Draft the results and discussion sections of the final report.
+    -   [x] Draft the results and discussion sections of the final report.
 -   **Member 2 (Development & Experimentation Focus):**
     -   [x] **Rule-Based Aggregation:**
         -   [x] Design and implement a `RuleBasedAggregator` that combines the outputs of all four signal detectors.
