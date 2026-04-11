@@ -246,15 +246,39 @@ Drawing inspiration from traditional fact-checking benchmarks like **FEVER** [4]
 **Code Example (`src/verification/retrieval_grounded.py`):**
 ```python
 def _calculate_entity_coverage(self, claim: Claim, evidence: EvidenceChunk) -> float:
-    # 1. Extract Named Entities using spaCy Dependency
+    # 1. Extract Named Entities using spaCy NER
     doc_claim = self.nlp(claim.text)
-    entities = [ent.text for ent in doc_claim.ents]
+    entities = [ent.text for ent in doc_claim.ents if ent.label_ in self.entity_types]
     
-    # 2. Validate presence in evidence
-    matched = sum(1 for e in entities if self._fuzzy_match(e, evidence.text))
+    # 2. Validate presence in evidence (with fuzzy matching)
+    matched = sum(1 for e in entities if self.entity_matcher.match_entity(e, evidence.text))
     
     # 3. Calculate coverage percentage (defaulting to 1.0 if no entities exist)
     return matched / len(entities) if entities else 1.0
+
+def _calculate_number_coverage(self, claim: Claim, evidence: EvidenceChunk) -> float:
+    # 1. Extract numeric tokens using spaCy's like_num property
+    doc_claim = self.nlp(claim.text)
+    numbers = [token.text for token in doc_claim if token.like_num]
+    
+    # 2. Check each number against evidence (exact string match)
+    if not numbers: return 1.0
+    matched = sum(1 for n in numbers if n in evidence.text)
+    return matched / len(numbers)
+
+def _calculate_token_overlap(self, claim: Claim, evidence: EvidenceChunk) -> float:
+    # 1. Tokenize both texts (lowercase, alphanumeric)
+    claim_tokens = self._tokenize(claim.text)
+    evidence_tokens = self._tokenize(evidence.text)
+    
+    # 2. Compute Longest Common Subsequence (LCS) length
+    lcs_len = self._compute_lcs_length(claim_tokens, evidence_tokens)
+    
+    # 3. Calculate Precision, Recall, and ROUGE-L F1
+    precision = lcs_len / len(evidence_tokens) if evidence_tokens else 0
+    recall = lcs_len / len(claim_tokens) if claim_tokens else 0
+    
+    return 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
 ```
 
 #### 2.4.4 Zero-Shot Natural Language Inference (NLI)
