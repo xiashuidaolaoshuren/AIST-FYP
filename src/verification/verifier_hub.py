@@ -124,6 +124,9 @@ class VerifierHub:
             self.global_contradiction_entailment_floor = float(
                 getattr(config.verification, 'global_contradiction_entailment_floor', 0.003)
             )
+            self.max_contradiction_for_entailment_floor_override = float(
+                getattr(config.verification, 'max_contradiction_for_entailment_floor_override', 0.85)
+            )
             self.artifact_coverage_floor = float(
                 getattr(config.verification, 'artifact_coverage_floor', 0.5)
             )
@@ -155,6 +158,7 @@ class VerifierHub:
             self.contradiction_dominance_factor = 1.5
             self.min_entailment_for_dominance = 0.0
             self.global_contradiction_entailment_floor = 0.003
+            self.max_contradiction_for_entailment_floor_override = 0.85
             self.artifact_coverage_floor = 0.5
             self.nli_ambiguity_threshold = 0.85
             self.min_entailment_context_threshold = 0.0
@@ -923,7 +927,10 @@ class VerifierHub:
                 self.logger.error("No valid signals collected from evidence chunks")
                 return None
             
-            aggregated, primary_chunk_idx = self._aggregate_signals(per_chunk_signals)
+            aggregated, primary_chunk_idx = self._aggregate_signals(
+                per_chunk_signals,
+                metadata=metadata,
+            )
             
             # Determine which chunk to use for doc_id/sent_id stamping
             # Use primary evidence chunk if available (max method), otherwise use top-ranked
@@ -990,7 +997,11 @@ class VerifierHub:
             self.logger.error(traceback.format_exc())
             return None
     
-    def _aggregate_signals(self, per_chunk_signals: List[Dict]) -> Tuple[Dict, Optional[int]]:
+    def _aggregate_signals(
+        self,
+        per_chunk_signals: List[Dict],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict, Optional[int]]:
         """
         Aggregate per-chunk signals using configured method.
         
@@ -1158,16 +1169,20 @@ class VerifierHub:
                         primary_nli_mode == 'contradiction'
                         and max_entailment < self.global_contradiction_entailment_floor
                         and max_coverage_score >= self.artifact_coverage_floor
+                        and max_contradiction < self.max_contradiction_for_entailment_floor_override
                     ):
                         primary_chunk_idx = entailment_chunk_idx
                         primary_nli_mode = 'entailment'
                         self.logger.debug(
                             "Global entailment floor: max_entailment=%.4f < %.4f and "
-                            "max_coverage_score=%.4f >= %.4f — overriding contradiction to entailment",
+                            "max_coverage_score=%.4f >= %.4f and max_contradiction=%.4f < %.4f "
+                            "— overriding contradiction to entailment",
                             max_entailment,
                             self.global_contradiction_entailment_floor,
                             max_coverage_score,
                             self.artifact_coverage_floor,
+                            max_contradiction,
+                            self.max_contradiction_for_entailment_floor_override,
                         )
                 else:
                     primary_chunk_idx = entailment_chunk_idx
@@ -1203,10 +1218,46 @@ class VerifierHub:
                         f"with entailment={max_entailment:.3f}"
                     )
             
+            aggregated_entities = max(entities)
+            aggregated_numbers = max(numbers)
+
+            source_mode = str((metadata or {}).get('source_mode', '')).strip().lower()
+            if source_mode == 'user_context':
+                claim_entities_union = set()
+                matched_entities_union = set()
+                claim_numbers_union = set()
+                matched_numbers_union = set()
+
+                for signal in per_chunk_signals:
+                    coverage = signal.get('coverage', {}) or {}
+                    claim_entities_union.update(str(x) for x in coverage.get('claim_entities', []) if str(x).strip())
+                    matched_entities_union.update(str(x) for x in coverage.get('matched_entities', []) if str(x).strip())
+                    claim_numbers_union.update(str(x) for x in coverage.get('claim_numbers', []) if str(x).strip())
+                    matched_numbers_union.update(str(x) for x in coverage.get('matched_numbers', []) if str(x).strip())
+
+                aggregated_entities = (
+                    float(len(matched_entities_union) / len(claim_entities_union))
+                    if claim_entities_union else 1.0
+                )
+                aggregated_numbers = (
+                    float(len(matched_numbers_union) / len(claim_numbers_union))
+                    if claim_numbers_union else 1.0
+                )
+
+                self.logger.info(
+                    "User-context pooled grounding: entities=%d/%d (%.3f), numbers=%d/%d (%.3f)",
+                    len(matched_entities_union),
+                    len(claim_entities_union),
+                    aggregated_entities,
+                    len(matched_numbers_union),
+                    len(claim_numbers_union),
+                    aggregated_numbers,
+                )
+
             result = {
                 'coverage': {
-                    'entities': max(entities),
-                    'numbers': max(numbers),
+                    'entities': aggregated_entities,
+                    'numbers': aggregated_numbers,
                     'tokens_overlap': max(tokens)
                 },
                 'uncertainty': {

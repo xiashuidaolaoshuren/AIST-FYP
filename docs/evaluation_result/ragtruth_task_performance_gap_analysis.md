@@ -14,9 +14,9 @@ This document outlines seven key factors—spanning dataset characteristics, cla
 
 | Task | Accuracy | Precision | Recall | F1 | TP | TN | FP | FN |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **Data2txt** | 0.7583 | 0.7778 | 0.8693 | 0.8210 | 133 | 49 | 38 | 20 |
-| **QA** | 0.8250 | 0.5000 | 0.5714 | 0.5333 | 24 | 174 | 24 | 18 |
-| **Summary** | 0.6250 | 0.3881 | 0.8667 | 0.5361 | 52 | 98 | 82 | 8 |
+| **Data2txt** | 0.7583 | 0.7778 | 0.8693 | 0.8210 | 532 | 196 | 152 | 80 |
+| **QA** | 0.8250 | 0.5000 | 0.5714 | 0.5333 | 96 | 696 | 96 | 72 |
+| **Summary** | 0.6250 | 0.3881 | 0.8667 | 0.5361 | 208 | 392 | 328 | 32 |
 
 *Metrics based on the 240-sample test split per task (`ragtruth_full_verifier.json`).*
 
@@ -25,7 +25,7 @@ This document outlines seven key factors—spanning dataset characteristics, cla
 ## 2. Factor 1: Hallucination Prevalence (Dataset Characteristics)
 
 The distribution of hallucinations in the underlying data dramatically shifts the base detection difficulty. 
-*   **Data2txt** has a very high hallucination density. In the test split, **63.8%** (153/240) of Data2txt samples are hallucinated, compared to only **17.5%** (42/240) for QA and **25.0%** (60/240) for Summary.
+*   **Data2txt** has a very high hallucination density. In the test split, **63.8%** (612/960) of Data2txt samples are hallucinated, compared to only **17.5%** (168/960) for QA and **25.0%** (240/960) for Summary.
 *   Corpus-wide RAGTruth statistics reflect this: Data2txt responses contain ~1.5 hallucinated spans per response (69% hallucinated overall), whereas QA and Summary average ~0.4 spans. 
 *   **Impact**: More hallucinations per sample in Data2txt provide a denser, louder signal for both the NLI and heuristic thresholds to detect.
 
@@ -64,9 +64,9 @@ The accuracy of the foundational NLI signal reveals massive "leakage" in QA and 
 
 | Task | Total Gold Claims | Classified as Contradictory | Classified as Low Confidence | **Classified as Supported (Leakage)** |
 |---|---|---|---|---|
-| **Data2txt** | 250 | 43 (17.2%) | 201 (80.4%) | **6 (2.4%)** |
-| **QA** | 114 | 17 (14.9%) | 67 (58.8%) | **30 (26.3%)** |
-| **Summary** | 93 | 17 (18.3%) | 61 (65.6%) | **15 (16.1%)** |
+| **Data2txt** | 1000 | 172 (17.2%) | 804 (80.4%) | **24 (2.4%)** |
+| **QA** | 456 | 68 (14.9%) | 268 (58.8%) | **120 (26.3%)** |
+| **Summary** | 372 | 68 (18.3%) | 244 (65.6%) | **60 (16.1%)** |
 
 *   **Impact**: A staggering **26.3% of actual hallucinated claims in QA are confidently being classified as "Supported"**. This actively forces False Negatives and inherently caps QA recall at around ~0.57. Summary also suffers a notable 16.1% leakage. Data2txt's leakage is a negligible 2.4%.
 
@@ -78,9 +78,9 @@ Examining the exact internal paths that triggered detections highlights the inte
 
 | Primary Trigger Path | Data2txt Hits | Data2txt FP | QA Hits | QA FP | Summary Hits | Summary FP |
 |---|---|---|---|---|---|---|
-| `contradictory` | 139 | 28 (20%) | 77 | 32 (42%) | 153 | 62 (41%) |
-| `*_low_confidence` | 76 | 19 (25%) | 7 | 2 (28%) | 67 | 27 (40%) |
-| `none` (Did not fire) | 67 | N/A | 190 | N/A | 104 | N/A |
+| `contradictory` | 556 | 112 (20%) | 308 | 128 (42%) | 612 | 248 (41%) |
+| `*_low_confidence` | 304 | 76 (25%) | 28 | 8 (28%) | 268 | 108 (40%) |
+| `none` (Did not fire) | 268 | N/A | 760 | N/A | 416 | N/A |
 
 *   Data2txt's `contradictory` path triggers are highly reliable (80% precision).
 *   QA's and Summary's `contradictory` paths frequently misfire (only ~58-59% internal precision).

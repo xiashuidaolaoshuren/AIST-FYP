@@ -1,6 +1,16 @@
 # Comprehensive Evaluation Workflow: RAGTruth & CiteBench
 
-This document provides an end-to-end overview of the verification and mitigation evaluation pipelines using the **RAGTruth** and **CiteBench (CiteEval)** frameworks. It is designed as a technical reference to assist in writing project reports, detailing how raw data flows to final evaluation metrics.
+This document provides an end-to-end overview of the verification and mitigation evaluation pipelines using the **RAGTruth** and **CiteBench (CiteEval)** frameworks. 
+
+### Core Evaluation Frameworks
+
+Our evaluation protocol uses two complementary benchmarks to assess different stages of the hallucination-aware RAG pipeline:
+
+1.  **RAGTruth (Verification Benchmarking):**
+    Initially used to evaluate the correctness of the **Verification (Detection)** stage. It focuses on the system's ability to accurately label factual hallucinations at the sentence or claim level. By comparing our internal verifier signals (NLI, Intrinsic Uncertainty, etc.) against RAGTruth's manually annotated hallucination spans, we can calculate the **Precision, Recall, and F1-score of the detection stage itself**, ensuring the "alarm system" is reliable before any mitigation is applied.
+
+2.  **CiteBench / CiteEval (Verification & Mitigation Benchmarking):**
+    Used to evaluate the downstream impact of both **Verification and Mitigation** on the final, user-facing output. Unlike RAGTruth, which evaluates binary labels (Hallucination vs. Not), CiteBench evaluates the **Citation Faithfulness** and **Groundedness** of the entire response. This allows us to measure how different mitigation strategies—such as **Filtering**, **Reranking**, or **Reprompting**—effectively fix detected hallucinations and improve the quality of source attribution in long-form generation.
 
 ---
 
@@ -107,7 +117,24 @@ Because RAGTruth and CiteBench measure fundamentally different aspects of system
 
 ---
 
-## 4. Reference Appendix
+## 4. Evaluation Limitations: The Mitigation Correctness Gap
+
+### Absence of a Unified Mitigation Correctness Benchmark
+
+A critical observation from our research is the **absence of a single, unified industry-standard benchmark** designed to simultaneously evaluate the **correctness** of multiple hallucination mitigation strategies (Filtering, Reranking, and Reprompting) in an "apple-to-apple" manner.
+
+While existing benchmarks provide partial views, they fail to cover the end-to-end correctness of a complex mitigation pipeline:
+*   **CiteEval / CiteBench:** Excellent for evaluating **citation faithfulness** and source attribution quality, but does not explicitly measure if a *Correction* (Reprompt) is factually accurate against a gold truth, or if a *Filter* correctly removed only false claims without collateral damage to true ones.
+*   **FActScore:** Focuses strictly on the **factual precision** of final generated text. While it can evaluate the result of a *Reprompting* strategy, it is "intervention-blind"—it cannot distinguish whether a quality gain came from a better *Rerank* (improved evidence) or a more accurate *Filter* (removed noise). It treats the pipeline as a black box.
+*   **RAGTruth:** Highly effective for **hallucination detection** correctness (Label F1), but does not evaluate how those labels are actually used by a mitigation module to repair or restructure the final output.
+
+### Conclusion for the Technical Report
+
+Due to this industry-wide gap, our evaluation strategy treats **CiteEval** as the primary proxy for **mitigation effectiveness** (how well the strategy improved the user-facing response quality and groundedness). However, for the **correctness** of individual mitigation actions (e.g., "was this specific filter action justified?"), the field lacks a standardized "ground truth" correction benchmark. Future work or more granular manual annotation would be required to verify the internal logic of each mitigation step beyond the final text's faithfulness.
+
+---
+
+## 5. Reference Appendix
 
 ### Key Scripts & Entry Points
 *   **RAGTruth Evaluation:** `scripts/demo_ragtruth_eval.py`

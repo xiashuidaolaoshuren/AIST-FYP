@@ -263,7 +263,10 @@ class ControlledPipelineUI(ConfidenceUI):
                     "claims": claims,
                     "evidence_chunks": evidence_chunks,
                     "claim_evidence_pairs": claim_evidence_pairs,
-                    "generator_metadata": result.get("generator_metadata", {}),
+                    "generator_metadata": {
+                        **result.get("generator_metadata", {}),
+                        "source_mode": source_mode,
+                    },
                     "sub_answers": result.get("sub_answers", [{"text": draft_text, "char_span": [0, len(draft_text)], "sub_answer_id": 0, "sub_query": query_clean}]),
                     "claims_by_sub_answer": claims_by_sub_answer or [{
                         "sub_answer_id": 0,
@@ -318,6 +321,7 @@ class ControlledPipelineUI(ConfidenceUI):
                     metadata.update({
                         "text": text,
                         "original_query": query_clean,
+                        "source_mode": source_mode,
                     })
                     sub_answers = [{
                         "text": text,
@@ -349,6 +353,7 @@ class ControlledPipelineUI(ConfidenceUI):
                 generated_text = bundle.get("generated_text", "")
                 evidence_chunks: List[EvidenceChunk] = bundle.get("evidence_chunks", [])
                 metadata = dict(bundle.get("generator_metadata", {}))
+                metadata.setdefault("source_mode", bundle.get("source_mode", "wikipedia"))
 
                 edited = text != generated_text
                 if edited:
@@ -363,6 +368,7 @@ class ControlledPipelineUI(ConfidenceUI):
                         **score_meta,
                         "text": text,
                         "original_query": query,
+                        "source_mode": bundle.get("source_mode", metadata.get("source_mode", "wikipedia")),
                     }
                     sub_answers = [{
                         "text": text,

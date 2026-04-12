@@ -246,15 +246,39 @@ Drawing inspiration from traditional fact-checking benchmarks like **FEVER** [4]
 **Code Example (`src/verification/retrieval_grounded.py`):**
 ```python
 def _calculate_entity_coverage(self, claim: Claim, evidence: EvidenceChunk) -> float:
-    # 1. Extract Named Entities using spaCy Dependency
+    # 1. Extract Named Entities using spaCy NER
     doc_claim = self.nlp(claim.text)
-    entities = [ent.text for ent in doc_claim.ents]
+    entities = [ent.text for ent in doc_claim.ents if ent.label_ in self.entity_types]
     
-    # 2. Validate presence in evidence
-    matched = sum(1 for e in entities if self._fuzzy_match(e, evidence.text))
+    # 2. Validate presence in evidence (with fuzzy matching)
+    matched = sum(1 for e in entities if self.entity_matcher.match_entity(e, evidence.text))
     
     # 3. Calculate coverage percentage (defaulting to 1.0 if no entities exist)
     return matched / len(entities) if entities else 1.0
+
+def _calculate_number_coverage(self, claim: Claim, evidence: EvidenceChunk) -> float:
+    # 1. Extract numeric tokens using spaCy's like_num property
+    doc_claim = self.nlp(claim.text)
+    numbers = [token.text for token in doc_claim if token.like_num]
+    
+    # 2. Check each number against evidence (exact string match)
+    if not numbers: return 1.0
+    matched = sum(1 for n in numbers if n in evidence.text)
+    return matched / len(numbers)
+
+def _calculate_token_overlap(self, claim: Claim, evidence: EvidenceChunk) -> float:
+    # 1. Tokenize both texts (lowercase, alphanumeric)
+    claim_tokens = self._tokenize(claim.text)
+    evidence_tokens = self._tokenize(evidence.text)
+    
+    # 2. Compute Longest Common Subsequence (LCS) length
+    lcs_len = self._compute_lcs_length(claim_tokens, evidence_tokens)
+    
+    # 3. Calculate Precision, Recall, and ROUGE-L F1
+    precision = lcs_len / len(evidence_tokens) if evidence_tokens else 0
+    recall = lcs_len / len(claim_tokens) if claim_tokens else 0
+    
+    return 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
 ```
 
 #### 2.4.4 Zero-Shot Natural Language Inference (NLI)
@@ -320,11 +344,13 @@ def check_agreement(self, claim: str, query: str, num_samples: int = 5) -> float
 ```
 
 #### 2.4.6 Rule-Based Aggregation
-The four independent signals are passed to the `VerifierHub`'s aggregation engine. 
+
+The final verdict for each claim is determined by the **Rule-Based Aggregation** engine. This module is governed by three architectural principles designed to ensure transparency, reliability, and safety:
 
 *   **Technical Highlights:**
-    *   **Veto Logic:** Specific critical failure signals (e.g., NLI Contradiction or Extreme Uncertainty) can unilaterally override positive signals.
-    *   **Signal Normalization:** Raw telemetry from heterogeneous detectors (probabilities, ratios, entropy) are scaled to a unified 0-1 range before fusion.
+    *  **Heterogeneous Signal Normalization**: Raw telemetry from diverse detectors—including semantic probability distributions (NLI), information-theoretic uncertainty (Entropy), and lexical overlap ratios (Grounded Heuristics)—are first transformed into a unified 0-1 confidence scale. This ensures that a "high" entropy signal is mathematically comparable to a "low" NLI support score.
+    *  **Hierarchical Veto Logic (Safety-First)**: The aggregator employs a strict priority-based classification system. "Negative" signals, such as strong NLI contradictions or numeric mismatches, serve as a **hard veto** that can unilaterally override positive signals. A claim is only classified as *Supported* if it passes all safety gates and meets high thresholds for both semantic entailment and lexical grounding.
+    *  **Conservative Fallback (Low Confidence)**: In scenarios where signals are ambiguous, conflicting, or neutral (e.g., the NLI model is unsure), the system defaults to a `Low Confidence` status. This "safe-fail" design prevents the pipeline from erroneously confirming a claim when the evidence is insufficient or the model's internal state is unstable.
 
 *   **Input:** All preceding detector outputs (`mean_entropy`, grounding scores, NLI distribution, agreement ratio).
 *   **Method:** The engine normalizes the signals and applies **Veto Logic** to determine if any catastrophic failures exist. If no vetoes are triggered, it computes a weighted aggregation of the scores to issue a final verdict.
@@ -366,7 +392,7 @@ Not all factual errors require the same level of intervention. The **Mitigation 
 *   **Technical Highlights:**
     *   **Goal-Oriented Routing:** The system implements three distinct routing modes ('Balanced', 'Accuracy-Focused', 'Attribution-Safety') to tailor thresholds based on the project's current safety requirements.
     *   **Cascading Priorities:** Actions are resolved hierarchically. Low confidence primarily triggers rerank to improve the context, whereas high contradiction ratios trigger reprompt or hard filtering.
-    *   **Veto Logic:** Specific critical failure signals (e.g., high NLI Contradiction or Extreme Entropy) can unilaterally override positive signals to ensure factual integrity.
+    *   **Statistical Feedback Loop:** Unlike the claim-level Veto Logic in the verifier, the Router operates on **aggregate response statistics** (e.g., Contradiction Ratio). By analyzing the distribution of verdicts across the entire draft, it determines if the generation is "conceptually unstable" enough to require a full reprompt rather than a simple edit.
 
 *   **Input:** A list of `ClaimDecision` objects (the output from the aggregator).
 *   **Method:** The engine calculates statistical ratios of `Contradictory` and `Low Confidence` occurrences against predefined thresholds in `config.yaml` to authorize specific mitigation actions.
