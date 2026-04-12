@@ -233,13 +233,13 @@ def _calculate_entropy(self, logits: np.ndarray) -> float:
 Drawing inspiration from traditional fact-checking benchmarks like **FEVER** [4], this module operates on the principle of **lexical grounding**. The idea is that for a claim to be considered "faithful" to its source, it must preserve the core "anchors" of the evidence—specifically named entities and numeric values. Hallucinations often involve "entity-swapping" (mixing up names) or "numeric drift" (incorrect dates or quantities). By strictly enforcing coverage of these anchors, we provide a fast, interpretable heuristic that catches the most common types of RAG hallucinations before invoking more latent, compute-heavy semantic checks.
 
 *   **Technical Highlights:**
-    *   **NER Fuzzy Matching:** Since surface forms can vary (e.g., "U.S." vs "United States"), we use a small Levenshtein distance threshold for matching.
+    *   **4-Tier Entity Matching System:** Since surface forms and identifiers can vary (e.g., "U.S." vs "United States" or "MIT" vs "Massachusetts Institute of Technology"), we implement a cascading matching system that handles substrings, acronyms, and aliases before falling back to a lightweight LLM-based verification.
     *   **Anchor Point Analysis:** Numbers and Proper Nouns are treated as "Anchors"—non-negotiable factual units that must intersect with source text for a claim to be considered faithful.
     *   **ROUGE-L (Longest Common Subsequence):** Unlike simple n-gram overlap, ROUGE-L accounts for sentence structure by measuring the longest sequence of words appearing in both claim and evidence in the same relative order.
 
 *   **Input:** `Claim` text and `EvidenceChunk` object (retrieved document snippet).
 *   **Method:**
-    *   **Anchor Point Analysis (Entity/Number):** Uses **spaCy NER** and rule-based extractors to identify anchor points. Validates their presence in the evidence via **Fuzzy Matching** (Levenshtein distance).
+    *   **Anchor Point Analysis (Entity/Number):** Uses **spaCy NER** and rule-based extractors to identify anchor points. Validates their presence in the evidence via a **4-Tier EntityMatcher cascade** (Substring, Acronym, Alias Dictionary, and LLM-based verification).
     *   **Structural Lexical Overlap:** Computes the **ROUGE-L F1** score based on the Longest Common Subsequence between the strings.
 *   **Output:** A dictionary of grounding scores `{entities: float, numbers: float, tokens_overlap: float}`.
 
