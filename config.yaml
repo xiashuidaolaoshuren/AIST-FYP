@@ -406,7 +406,12 @@ verification:
     max_neutral_for_contradiction: 0.25
 
     # Require minimal evidence grounding before escalating to contradiction.
-    min_coverage_for_contradiction: 0.15
+    # Raised from 0.15 → 0.65: complex partial claims (e.g. a true sub-fact bundled with
+    # a false implication) often score moderate coverage (~0.62) but receive extreme NLI
+    # contradiction because no evidence chunk fully entails the whole sentence.
+    # Requiring coverage ≥ 0.65 forces a Low Confidence verdict for such cases while
+    # leaving strongly grounded genuine contradictions (coverage ≥ 0.83) unaffected.
+    min_coverage_for_contradiction: 0.65
     
     # Entailment threshold: Minimum NLI entailment score required for "Supported" status
     entailment_threshold: 0.65

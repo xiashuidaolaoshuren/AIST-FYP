@@ -949,13 +949,22 @@ class VerifierHub:
             source_mode = str(metadata.get('source_mode', '')).strip().lower()
             for idx, chunk in enumerate(evidence_list):
                 try:
-                    # Compute uncertainty and grounded signals for this chunk
+                    # Compute uncertainty signal — isolated so that missing logits (e.g. when
+                    # the user manually types text without generation metadata) do not prevent
+                    # grounded and NLI signals from being computed for this chunk.
                     if self.uncertainty_detector is None or metadata.get('disable_intrinsic_uncertainty'):
                         uncertainty_signal = {'mean_entropy': 0.0}
                     else:
-                        uncertainty_signal = self.uncertainty_detector.compute_signal(
-                            claim, chunk, metadata
-                        )
+                        try:
+                            uncertainty_signal = self.uncertainty_detector.compute_signal(
+                                claim, chunk, metadata
+                            )
+                        except Exception as unc_exc:
+                            self.logger.warning(
+                                f"Failed to compute signal for chunk {chunk.doc_id}#{chunk.sent_id}: {str(unc_exc)}"
+                            )
+                            uncertainty_signal = {'mean_entropy': 0.0}
+
                     if self.grounded_detector is None:
                         grounded_signal = {'entities': 0.0, 'numbers': 0.0, 'tokens_overlap': 0.0}
                     else:
