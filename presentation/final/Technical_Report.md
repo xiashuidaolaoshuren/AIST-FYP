@@ -542,7 +542,29 @@ The **Controlled Pipeline UI (`src/ui/controlled_ui.py`)** serves as a laborator
 
 ---
 
-## 4. Final Conclusion & Future Work
+## 4. Technical and Architectural Limitations
+
+While our four-stage pipeline achieves high interpretability and efficiency, rigorous evaluation against RAGTruth and CiteEval has identified three primary architectural bottlenecks and a significant gap in the evaluation landscape.
+
+### 4.1 Decontextualized Chunking Destroys NLI Grounding
+Our current retrieval strategy utilizes sentence-level chunking to maintain high precision. However, this often results in "orphaned" chunks containing unresolved pronouns (e.g., "it", "she") or entities that lack their antecedent within the same fragment. When the **DeBERTa NLI** model receives such a chunk as a premise, it lacks the discourse context necessary to resolve these references, leading to unreliable entailment or contradiction scores.
+
+### 4.2 Sentence-Level NLI Reasoning Gaps
+The DeBERTa-v3 NLI model is optimized for single `(premise, hypothesis)` pairs. In complex Question-Answering (QA) tasks, a hallucination often requires reasoning across multiple sentences or even entire paragraphs of evidence. Because our verifier decomposes the response into atomic claims and evaluates them against individual chunks iteratively, it can be "blind" to contradictions that only manifest when considering the holistic evidence structure.
+
+### 4.3 Overlapping Signal Distributions in Aggregation
+Our **Rule-Based Aggregator** relies on Boolean threshold cascades (veto logic). Evaluation data shows that the signal distributions for True Positives (actual hallucinations) and False Positives (valid summaries) often overlap significantly. For example, on summary tasks, we observed that False Positive samples sometimes exhibited *higher* grounding coverage (0.764) than True Positives (0.745), making it difficult for static thresholds to cleanly separate hallucinations without incurring high false-alarm rates.
+
+### 4.4 The Mitigation Correctness Gap (Evaluation Limitation)
+A critical insight from our research is the **absence of a unified industry-standard benchmark** for evaluating the end-to-end "correctness" of mitigation actions.
+*   **CiteEval** is excellent for measuring **citation faithfulness** and groundedness, but it does not explicitly verify if a *Correction* (Reprompt) is factually accurate against a hidden gold truth.
+*   **RAGTruth** focuses on **detection correctness** (label accuracy) but ignores how those labels are used to repair the text.
+*   **FActScore** measures final **factual precision** but treats the mitigation process as a black box.
+Consequently, our evaluation relies on CiteEval as a proxy for effectiveness, but the field currently lacks a specialized benchmark to verify the internal logic and "collateral damage" of individual filter or rerank operations.
+
+---
+
+## 5. Final Conclusion & Future Work
 
 Our four-stage system proves that hallucination mitigation does not require constant fine-tuning of massive generator models. By pairing open-source retrieval (FAISS/BM25) with a rigorous, trainless verifier (combining Intrinsic Entropy, NLI Cross-Encoders, and Self-Consistency), and coupling that with a proactive Mitigation Orchestrator (Reranking, Reprompting, and Filtering), we have established a highly interpretable, reliable, and grounded NLP pipeline.
 
