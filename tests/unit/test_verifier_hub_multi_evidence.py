@@ -16,13 +16,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.verification.verifier_hub import VerifierHub
 from src.utils.data_structures import Claim, EvidenceChunk, VerifierSignal
-from src.utils.config import Config
 
+
+def _make_config():
+    """Create a minimal config object for VerifierHub unit tests."""
+    return type('obj', (object,), {})()
 
 @pytest.fixture
 def config_multi_max():
     """Config with multi-evidence enabled and max aggregation."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -43,7 +46,7 @@ def config_multi_max():
 @pytest.fixture
 def config_multi_mean():
     """Config with multi-evidence enabled and mean aggregation."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -64,7 +67,7 @@ def config_multi_mean():
 @pytest.fixture
 def config_single_only():
     """Config with multi-evidence disabled (backward compatible)."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': False,
@@ -321,7 +324,7 @@ def test_config_flag_aggregation_method(config_multi_max, config_multi_mean):
 
 def test_contradiction_first_fusion_preserves_max_contradiction():
     """Contradiction-first fusion should keep strongest contradiction and select its chunk as primary."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -329,6 +332,7 @@ def test_contradiction_first_fusion_preserves_max_contradiction():
         'contradiction_first_fusion': True,
         'contradiction_priority_threshold': 0.5,
         'contradiction_priority_margin': 0.0,
+        'cross_chunk_conflict_entailment_threshold': 1.0,
         'coherence_threshold': 0.5,
         'contradiction_dominance_factor': 1.5,
         'modules': type('obj', (object,), {
@@ -373,7 +377,7 @@ def test_contradiction_first_fusion_preserves_max_contradiction():
 
 def test_contradiction_first_fusion_marks_ambiguous_same_chunk():
     """Same-chunk high entailment+contradiction should be treated as ambiguous."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -427,7 +431,7 @@ def test_contradiction_first_fusion_marks_ambiguous_same_chunk():
 
 def test_contradiction_first_fusion_marks_ambiguous_same_paragraph():
     """High entailment+contradiction in same doc_id should be treated as ambiguous."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -482,7 +486,7 @@ def test_contradiction_first_fusion_marks_ambiguous_same_paragraph():
 
 def test_contradiction_first_fusion_keeps_cross_doc_contradiction():
     """Different doc_id should not trigger ambiguity suppression."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -490,6 +494,7 @@ def test_contradiction_first_fusion_keeps_cross_doc_contradiction():
         'contradiction_first_fusion': True,
         'contradiction_priority_threshold': 0.5,
         'contradiction_priority_margin': 0.0,
+        'cross_chunk_conflict_entailment_threshold': 1.0,
         'coherence_threshold': 0.5,
         'contradiction_dominance_factor': 1.5,
         'nli_ambiguity_threshold': 0.85,
@@ -536,7 +541,7 @@ def test_contradiction_first_fusion_keeps_cross_doc_contradiction():
 
 def test_contradiction_first_fusion_ignores_low_dense_score_for_contradiction():
     """Low dense-score chunks should be excluded from contradiction peak selection."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -596,7 +601,7 @@ def test_contradiction_first_fusion_ignores_low_dense_score_for_contradiction():
 
 def test_contradiction_first_fusion_respects_min_entailment_guard():
     """High contradiction should not become primary when entailment context is too weak."""
-    config = Config()
+    config = _make_config()
     config.verification = type('obj', (object,), {
         'enabled': True,
         'verify_all_evidence': True,
@@ -652,3 +657,76 @@ def test_contradiction_first_fusion_respects_min_entailment_guard():
     assert primary_idx == 0
     assert aggregated['primary_nli_mode'] == 'entailment'
     assert aggregated['nli']['entailment'] == pytest.approx(0.05)
+
+
+def test_resolve_claim_text_for_nli_rewrites_leading_pronoun():
+    """Leading pronouns should be rewritten using previous subject within same answer."""
+    config = _make_config()
+    config.verification = type('obj', (object,), {
+        'enabled': True,
+        'verify_all_evidence': False,
+        'aggregation_method': 'max',
+        'modules': type('obj', (object,), {
+            'intrinsic': False,
+            'grounded': False,
+            'nli': False,
+            'self_agreement': False,
+        })(),
+        'intrinsic': type('obj', (object,), {
+            'strict_logits': False,
+            'epsilon': 1e-10,
+        })(),
+    })()
+
+    hub = VerifierHub(config)
+    antecedents = {}
+
+    first = hub._resolve_claim_text_for_nli(
+        claim_text="Istanbul is the capital of Turkey.",
+        answer_id="ans_1",
+        antecedents=antecedents,
+    )
+    second = hub._resolve_claim_text_for_nli(
+        claim_text="It is Turkey's largest city.",
+        answer_id="ans_1",
+        antecedents=antecedents,
+    )
+
+    assert first == "Istanbul is the capital of Turkey."
+    assert second == "Istanbul is Turkey's largest city."
+
+
+def test_resolve_claim_text_for_nli_scopes_antecedent_by_answer_id():
+    """Antecedents should not leak across different answer IDs."""
+    config = _make_config()
+    config.verification = type('obj', (object,), {
+        'enabled': True,
+        'verify_all_evidence': False,
+        'aggregation_method': 'max',
+        'modules': type('obj', (object,), {
+            'intrinsic': False,
+            'grounded': False,
+            'nli': False,
+            'self_agreement': False,
+        })(),
+        'intrinsic': type('obj', (object,), {
+            'strict_logits': False,
+            'epsilon': 1e-10,
+        })(),
+    })()
+
+    hub = VerifierHub(config)
+    antecedents = {}
+
+    _ = hub._resolve_claim_text_for_nli(
+        claim_text="Istanbul is the capital of Turkey.",
+        answer_id="ans_1",
+        antecedents=antecedents,
+    )
+    rewritten_other_answer = hub._resolve_claim_text_for_nli(
+        claim_text="It is Turkey's largest city.",
+        answer_id="ans_2",
+        antecedents=antecedents,
+    )
+
+    assert rewritten_other_answer == "It is Turkey's largest city."

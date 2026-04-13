@@ -15,6 +15,7 @@ Month 4 Architecture:
 from typing import Dict, Optional, Union, List, Tuple, Any
 import traceback
 import time
+import re
 from dataclasses import dataclass
 
 from src.utils.data_structures import Claim, EvidenceChunk, VerifierSignal
@@ -221,7 +222,12 @@ class VerifierHub:
             # Initialize Self-Agreement Detector (Month 4, Task 4)
             if self.module_flags['self_agreement']:
                 try:
-                    if generator is not None:
+                    if SelfAgreementDetector is None:
+                        self.self_agreement_detector = None
+                        self.logger.warning(
+                            "Self-Agreement dependency unavailable (sentence-transformers missing), detector disabled"
+                        )
+                    elif generator is not None:
                         self.self_agreement_detector = SelfAgreementDetector(config, generator)
                         self.logger.info("✓ SelfAgreementDetector initialized")
                     else:
@@ -286,6 +292,50 @@ class VerifierHub:
             'nli': bool(getattr(getattr(verification, 'nli', None), 'enabled', True)),
             'self_agreement': bool(getattr(getattr(verification, 'self_agreement', None), 'enabled', True)),
         }
+
+    def _extract_subject_antecedent(self, claim_text: str) -> Optional[str]:
+        """Extract a simple leading proper-noun subject candidate from claim text."""
+        if not claim_text or not claim_text.strip():
+            return None
+        # Match up to four title-cased words at sentence start (e.g., "Istanbul", "New York City").
+        match = re.match(r"^\s*([A-Z][\w-]*(?:\s+[A-Z][\w-]*){0,3})\b", claim_text.strip())
+        if not match:
+            return None
+        return match.group(1).strip()
+
+    def _rewrite_leading_pronoun(self, claim_text: str, antecedent: Optional[str]) -> str:
+        """Rewrite sentence-initial pronouns using a lightweight antecedent hint."""
+        if not antecedent:
+            return claim_text
+        if not claim_text or not claim_text.strip():
+            return claim_text
+
+        pronoun_match = re.match(
+            r"^(\s*)(it|he|she|they|this|that|these|those)\b(.*)$",
+            claim_text,
+            flags=re.IGNORECASE,
+        )
+        if not pronoun_match:
+            return claim_text
+
+        leading_ws, _, trailing = pronoun_match.groups()
+        return f"{leading_ws}{antecedent}{trailing}"
+
+    def _resolve_claim_text_for_nli(
+        self,
+        claim_text: str,
+        answer_id: Optional[str],
+        antecedents: Dict[str, str],
+    ) -> str:
+        """Resolve claim text for NLI while keeping original claim text untouched elsewhere."""
+        answer_key = str(answer_id) if answer_id else '__global__'
+        resolved_text = self._rewrite_leading_pronoun(claim_text, antecedents.get(answer_key))
+
+        current_subject = self._extract_subject_antecedent(claim_text)
+        if current_subject:
+            antecedents[answer_key] = current_subject
+
+        return resolved_text
     
     def verify_claim(
         self,
@@ -405,6 +455,7 @@ class VerifierHub:
     def prepare_verification_collect_nli(self, claim_records: List[Dict[str, Any]]) -> _BatchPreparedState:
         """Prepare non-NLI verifier signals and collect pending NLI pairs."""
         results: List[Optional[VerifierSignal]] = [None] * len(claim_records)
+        antecedents_by_answer: Dict[str, str] = {}
 
         single_items: List[Dict[str, Any]] = []
         multi_items: List[Dict[str, Any]] = []
@@ -417,13 +468,21 @@ class VerifierHub:
             if claim is None or evidence is None:
                 continue
 
+            nli_claim_text = self._resolve_claim_text_for_nli(
+                claim_text=claim.text,
+                answer_id=getattr(claim, 'answer_id', None),
+                antecedents=antecedents_by_answer,
+            )
+
             is_multi_evidence = isinstance(evidence, list)
             if is_multi_evidence and self.verify_all_evidence and len(evidence) > 1:
+                enriched_metadata = dict(metadata)
+                enriched_metadata['nli_claim_text'] = nli_claim_text
                 multi_items.append({
                     'index': idx,
                     'claim': claim,
                     'evidence': evidence,
-                    'metadata': metadata,
+                    'metadata': enriched_metadata,
                 })
                 continue
 
@@ -442,6 +501,7 @@ class VerifierHub:
                 'claim': claim,
                 'evidence': evidence_chunk,
                 'metadata': metadata,
+                'nli_claim_text': nli_claim_text,
             })
 
         for item in multi_items:
@@ -473,6 +533,7 @@ class VerifierHub:
             claim = item['claim']
             evidence = item['evidence']
             metadata = item['metadata']
+            nli_claim_text = item['nli_claim_text']
 
             try:
                 disable_intrinsic = bool(metadata.get('disable_intrinsic_uncertainty'))
@@ -512,6 +573,7 @@ class VerifierHub:
                         'claim': claim,
                         'evidence': evidence,
                         'metadata': metadata,
+                        'nli_claim_text': nli_claim_text,
                         'uncertainty': uncertainty_signal,
                         'grounded': grounded_signal,
                     }
@@ -569,6 +631,7 @@ class VerifierHub:
                 'index': item['index'],
                 'claim': claim,
                 'evidence': evidence,
+                'nli_claim_text': item['nli_claim_text'],
                 'uncertainty': item['uncertainty'],
                 'grounded': item['grounded'],
                 'consistency': consistency_signal,
@@ -577,7 +640,7 @@ class VerifierHub:
             prepared_items.append(prepared_item)
 
             if prepared_item['needs_nli']:
-                nli_pending.append((item['index'], claim.text, evidence.text))
+                nli_pending.append((item['index'], prepared_item['nli_claim_text'], evidence.text))
 
         return _BatchPreparedState(
             results=results,
@@ -721,7 +784,7 @@ class VerifierHub:
             if self.nli_detector is not None:
                 try:
                     nli_scores = self._detect_nli_single(
-                        claim_text=claim.text,
+                        claim_text=metadata.get('nli_claim_text', claim.text),
                         evidence_text=evidence.text,
                     )
                     nli_signal = nli_scores  # Dict with entailment, neutral, contradiction
@@ -848,9 +911,10 @@ class VerifierHub:
             nli_batch_scores = None
 
             # Precompute NLI scores in batch for all evidence chunks when available.
+            nli_claim_text = metadata.get('nli_claim_text', claim.text)
             if self.nli_detector is not None:
                 try:
-                    claim_texts = [claim.text] * len(evidence_list)
+                    claim_texts = [nli_claim_text] * len(evidence_list)
                     evidence_texts = [chunk.text for chunk in evidence_list]
                     nli_batch_scores = self.detect_nli_batch(claim_texts, evidence_texts)
                 except Exception as e:
@@ -882,7 +946,7 @@ class VerifierHub:
                                 nli_signal = nli_batch_scores[idx]
                             else:
                                 nli_signal = self._detect_nli_single(
-                                    claim_text=claim.text,
+                                    claim_text=nli_claim_text,
                                     evidence_text=chunk.text,
                                 )
                         except Exception as e:
