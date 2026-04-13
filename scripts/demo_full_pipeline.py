@@ -177,6 +177,11 @@ def parse_args() -> argparse.Namespace:
         description="Launch the full hallucination-detection demo UI."
     )
     parser.add_argument(
+        "--config",
+        default="config.yaml",
+        help="Path to runtime config YAML (default: config.yaml).",
+    )
+    parser.add_argument(
         "--strategy",
         choices=["development", "validation", "production"],
         help="Data strategy to use. If omitted, script auto-selects.",
@@ -217,7 +222,7 @@ def main():
     Initialize all components and launch the Gradio UI.
     
     This script:
-    1. Loads configuration from config.yaml
+    1. Loads configuration from the configured YAML path
     2. Initializes RAG pipeline with retriever and generator
     3. Initializes VerifierHub with all detectors
     4. Initializes RuleBasedAggregator for claim classification
@@ -297,30 +302,38 @@ def main():
     pbar = tqdm(total=len(setup_steps), desc="🔧 Setup progress", ascii=False, unit="step")
     
     try:
-        config = Config("config.yaml")
+        config = Config(args.config)
         pbar.update(1)
         pbar.set_description_str("🔧 Setup progress | ✓ Config loaded")
         
         if 'aggregator' not in config.get('verification', {}):
-            print("\n⚠️  WARNING: verification.aggregator section missing in config.yaml")
+            print(f"\n⚠️  WARNING: verification.aggregator section missing in {args.config}")
             print("   The full pipeline requires aggregator configuration.")
             pbar.close()
             return
     except Exception as e:
         pbar.close()
         print(f"❌ ERROR loading configuration: {e}")
-        print("\nPlease ensure config.yaml exists in the project root.")
+        print(f"\nPlease ensure {args.config} exists and is readable.")
         return
     
     # Step 2: Initialize RAG pipeline
     pbar.set_description_str("🔧 Setup progress | Loading RAG Pipeline")
     try:
         pipeline = BaselineRAGPipeline.from_config(
-            config_path="config.yaml",
+            config_path=args.config,
             strategy=strategy
         )
         pbar.update(1)
         pbar.set_description_str("🔧 Setup progress | ✓ RAG Pipeline loaded")
+        generator = getattr(pipeline, "generator", None)
+        if generator is not None and getattr(generator, "model_family", None) == "seq2seq":
+            print("\n⚠️  GENERATOR WARNING: Seq2Seq generator detected.")
+            print(
+                f"   model={getattr(generator, 'model_name', 'unknown')} | "
+                "Seq2Seq models may ignore chat-style system instructions and produce short QA outputs."
+            )
+            print("   For full-sentence reprompt testing, use an instruction-tuned causal model (for example Qwen3).")
     except FileNotFoundError as e:
         pbar.close()
         print(f"❌ ERROR: {e}")

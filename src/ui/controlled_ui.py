@@ -573,6 +573,22 @@ class ControlledPipelineUI(ConfidenceUI):
                 "Stage 1: Generate draft answer. Stage 2: Edit draft. Stage 3: Verify and inspect signals."
             )
 
+            generator = getattr(self.rag_pipeline, "generator", None)
+            if generator is not None and getattr(generator, "model_family", None) == "seq2seq":
+                model_name = getattr(generator, "model_name", "unknown")
+                gr.Markdown(
+                    (
+                        "<div style='border:1px solid #f59e0b; background:#fff7ed; color:#9a3412; "
+                        "padding:10px 12px; border-radius:8px; margin-bottom:8px;'>"
+                        "<strong>Generator Warning:</strong> "
+                        f"Current model <code>{model_name}</code> is seq2seq. "
+                        "It may ignore chat-style system instructions and produce very short answers "
+                        "(for example single tokens). For reprompt testing, use an instruction-tuned "
+                        "causal model such as Qwen3."
+                        "</div>"
+                    )
+                )
+
             generation_state = gr.State({})
             verification_state = gr.State({})
 

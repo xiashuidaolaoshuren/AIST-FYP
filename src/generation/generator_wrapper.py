@@ -112,6 +112,14 @@ class GeneratorWrapper:
             model_config = AutoConfig.from_pretrained(model_name)
             self.model_family = 'seq2seq' if bool(getattr(model_config, 'is_encoder_decoder', False)) else 'causal'
             self.logger.info("Detected generator family: %s", self.model_family)
+            if self.model_family == 'seq2seq':
+                warning_msg = (
+                    "Seq2Seq generator detected (%s). Chat-style system instructions may be ignored in fallback "
+                    "prompt formatting; outputs can be short/extractive. For full-sentence reprompt evaluation, "
+                    "prefer an instruction-tuned causal model."
+                )
+                self.logger.warning(warning_msg, model_name)
+                print(f"[generator] WARNING: {warning_msg % model_name}", flush=True)
         except Exception as e:
             raise ValueError(f"Failed to inspect model architecture: {e}")
         
