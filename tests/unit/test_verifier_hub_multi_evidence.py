@@ -730,3 +730,129 @@ def test_resolve_claim_text_for_nli_scopes_antecedent_by_answer_id():
     )
 
     assert rewritten_other_answer == "It is Turkey's largest city."
+
+
+def test_user_context_self_match_excluded_from_entailment_selection():
+    """Self-matching user-context chunk should not dominate max entailment selection."""
+    config = _make_config()
+    config.verification = type('obj', (object,), {
+        'enabled': True,
+        'verify_all_evidence': True,
+        'aggregation_method': 'max',
+        'contradiction_first_fusion': False,
+        'modules': type('obj', (object,), {
+            'intrinsic': False,
+            'grounded': False,
+            'nli': False,
+            'self_agreement': False,
+        })(),
+        'intrinsic': type('obj', (object,), {
+            'strict_logits': False,
+            'epsilon': 1e-10,
+        })(),
+    })()
+
+    hub = VerifierHub(config)
+    per_chunk_signals = [
+        {
+            'doc_id': 'user_context',
+            'sent_id': 0,
+            'is_self_match': True,
+            'score_dense': 0.95,
+            'coverage': {'entities': 1.0, 'numbers': 1.0, 'tokens_overlap': 1.0},
+            'uncertainty': {'mean_entropy': 0.1},
+            'citation_span_match': 1.0,
+            'numeric_check': True,
+            'nli': {'entailment': 0.99, 'neutral': 0.00, 'contradiction': 0.01},
+        },
+        {
+            'doc_id': 'user_context',
+            'sent_id': 1,
+            'is_self_match': False,
+            'score_dense': 0.90,
+            'coverage': {'entities': 1.0, 'numbers': 1.0, 'tokens_overlap': 0.7},
+            'uncertainty': {'mean_entropy': 0.2},
+            'citation_span_match': 0.7,
+            'numeric_check': True,
+            'nli': {'entailment': 0.22, 'neutral': 0.60, 'contradiction': 0.18},
+        },
+    ]
+
+    aggregated, primary_idx = hub._aggregate_signals(
+        per_chunk_signals,
+        metadata={'source_mode': 'user_context'},
+    )
+
+    assert primary_idx == 1
+    assert aggregated['nli']['entailment'] == pytest.approx(0.22)
+
+
+def test_user_context_self_match_excluded_from_pooled_grounding():
+    """Self-matching user-context chunk should not inflate pooled entity/number coverage."""
+    config = _make_config()
+    config.verification = type('obj', (object,), {
+        'enabled': True,
+        'verify_all_evidence': True,
+        'aggregation_method': 'max',
+        'contradiction_first_fusion': False,
+        'modules': type('obj', (object,), {
+            'intrinsic': False,
+            'grounded': False,
+            'nli': False,
+            'self_agreement': False,
+        })(),
+        'intrinsic': type('obj', (object,), {
+            'strict_logits': False,
+            'epsilon': 1e-10,
+        })(),
+    })()
+
+    hub = VerifierHub(config)
+    per_chunk_signals = [
+        {
+            'doc_id': 'user_context',
+            'sent_id': 0,
+            'is_self_match': True,
+            'score_dense': 0.95,
+            'coverage': {
+                'entities': 1.0,
+                'numbers': 1.0,
+                'tokens_overlap': 1.0,
+                'claim_entities': ['Istanbul', 'Turkey'],
+                'matched_entities': ['Istanbul', 'Turkey'],
+                'claim_numbers': ['1923'],
+                'matched_numbers': ['1923'],
+            },
+            'uncertainty': {'mean_entropy': 0.1},
+            'citation_span_match': 1.0,
+            'numeric_check': True,
+            'nli': {'entailment': 0.95, 'neutral': 0.03, 'contradiction': 0.02},
+        },
+        {
+            'doc_id': 'user_context',
+            'sent_id': 1,
+            'is_self_match': False,
+            'score_dense': 0.90,
+            'coverage': {
+                'entities': 0.0,
+                'numbers': 0.0,
+                'tokens_overlap': 0.1,
+                'claim_entities': ['Istanbul', 'Turkey'],
+                'matched_entities': [],
+                'claim_numbers': ['1923'],
+                'matched_numbers': [],
+            },
+            'uncertainty': {'mean_entropy': 0.2},
+            'citation_span_match': 0.1,
+            'numeric_check': False,
+            'nli': {'entailment': 0.10, 'neutral': 0.70, 'contradiction': 0.20},
+        },
+    ]
+
+    aggregated, _ = hub._aggregate_signals(
+        per_chunk_signals,
+        metadata={'source_mode': 'user_context'},
+    )
+
+    assert aggregated['coverage']['entities'] == pytest.approx(0.0)
+    assert aggregated['coverage']['numbers'] == pytest.approx(0.0)

@@ -336,6 +336,30 @@ class VerifierHub:
             antecedents[answer_key] = current_subject
 
         return resolved_text
+
+    @staticmethod
+    def _normalize_text_for_similarity(text: str) -> str:
+        """Normalize text for lightweight exact/near-exact self-match checks."""
+        if not text:
+            return ''
+        lowered = text.lower().strip()
+        return re.sub(r'[^a-z0-9]+', ' ', lowered).strip()
+
+    def _is_user_context_self_match(self, claim_text: str, evidence_text: str) -> bool:
+        """Return True when evidence text is effectively the same statement as the claim."""
+        normalized_claim = self._normalize_text_for_similarity(claim_text)
+        normalized_evidence = self._normalize_text_for_similarity(evidence_text)
+        if not normalized_claim or not normalized_evidence:
+            return False
+        if normalized_claim == normalized_evidence:
+            return True
+        shorter_len = min(len(normalized_claim), len(normalized_evidence))
+        if shorter_len < 24:
+            return False
+        if normalized_claim in normalized_evidence or normalized_evidence in normalized_claim:
+            overlap_ratio = shorter_len / max(len(normalized_claim), len(normalized_evidence))
+            return overlap_ratio >= 0.9
+        return False
     
     def verify_claim(
         self,
@@ -922,6 +946,7 @@ class VerifierHub:
                     nli_batch_scores = None
             
             # Collect signals from all chunks
+            source_mode = str(metadata.get('source_mode', '')).strip().lower()
             for idx, chunk in enumerate(evidence_list):
                 try:
                     # Compute uncertainty and grounded signals for this chunk
@@ -954,10 +979,15 @@ class VerifierHub:
                             nli_signal = {'entailment': 0.33, 'neutral': 0.34, 'contradiction': 0.33}
                     
                     # Store per-chunk details
+                    is_self_match = (
+                        source_mode == 'user_context'
+                        and self._is_user_context_self_match(nli_claim_text, chunk.text)
+                    )
                     chunk_data = {
                         'doc_id': chunk.doc_id,
                         'sent_id': chunk.sent_id,
                         'score_dense': getattr(chunk, 'score_dense', None),
+                        'is_self_match': is_self_match,
                         'coverage': grounded_signal,
                         'uncertainty': uncertainty_signal,
                         'citation_span_match': grounded_signal.get('tokens_overlap', 0.0),
@@ -977,6 +1007,7 @@ class VerifierHub:
                         'doc_id': chunk.doc_id,
                         'sent_id': chunk.sent_id,
                         'score_dense': None,
+                        'is_self_match': False,
                         'coverage': {'entities': 0.0, 'numbers': 0.0, 'tokens_overlap': 0.0},
                         'uncertainty': {'mean_entropy': 0.0},
                         'citation_span_match': 0.0,
@@ -1086,6 +1117,7 @@ class VerifierHub:
                                    or None for MEAN method
         """
         # Extract values for aggregation
+        source_mode = str((metadata or {}).get('source_mode', '')).strip().lower()
         entities = [s['coverage'].get('entities', 0.0) for s in per_chunk_signals]
         numbers = [s['coverage'].get('numbers', 0.0) for s in per_chunk_signals]
         tokens = [s['coverage'].get('tokens_overlap', 0.0) for s in per_chunk_signals]
@@ -1099,6 +1131,7 @@ class VerifierHub:
         
         # Extract NLI scores if available
         nli_available = any('nli' in s for s in per_chunk_signals)
+        self_match_mask = [bool(s.get('is_self_match', False)) for s in per_chunk_signals]
         if nli_available:
             entailments = [s.get('nli', {}).get('entailment', 0.33) for s in per_chunk_signals]
             neutrals = [s.get('nli', {}).get('neutral', 0.33) for s in per_chunk_signals]
@@ -1108,6 +1141,11 @@ class VerifierHub:
                 max(0.0, float(c) * (1.0 - float(rev_e)))
                 for c, rev_e in zip(raw_contradictions, reverse_entailments)
             ]
+
+            if source_mode == 'user_context':
+                eligible_entailment_indices = [idx for idx, is_self in enumerate(self_match_mask) if not is_self]
+            else:
+                eligible_entailment_indices = list(range(len(entailments)))
         
         primary_chunk_idx = None
         primary_nli_mode = None
@@ -1120,8 +1158,15 @@ class VerifierHub:
             # Track primary evidence chunk (entailment-first by default,
             # contradiction-first when explicitly enabled)
             if nli_available:
-                max_entailment = max(entailments)
-                entailment_chunk_idx = entailments.index(max_entailment)
+                if eligible_entailment_indices:
+                    entailment_chunk_idx = max(
+                        eligible_entailment_indices,
+                        key=lambda idx: entailments[idx],
+                    )
+                    max_entailment = entailments[entailment_chunk_idx]
+                else:
+                    entailment_chunk_idx = 0
+                    max_entailment = 0.0
                 max_coverage_score = max(coverage_scores) if coverage_scores else 0.0
 
                 # Optional guard: ignore low-ranked dense retrieval evidence when
@@ -1285,7 +1330,6 @@ class VerifierHub:
             aggregated_entities = max(entities)
             aggregated_numbers = max(numbers)
 
-            source_mode = str((metadata or {}).get('source_mode', '')).strip().lower()
             if source_mode == 'user_context':
                 claim_entities_union = set()
                 matched_entities_union = set()
@@ -1293,11 +1337,18 @@ class VerifierHub:
                 matched_numbers_union = set()
 
                 for signal in per_chunk_signals:
+                    if signal.get('is_self_match', False):
+                        continue
                     coverage = signal.get('coverage', {}) or {}
                     claim_entities_union.update(str(x) for x in coverage.get('claim_entities', []) if str(x).strip())
                     matched_entities_union.update(str(x) for x in coverage.get('matched_entities', []) if str(x).strip())
                     claim_numbers_union.update(str(x) for x in coverage.get('claim_numbers', []) if str(x).strip())
                     matched_numbers_union.update(str(x) for x in coverage.get('matched_numbers', []) if str(x).strip())
+
+                if not claim_entities_union and any(self_match_mask):
+                    aggregated_entities = 0.0
+                if not claim_numbers_union and any(self_match_mask):
+                    aggregated_numbers = 0.0
 
                 aggregated_entities = (
                     float(len(matched_entities_union) / len(claim_entities_union))

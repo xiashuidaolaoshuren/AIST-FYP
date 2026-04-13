@@ -139,6 +139,128 @@ class ControlledPipelineUI(ConfidenceUI):
 
         return retrieved
 
+    def _coerce_evidence_chunks(self, evidence_chunks: Any) -> List[EvidenceChunk]:
+        """Coerce serialized or in-memory evidence chunks into dataclass instances."""
+        if not evidence_chunks:
+            return []
+
+        coerced: List[EvidenceChunk] = []
+        for chunk in evidence_chunks:
+            if isinstance(chunk, EvidenceChunk):
+                coerced.append(chunk)
+            elif isinstance(chunk, dict):
+                coerced.append(EvidenceChunk(**chunk))
+        return coerced
+
+    @staticmethod
+    def _normalize_ui_text(value: Optional[str]) -> str:
+        return (value or "").strip()
+
+    def _user_context_evidence_matches_context(
+        self,
+        evidence_chunks: List[EvidenceChunk],
+        context_text: str,
+    ) -> bool:
+        """Return True when all user-context evidence texts are substrings of the current context."""
+        normalized_context = self._normalize_ui_text(context_text)
+        if not normalized_context:
+            return not any(chunk.doc_id == "user_context" for chunk in evidence_chunks)
+
+        for chunk in evidence_chunks:
+            if chunk.doc_id != "user_context":
+                continue
+            if self._normalize_ui_text(chunk.text) not in normalized_context:
+                return False
+        return True
+
+    def _build_verify_bundle(
+        self,
+        query: str,
+        answer_text: str,
+        user_context: str,
+    ) -> Dict[str, Any]:
+        """Build fresh verification inputs from the current UI state."""
+        query_clean = self._normalize_ui_text(query)
+        context_clean = self._normalize_ui_text(user_context)
+
+        if context_clean:
+            evidence_chunks = self._build_user_context_evidence(query_clean, context_clean, top_k=5)
+            source_mode = "user_context"
+        else:
+            retrieval_result = self.rag_pipeline.run(query_clean, top_k=5)
+            evidence_chunks = self._extract_evidence_chunks(retrieval_result.get("claim_evidence_pairs", []))
+            source_mode = "wikipedia"
+
+        claims = extract_claims(text=answer_text, method="auto")
+        metadata = self.rag_pipeline.generator.score_target_with_metadata(
+            prompt=query_clean,
+            target_text=answer_text,
+            evidence_chunks=evidence_chunks,
+        )
+        metadata.update({
+            "text": answer_text,
+            "original_query": query_clean,
+            "source_mode": source_mode,
+        })
+        sub_answers = [{
+            "text": answer_text,
+            "char_span": [0, len(answer_text)],
+            "sub_answer_id": 0,
+            "sub_query": query_clean,
+        }]
+        claims_by_sub_answer = [{
+            "sub_answer_id": 0,
+            "sub_text": answer_text,
+            "sub_query": query_clean,
+            "claims": claims,
+        }]
+        claim_evidence_pairs = self._build_pairs_for_claims(claims, evidence_chunks)
+
+        return {
+            "query": query_clean,
+            "user_context_text": context_clean,
+            "source_mode": source_mode,
+            "generated_text": answer_text,
+            "claims": claims,
+            "evidence_chunks": evidence_chunks,
+            "claim_evidence_pairs": claim_evidence_pairs,
+            "generator_metadata": metadata,
+            "sub_answers": sub_answers,
+            "claims_by_sub_answer": claims_by_sub_answer,
+        }
+
+    def _should_rebuild_verify_bundle(
+        self,
+        bundle: Dict[str, Any],
+        query_input: str,
+        user_context_input: str,
+    ) -> bool:
+        """Determine whether verify must rebuild state from current UI inputs."""
+        if not bundle or bundle.get("error"):
+            return True
+
+        bundle_query = self._normalize_ui_text(bundle.get("query"))
+        current_query = self._normalize_ui_text(query_input)
+        if current_query and current_query != bundle_query:
+            return True
+
+        bundle_context = self._normalize_ui_text(bundle.get("user_context_text"))
+        current_context = self._normalize_ui_text(user_context_input)
+        bundle_source_mode = bundle.get("source_mode", "wikipedia")
+
+        if current_context:
+            if bundle_source_mode != "user_context":
+                return True
+            if current_context != bundle_context:
+                return True
+            evidence_chunks = self._coerce_evidence_chunks(bundle.get("evidence_chunks", []))
+            if not self._user_context_evidence_matches_context(evidence_chunks, current_context):
+                self.logger.warning("User-context evidence no longer matches current textbox content; rebuilding verify bundle")
+                return True
+            return False
+
+        return bundle_source_mode == "user_context" and bool(bundle_context)
+
     def _flatten_claims(self, claims_by_sub_answer: List[Dict[str, Any]]) -> List[Claim]:
         claims: List[Claim] = []
         for item in claims_by_sub_answer:
@@ -258,6 +380,7 @@ class ControlledPipelineUI(ConfidenceUI):
 
                 bundle = {
                     "query": query_clean,
+                    "user_context_text": context_clean,
                     "source_mode": source_mode,
                     "generated_text": draft_text,
                     "claims": claims,
@@ -297,61 +420,17 @@ class ControlledPipelineUI(ConfidenceUI):
             try:
                 print("[verify] callback start", flush=True)
                 bundle = bundle if isinstance(bundle, dict) else {}
-                if not bundle or bundle.get("error"):
-                    query_clean = (query_input or "").strip()
-                    context_clean = (user_context_input or "").strip()
+                if self._should_rebuild_verify_bundle(bundle, query_input, user_context_input):
+                    query_clean = self._normalize_ui_text(query_input) or self._normalize_ui_text(bundle.get("query"))
+                    context_clean = self._normalize_ui_text(user_context_input)
                     if not query_clean:
                         msg = bundle.get("error", "Query is required before verification.") if bundle else "Query is required before verification."
                         return empty_highlight, pd.DataFrame(), pd.DataFrame(), {}, msg
+                    bundle = self._build_verify_bundle(query=query_clean, answer_text=text, user_context=context_clean)
 
-                    if context_clean:
-                        evidence_chunks = self._build_user_context_evidence(query_clean, context_clean, top_k=5)
-                        source_mode = "user_context"
-                    else:
-                        retrieval_result = self.rag_pipeline.run(query_clean, top_k=5)
-                        evidence_chunks = self._extract_evidence_chunks(retrieval_result.get("claim_evidence_pairs", []))
-                        source_mode = "wikipedia"
-
-                    claims = extract_claims(text=text, method="auto")
-                    metadata = self.rag_pipeline.generator.score_target_with_metadata(
-                        prompt=query_clean,
-                        target_text=text,
-                        evidence_chunks=evidence_chunks,
-                    )
-                    metadata.update({
-                        "text": text,
-                        "original_query": query_clean,
-                        "source_mode": source_mode,
-                    })
-                    sub_answers = [{
-                        "text": text,
-                        "char_span": [0, len(text)],
-                        "sub_answer_id": 0,
-                        "sub_query": query_clean,
-                    }]
-                    claims_by_sub_answer = [{
-                        "sub_answer_id": 0,
-                        "sub_text": text,
-                        "sub_query": query_clean,
-                        "claims": claims,
-                    }]
-                    claim_evidence_pairs = self._build_pairs_for_claims(claims, evidence_chunks)
-
-                    bundle = {
-                        "query": query_clean,
-                        "source_mode": source_mode,
-                        "generated_text": text,
-                        "claims": claims,
-                        "evidence_chunks": evidence_chunks,
-                        "claim_evidence_pairs": claim_evidence_pairs,
-                        "generator_metadata": metadata,
-                        "sub_answers": sub_answers,
-                        "claims_by_sub_answer": claims_by_sub_answer,
-                    }
-
-                query = bundle.get("query", "")
+                query = self._normalize_ui_text(query_input) or bundle.get("query", "")
                 generated_text = bundle.get("generated_text", "")
-                evidence_chunks: List[EvidenceChunk] = bundle.get("evidence_chunks", [])
+                evidence_chunks = self._coerce_evidence_chunks(bundle.get("evidence_chunks", []))
                 metadata = dict(bundle.get("generator_metadata", {}))
                 metadata.setdefault("source_mode", bundle.get("source_mode", "wikipedia"))
 
@@ -390,6 +469,18 @@ class ControlledPipelineUI(ConfidenceUI):
                     claim_evidence_pairs = bundle.get("claim_evidence_pairs", [])
                     metadata.setdefault("text", text)
                     metadata.setdefault("original_query", query)
+
+                if metadata.get("source_mode") == "user_context":
+                    current_context = self._normalize_ui_text(user_context_input)
+                    if not self._user_context_evidence_matches_context(evidence_chunks, current_context):
+                        self.logger.warning("Detected stale user-context evidence at verify time; rebuilding from current context")
+                        bundle = self._build_verify_bundle(query=query, answer_text=text, user_context=current_context)
+                        evidence_chunks = self._coerce_evidence_chunks(bundle.get("evidence_chunks", []))
+                        claims = bundle.get("claims", [])
+                        sub_answers = bundle.get("sub_answers", [])
+                        claims_by_sub_answer = bundle.get("claims_by_sub_answer", [])
+                        claim_evidence_pairs = bundle.get("claim_evidence_pairs", [])
+                        metadata = dict(bundle.get("generator_metadata", {}))
 
                 signals, decisions = self._verify_from_bundle(
                     query=query,
