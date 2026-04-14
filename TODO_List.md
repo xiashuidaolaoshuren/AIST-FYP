@@ -68,9 +68,9 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
     -   [x] Deliver First Term Presentation.
 
 -   **Member 1 (Research & Presentation Focus):**
-    -   [ ] Research advanced NLI models and their application in fact-checking beyond the baseline DeBERTa model.
-    -   [ ] Analyze different approaches to self-agreement and consistency checking (e.g., SelfCheckGPT variants).
-    -   [ ] Consolidate findings from all four signals and prepare for the integration analysis.
+    -   [X] Research advanced NLI models and their application in fact-checking beyond the baseline DeBERTa model.
+    -   [X] Analyze different approaches to self-agreement and consistency checking (e.g., SelfCheckGPT variants).
+    -   [X] Consolidate findings from all four signals and prepare for the integration analysis.
 -   **Member 2 (Development & Experimentation Focus):**
     -   [x] **Architecture Refactoring:**
         -   [x] Implement `VerifierHub` class in `src/verification/verifier_hub.py` to centralize all detector orchestration.
@@ -96,7 +96,7 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 ### **Month 5: Detector Evaluation & Mitigation**
 
 -   **Member 1 (Research & Presentation Focus):**
-    -   [ ] Analyze the results from the end-to-end evaluation, focusing on the performance of each individual signal.
+    -   [X] Analyze the results from the end-to-end evaluation, focusing on the performance of each individual signal.
     -   [x] Draft the results and discussion sections of the final report.
 -   **Member 2 (Development & Experimentation Focus):**
     -   [x] **Rule-Based Aggregation:**
@@ -129,13 +129,13 @@ This to-do list breaks down the 6-month project plan into actionable tasks, orga
 
 ### **Month 6: Finalization & Documentation**
 
--   [ ] **Ablation Study:**
-    -   [ ] Design and run experiments to analyze the contribution of each trainless signal.
-    -   [ ] Systematically disable each of the four detectors one by one and re-run the evaluation to measure the drop in performance.
+-   [X] **Ablation Study:**
+    -   [X] Design and run experiments to analyze the contribution of each trainless signal.
+    -   [X] Systematically disable each of the four detectors one by one and re-run the evaluation to measure the drop in performance.
 -   [x] **Final Report & Demo:**
-    -   [ ] Write the final project report, including sections on architecture, methodology, results, ablation study, and conclusions.
+    -   [X] Write the final project report, including sections on architecture, methodology, results, ablation study, and conclusions.
     -   [ ] Create a presentation summarizing the project.
-    -   [ ] Prepare a compelling live demo or a recorded video showcasing the system's ability to detect hallucinations.
+    -   [X] Prepare a compelling live demo or a recorded video showcasing the system's ability to detect hallucinations.
 -   [x] **Code Cleanup & Handoff:**
     -   [x] Refactor the codebase for clarity and readability.
     -   [x] Add comprehensive comments and docstrings to all functions and classes.
