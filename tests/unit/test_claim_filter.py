@@ -621,3 +621,56 @@ class TestPlaceholderDetection:
     def test_is_placeholder_detects_lc_marker(self, sample_config):
         filter = ClaimFilter(sample_config)
         assert filter.is_placeholder("Prefix [CLAIM UNCERTAIN: Low Confidence] suffix")
+
+
+class TestPlaceholderSpanFiltering:
+    """Regression tests for placeholder span-overlap filtering."""
+
+    def test_filter_placeholder_claims_drops_fragmented_marker_claims(self, sample_config):
+        filter = ClaimFilter(sample_config)
+        filtered_text = (
+            "[CLAIM REMOVED: Contradictory] It is Turkey's largest city. "
+            "Ankara is Turkey's second-largest city."
+        )
+
+        claims = [
+            Claim(
+                claim_id="c1",
+                answer_id="a1",
+                text="[CLAIM REMOVED:",
+                answer_char_span=[0, 15],
+            ),
+            Claim(
+                claim_id="c2",
+                answer_id="a1",
+                text="Contradictory]",
+                answer_char_span=[16, 30],
+            ),
+            Claim(
+                claim_id="c3",
+                answer_id="a1",
+                text="It is Turkey's largest city.",
+                answer_char_span=[31, 58],
+            ),
+        ]
+
+        kept = filter.filter_placeholder_claims(claims, filtered_text)
+
+        assert len(kept) == 1
+        assert kept[0].claim_id == "c3"
+
+    def test_filter_placeholder_claims_keeps_claims_when_no_marker(self, sample_config):
+        filter = ClaimFilter(sample_config)
+        text = "It is Turkey's largest city."
+        claims = [
+            Claim(
+                claim_id="c1",
+                answer_id="a1",
+                text="It is Turkey's largest city.",
+                answer_char_span=[0, len(text)],
+            )
+        ]
+
+        kept = filter.filter_placeholder_claims(claims, text)
+        assert len(kept) == 1
+        assert kept[0].claim_id == "c1"

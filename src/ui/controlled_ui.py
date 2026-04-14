@@ -574,10 +574,10 @@ class ControlledPipelineUI(ConfidenceUI):
                     )
                     working_answer = filtered_text
                     working_claims = extract_claims(text=working_answer, method="auto")
-                    working_claims = [
-                        claim for claim in working_claims
-                        if not self.claim_filter.is_placeholder(claim.text)
-                    ]
+                    working_claims = self.claim_filter.filter_placeholder_claims(
+                        working_claims,
+                        working_answer,
+                    )
                     working_metadata = self.rag_pipeline.generator.score_target_with_metadata(
                         prompt=query,
                         target_text=working_answer,
@@ -605,10 +605,10 @@ class ControlledPipelineUI(ConfidenceUI):
                         working_answer = reprompt_result.get("final_answer", working_answer)
                         working_claims = extract_claims(text=working_answer, method="auto")
                         if self.claim_filter:
-                            working_claims = [
-                                claim for claim in working_claims
-                                if not self.claim_filter.is_placeholder(claim.text)
-                            ]
+                            working_claims = self.claim_filter.filter_placeholder_claims(
+                                working_claims,
+                                working_answer,
+                            )
                         working_metadata = self.rag_pipeline.generator.score_target_with_metadata(
                             prompt=query,
                             target_text=working_answer,

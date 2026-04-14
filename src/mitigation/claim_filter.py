@@ -16,6 +16,7 @@ while preventing harmful hallucinations from reaching the final output.
 
 from typing import Any, List, Optional, Tuple, Dict
 import logging
+import re
 import numpy as np
 
 from src.utils.data_structures import Claim, ClaimDecision
@@ -114,7 +115,12 @@ class ClaimFilter:
         )
 
     def is_placeholder(self, text: str) -> bool:
-        """Return True when text contains mitigation placeholder markers."""
+        """Return True when text contains mitigation placeholder markers.
+
+        This text-based check is used as a lightweight guard. For mitigation
+        re-verification, prefer ``filter_placeholder_claims`` which uses span
+        overlap and is robust to sentence segmentation artifacts.
+        """
         if not text or not text.strip():
             return False
 
@@ -124,7 +130,50 @@ class ClaimFilter:
             if marker and marker.strip() and marker.lower() in lowered:
                 return True
 
+        # Fragment fallback: spaCy can split "[CLAIM REMOVED: Contradictory]"
+        # into partial pieces that don't contain the whole marker string.
+        for marker in placeholders:
+            if not marker:
+                continue
+            label_match = re.match(r'\[([^\]:]+)', marker)
+            if label_match:
+                label = label_match.group(1).strip().lower()
+                if label and label in lowered:
+                    return True
+
         return False
+
+    def filter_placeholder_claims(
+        self,
+        claims: List[Claim],
+        filtered_text: str,
+    ) -> List[Claim]:
+        """Remove extracted claims whose spans overlap placeholder regions.
+
+        This is robust against claim extractor splitting placeholders into
+        partial fragments whose claim text no longer matches the full marker.
+        """
+        placeholder_regions: List[Tuple[int, int]] = []
+        for marker in [self.placeholder, self.lc_placeholder]:
+            if not marker or not marker.strip():
+                continue
+            for match in re.finditer(re.escape(marker), filtered_text):
+                placeholder_regions.append((match.start(), match.end()))
+
+        if not placeholder_regions:
+            return claims
+
+        kept_claims: List[Claim] = []
+        for claim in claims:
+            span_start, span_end = claim.answer_char_span
+            overlaps_placeholder = any(
+                span_start < region_end and span_end > region_start
+                for region_start, region_end in placeholder_regions
+            )
+            if not overlaps_placeholder:
+                kept_claims.append(claim)
+
+        return kept_claims
     
     def filter_answer(
         self,
