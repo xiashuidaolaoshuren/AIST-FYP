@@ -79,6 +79,13 @@ def _split_claim_text_with_spans(nlp, claim_text: str, claim_start: int) -> List
     return valid_parts
 
 
+def _trim_raw_span(raw_text: str, start_char: int, end_char: int) -> Tuple[int, int]:
+    """Trim leading/trailing whitespace from a raw text span."""
+    left_ws = len(raw_text) - len(raw_text.lstrip())
+    right_ws = len(raw_text) - len(raw_text.rstrip())
+    return start_char + left_ws, end_char - right_ws
+
+
 def extract_claims_spacy(
     text: str,
     answer_id: Optional[str] = None,
@@ -131,15 +138,15 @@ def extract_claims_spacy(
     # Extract sentences
     claims = []
     for sent in doc.sents:
-        # Get sentence text and character span
-        sent_text = sent.text.strip()
+        # Get sentence text and normalize spans to match stripped content.
+        raw_sent_text = sent.text
+        sent_text = raw_sent_text.strip()
         
         if not sent_text:
             continue
         
-        # Calculate character span in original text
-        char_start = sent.start_char
-        char_end = sent.end_char
+        # Calculate character span in original text (trim leading/trailing ws).
+        char_start, char_end = _trim_raw_span(raw_sent_text, sent.start_char, sent.end_char)
         
         split_parts = _split_claim_text_with_spans(nlp, sent_text, char_start) if apply_clause_split else [
             (sent_text, char_start, char_end)

@@ -94,6 +94,22 @@ class TestClaimExtractor:
             start, end = claim.answer_char_span
             extracted_text = text[start:end].strip()
             assert extracted_text == claim.text.strip()
+
+    def test_extract_claims_spacy_trims_leading_whitespace_in_span(self):
+        """Leading whitespace should not remain in sentence-level claim spans."""
+        placeholder = "[CLAIM REMOVED: Contradictory]"
+        text = (" " * len(placeholder)) + " Istanbul is Turkey's largest city. Ankara is second-largest."
+
+        claims = extract_claims_spacy(text)
+
+        assert len(claims) >= 2
+        first = claims[0]
+        first_start, first_end = first.answer_char_span
+
+        # First surviving sentence should start at non-space text ("Istanbul...").
+        assert text[first_start] == "I"
+        assert first.text.startswith("Istanbul is Turkey's largest city.")
+        assert text[first_start:first_end] == first.text
     
     def test_validate_claim_spans(self):
         """Test claim span validation."""
