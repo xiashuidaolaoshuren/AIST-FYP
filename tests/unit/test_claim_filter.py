@@ -148,7 +148,7 @@ class TestClaimFiltering:
         """Test filtering a single contradictory claim."""
         filter = ClaimFilter(sample_config)
         
-        filtered_text, removed_count = filter.filter_answer(
+        filtered_text, removed_count, _ = filter.filter_answer(
             sample_answer_text, sample_claims, sample_decisions_mixed
         )
         
@@ -212,7 +212,7 @@ class TestClaimFiltering:
             )
         ]
         
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         # Should replace claims 1 and 3
         expected = "[CLAIM REMOVED: Contradictory] Claim 2. [CLAIM REMOVED: Contradictory]"
@@ -239,7 +239,7 @@ class TestClaimFiltering:
             for i in range(3)
         ]
         
-        filtered_text, removed_count = filter.filter_answer(
+        filtered_text, removed_count, _ = filter.filter_answer(
             sample_answer_text, sample_claims, decisions
         )
         
@@ -261,7 +261,7 @@ class TestClaimFiltering:
         
         filter = ClaimFilter(config)
         
-        filtered_text, removed_count = filter.filter_answer(
+        filtered_text, removed_count, _ = filter.filter_answer(
             sample_answer_text, sample_claims, sample_decisions_mixed
         )
         
@@ -273,7 +273,7 @@ class TestClaimFiltering:
         """Test filtering with empty claims list."""
         filter = ClaimFilter(sample_config)
         
-        filtered_text, removed_count = filter.filter_answer("Test", [], [])
+        filtered_text, removed_count, _ = filter.filter_answer("Test", [], [])
         
         assert filtered_text == "Test"
         assert removed_count == 0
@@ -331,7 +331,7 @@ class TestClaimFiltering:
             ClaimDecision(claim_id="c3", status="Supported", rationale="", primary_evidence="", signals_ref=[], confidence={})
         ]
         
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         # "Before." and "After." should be intact
         assert "Before." in filtered_text
@@ -362,7 +362,7 @@ class TestReverseOrderProcessing:
             ClaimDecision(claim_id="c3", status="Contradictory", rationale="", primary_evidence="", signals_ref=[], confidence={})
         ]
         
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         # All should be replaced correctly
         placeholder = '[CLAIM REMOVED: Contradictory]'
@@ -401,7 +401,7 @@ class TestInvalidSpanHandling:
         ]
         
         # Should skip invalid span and log warning
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         assert filtered_text == answer  # Unchanged
         assert removed_count == 0
@@ -432,7 +432,7 @@ class TestInvalidSpanHandling:
         ]
         
         # Should skip invalid span
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         assert filtered_text == answer
         assert removed_count == 0
@@ -463,7 +463,7 @@ class TestInvalidSpanHandling:
         ]
         
         # Should skip invalid span
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         assert filtered_text == answer
         assert removed_count == 0
@@ -559,7 +559,7 @@ class TestEdgeCases:
         ]
         
         # Should handle gracefully (invalid span)
-        filtered_text, removed_count = filter.filter_answer("", claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer("", claims, decisions)
         
         assert filtered_text == ""
         assert removed_count == 0
@@ -577,7 +577,7 @@ class TestEdgeCases:
             ClaimDecision(claim_id="c1", status="Contradictory", rationale="", primary_evidence="", signals_ref=[], confidence={})
         ]
         
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         assert "A" in filtered_text
         assert "C" in filtered_text
@@ -601,7 +601,7 @@ class TestEdgeCases:
             ClaimDecision(claim_id="c3", status="Contradictory", rationale="", primary_evidence="", signals_ref=[], confidence={})
         ]
         
-        filtered_text, removed_count = filter.filter_answer(answer, claims, decisions)
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
         
         # Start and End should be replaced
         placeholder = '[CLAIM REMOVED: Contradictory]'
@@ -609,3 +609,15 @@ class TestEdgeCases:
         
         assert filtered_text == expected
         assert removed_count == 2
+
+
+class TestPlaceholderDetection:
+    """Test placeholder marker detection used by post-mitigation re-verification."""
+
+    def test_is_placeholder_detects_contradictory_marker(self, sample_config):
+        filter = ClaimFilter(sample_config)
+        assert filter.is_placeholder("[CLAIM REMOVED: Contradictory]")
+
+    def test_is_placeholder_detects_lc_marker(self, sample_config):
+        filter = ClaimFilter(sample_config)
+        assert filter.is_placeholder("Prefix [CLAIM UNCERTAIN: Low Confidence] suffix")
