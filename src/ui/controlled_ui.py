@@ -688,7 +688,16 @@ class ControlledPipelineUI(ConfidenceUI):
                     working_answer = filtered_text
                     pre_filter_claims = list(working_claims)
                     pre_filter_decisions = list(working_decisions)
-                    working_claims = extract_claims(text=working_answer, method="auto")
+                    # Replace placeholder markers with same-length whitespace so
+                    # spaCy can segment sentences inside the placeholder correctly
+                    # without corrupting character positions used by downstream steps.
+                    view_text_for_extraction = working_answer
+                    for _ph in [self.claim_filter.placeholder, self.claim_filter.lc_placeholder]:
+                        if _ph:
+                            view_text_for_extraction = view_text_for_extraction.replace(
+                                _ph, ' ' * len(_ph)
+                            )
+                    working_claims = extract_claims(text=view_text_for_extraction, method="auto")
                     working_claims = self.claim_filter.filter_placeholder_claims(
                         working_claims,
                         working_answer,

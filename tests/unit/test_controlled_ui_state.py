@@ -163,6 +163,28 @@ def test_should_not_rebuild_when_bundle_matches_current_inputs():
     )
 
 
+def test_view_text_preserves_char_positions_for_placeholder_extraction():
+    """view_text substitution must produce same-length whitespace so claim spans are valid."""
+    ui = _make_ui()
+    from unittest.mock import MagicMock
+    from src.mitigation.claim_filter import ClaimFilter
+    from src.utils.config import Config
+
+    config = MagicMock(spec=Config)
+    config.get.return_value = {'filter': {'enabled': True, 'placeholder': '[CLAIM REMOVED: Contradictory]'}}
+    cf = ClaimFilter(config)
+
+    working_answer = "[CLAIM REMOVED: Contradictory] Istanbul is Turkey's largest city."
+    view_text = working_answer
+    for ph in [cf.placeholder, cf.lc_placeholder]:
+        if ph:
+            view_text = view_text.replace(ph, ' ' * len(ph))
+
+    assert len(view_text) == len(working_answer)
+    assert view_text[31:].startswith("Istanbul")
+    assert view_text[:30].strip() == ""
+
+
 def test_carryover_decisions_preserves_verdict_after_pronoun_substitution():
     ui = _make_ui()
 
