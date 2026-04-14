@@ -21,9 +21,13 @@ import numpy as np
 
 from src.utils.data_structures import Claim, ClaimDecision
 from src.utils.config import Config
+from src.utils.nlp_utils import get_spacy_model
 
 
 logger = logging.getLogger(__name__)
+
+
+LOW_CONFIDENCE_STATUS = 'Low Confidence'
 
 
 class ClaimFilter:
@@ -108,6 +112,9 @@ class ClaimFilter:
         self.qa_supported_contradict_override_threshold = float(
             filter_config.get('qa_supported_contradict_override_threshold', 0.25)
         )
+        self.pronoun_substitution_enabled = bool(
+            filter_config.get('pronoun_substitution_enabled', True)
+        )
         
         logger.info(
             f"ClaimFilter initialized: enabled={self.enabled}, "
@@ -174,6 +181,134 @@ class ClaimFilter:
                 kept_claims.append(claim)
 
         return kept_claims
+
+    @staticmethod
+    def _is_pronoun_token(text: str) -> bool:
+        pronouns = {'it', 'he', 'she', 'they', 'this', 'that', 'these', 'those'}
+        return text.strip().lower() in pronouns
+
+    def _clean_subject_candidate(self, candidate: str) -> Optional[str]:
+        cleaned = (candidate or '').strip()
+        if cleaned and not self._is_pronoun_token(cleaned):
+            return cleaned
+        return None
+
+    def _extract_subject_from_spacy(self, claim_text: str) -> Optional[str]:
+        nlp = get_spacy_model()
+        doc = nlp(claim_text)
+        for resolver in (
+            self._subject_from_entity_subject,
+            self._subject_from_first_entity,
+            self._subject_from_subject_chunk,
+        ):
+            candidate = resolver(doc)
+            if candidate:
+                return candidate
+
+        return None
+
+    def _subject_from_entity_subject(self, doc) -> Optional[str]:
+        allowed_labels = {'GPE', 'PERSON', 'ORG', 'LOC', 'FAC'}
+        subject_tokens = {token for token in doc if token.dep_ == 'nsubj'}
+        for ent in doc.ents:
+            if ent.label_ in allowed_labels and any(token in subject_tokens for token in ent):
+                candidate = self._clean_subject_candidate(ent.text)
+                if candidate:
+                    return candidate
+
+        return None
+
+    def _subject_from_first_entity(self, doc) -> Optional[str]:
+        allowed_labels = {'GPE', 'PERSON', 'ORG', 'LOC', 'FAC'}
+
+        for ent in doc.ents:
+            if ent.label_ in allowed_labels:
+                candidate = self._clean_subject_candidate(ent.text)
+                if candidate:
+                    return candidate
+
+        return None
+
+    def _subject_from_subject_chunk(self, doc) -> Optional[str]:
+
+        for chunk in doc.noun_chunks:
+            if any(token.dep_ == 'nsubj' for token in chunk):
+                candidate = self._clean_subject_candidate(chunk.text)
+                if candidate:
+                    return candidate
+
+        return None
+
+    def _apply_pronoun_substitution_after_replacement(
+        self,
+        filtered_text: str,
+        start: int,
+        placeholder: str,
+        claim_text: str,
+    ) -> str:
+        if not self.pronoun_substitution_enabled:
+            return filtered_text
+
+        subject = self._extract_removed_claim_subject(claim_text)
+        if not subject:
+            return filtered_text
+
+        tail_start = start + len(placeholder)
+        rewritten_tail = self._substitute_leading_pronoun(
+            filtered_text[tail_start:],
+            subject,
+        )
+        return filtered_text[:tail_start] + rewritten_tail
+
+    def _extract_removed_claim_subject(self, claim_text: str) -> Optional[str]:
+        """Extract a likely subject noun from removed claim text.
+
+        Uses spaCy when available and falls back to title-case regex.
+        """
+        if not claim_text or not claim_text.strip():
+            return None
+
+        # Fallback pattern reused by verifier antecedent extraction.
+        fallback_match = re.match(
+            r"^\s*([A-Z][\w-]*(?:\s+[A-Z][\w-]*){0,3})\b",
+            claim_text.strip(),
+        )
+
+        try:
+            candidate = self._extract_subject_from_spacy(claim_text)
+            if candidate:
+                return candidate
+        except Exception:
+            # Keep mitigation robust even if NLP model is unavailable.
+            pass
+
+        if fallback_match:
+            candidate = self._clean_subject_candidate(fallback_match.group(1))
+            if candidate:
+                return candidate
+
+        return None
+
+    def _substitute_leading_pronoun(self, text: str, antecedent: str) -> str:
+        """Replace leading pronoun in text with the extracted antecedent."""
+        if not text or not antecedent:
+            return text
+
+        pronoun_match = re.match(
+            r"^(\s*(?:[.?!]+\s*)?)(it|he|she|they|this|that|these|those)\b(.*)$",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not pronoun_match:
+            return text
+
+        leading_ws, _, trailing = pronoun_match.groups()
+        normalized = antecedent.strip()
+        if not normalized:
+            return text
+
+        normalized = normalized[0].upper() + normalized[1:]
+        return f"{leading_ws}{normalized}{trailing}"
     
     def filter_answer(
         self,
@@ -409,6 +544,12 @@ class ClaimFilter:
                 continue
 
             filtered_text = filtered_text[:start] + placeholder + filtered_text[end:]
+            filtered_text = self._apply_pronoun_substitution_after_replacement(
+                filtered_text,
+                start,
+                placeholder,
+                claim.text,
+            )
             replaced_count += 1
 
             logger.debug(
@@ -471,6 +612,12 @@ class ClaimFilter:
                 continue
 
             filtered_text = filtered_text[:start] + placeholder + filtered_text[end:]
+            filtered_text = self._apply_pronoun_substitution_after_replacement(
+                filtered_text,
+                start,
+                placeholder,
+                claim.text,
+            )
             if decision.status == 'Contradictory':
                 contradictory_removed += 1
             elif decision.status == 'Supported':
@@ -520,7 +667,7 @@ class ClaimFilter:
             return base_threshold, False
 
         low_confidence_decisions = [
-            d for d in decisions if d.status == 'Low Confidence'
+            d for d in decisions if d.status == LOW_CONFIDENCE_STATUS
         ]
         if not low_confidence_decisions:
             return base_threshold, False
@@ -551,7 +698,7 @@ class ClaimFilter:
         """
         lc_decisions = [
             d for d in decisions
-            if d.status == 'Low Confidence'
+            if d.status == LOW_CONFIDENCE_STATUS
             and float(d.confidence.get('contradict_prob', 0.0)) >= lc_threshold
             and d.claim_id in claim_dict
         ]
@@ -635,7 +782,7 @@ class ClaimFilter:
         status_counts = {
             'Supported': 0,
             'Contradictory': 0,
-            'Low Confidence': 0
+            LOW_CONFIDENCE_STATUS: 0
         }
         
         for decision in decisions:
@@ -647,6 +794,6 @@ class ClaimFilter:
             'total_claims': len(claims),
             'supported': status_counts['Supported'],
             'contradictory': status_counts['Contradictory'],
-            'low_confidence': status_counts['Low Confidence'],
+            'low_confidence': status_counts[LOW_CONFIDENCE_STATUS],
             'would_remove': status_counts['Contradictory']
         }

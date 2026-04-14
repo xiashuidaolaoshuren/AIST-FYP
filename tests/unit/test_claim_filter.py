@@ -674,3 +674,175 @@ class TestPlaceholderSpanFiltering:
         kept = filter.filter_placeholder_claims(claims, text)
         assert len(kept) == 1
         assert kept[0].claim_id == "c1"
+
+
+class TestPronounSubstitution:
+    """Regression tests for pronoun substitution after removal placeholders."""
+
+    def test_pronoun_substituted_after_contradictory_removal(self, sample_config):
+        filter = ClaimFilter(sample_config)
+        answer = "Istanbul is Turkey's largest city. It is also the country's cultural center."
+        claims = [
+            Claim(
+                claim_id="c1",
+                answer_id="a1",
+                text="Istanbul is Turkey's largest city.",
+                answer_char_span=[0, 33],
+            ),
+            Claim(
+                claim_id="c2",
+                answer_id="a1",
+                text="It is also the country's cultural center.",
+                answer_char_span=[34, len(answer)],
+            ),
+        ]
+        decisions = [
+            ClaimDecision(
+                claim_id="c1",
+                status="Contradictory",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+            ClaimDecision(
+                claim_id="c2",
+                status="Supported",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+        ]
+
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
+
+        assert removed_count == 1
+        assert filtered_text.startswith("[CLAIM REMOVED: Contradictory]. Istanbul is also")
+
+    def test_no_substitution_when_removed_subject_is_pronoun(self, sample_config):
+        filter = ClaimFilter(sample_config)
+        answer = "It is unknown. It remains uncertain."
+        claims = [
+            Claim(
+                claim_id="c1",
+                answer_id="a1",
+                text="It is unknown.",
+                answer_char_span=[0, 14],
+            ),
+            Claim(
+                claim_id="c2",
+                answer_id="a1",
+                text="It remains uncertain.",
+                answer_char_span=[14, len(answer)],
+            ),
+        ]
+        decisions = [
+            ClaimDecision(
+                claim_id="c1",
+                status="Contradictory",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+            ClaimDecision(
+                claim_id="c2",
+                status="Supported",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+        ]
+
+        filtered_text, _, _ = filter.filter_answer(answer, claims, decisions)
+        assert filtered_text.startswith("[CLAIM REMOVED: Contradictory] It remains uncertain.")
+
+    def test_no_substitution_when_both_claims_removed(self, sample_config):
+        filter = ClaimFilter(sample_config)
+        answer = "Istanbul is Turkey's largest city. It is also a major hub."
+        claims = [
+            Claim(
+                claim_id="c1",
+                answer_id="a1",
+                text="Istanbul is Turkey's largest city.",
+                answer_char_span=[0, 33],
+            ),
+            Claim(
+                claim_id="c2",
+                answer_id="a1",
+                text="It is also a major hub.",
+                answer_char_span=[34, len(answer)],
+            ),
+        ]
+        decisions = [
+            ClaimDecision(
+                claim_id="c1",
+                status="Contradictory",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+            ClaimDecision(
+                claim_id="c2",
+                status="Contradictory",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+        ]
+
+        filtered_text, removed_count, _ = filter.filter_answer(answer, claims, decisions)
+        assert removed_count == 2
+        assert "CLAIM REMOVED is" not in filtered_text
+
+    def test_pronoun_substitution_disabled(self):
+        config = MagicMock(spec=Config)
+        config.get.return_value = {
+            'filter': {
+                'enabled': True,
+                'placeholder': '[CLAIM REMOVED: Contradictory]',
+                'pronoun_substitution_enabled': False,
+            }
+        }
+
+        filter = ClaimFilter(config)
+        answer = "Istanbul is Turkey's largest city. It is also a major hub."
+        claims = [
+            Claim(
+                claim_id="c1",
+                answer_id="a1",
+                text="Istanbul is Turkey's largest city.",
+                answer_char_span=[0, 33],
+            ),
+            Claim(
+                claim_id="c2",
+                answer_id="a1",
+                text="It is also a major hub.",
+                answer_char_span=[34, len(answer)],
+            ),
+        ]
+        decisions = [
+            ClaimDecision(
+                claim_id="c1",
+                status="Contradictory",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+            ClaimDecision(
+                claim_id="c2",
+                status="Supported",
+                rationale="",
+                primary_evidence="",
+                signals_ref=[],
+                confidence={},
+            ),
+        ]
+
+        filtered_text, _, _ = filter.filter_answer(answer, claims, decisions)
+        assert filtered_text.startswith("[CLAIM REMOVED: Contradictory]. It is also")
