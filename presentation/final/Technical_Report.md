@@ -524,7 +524,7 @@ def filter_answer(self, answer_text: str, claims: List[Claim], decisions: List[C
 
 ## 3. Pipeline Demonstration Interface
 
-To practically demonstrate our hallucination detection and mitigation pipeline, we developed interactive web applications using the **Gradio** framework. The interface design and step-by-step interactive workflow were heavily inspired by the **LettuceDetect** framework [15], which advocates for a transparent, multi-stage inspection of LLM hallucinations.
+To practically demonstrate our hallucination detection and mitigation pipeline, we developed interactive web applications using the **Gradio** framework [16]. The interface design and step-by-step interactive workflow were heavily inspired by the **LettuceDetect** framework [15], which advocates for a transparent, multi-stage inspection of LLM hallucinations.
 
 Our demonstration suite consists of two distinct UI modes tailored for different levels of analysis:
 
@@ -603,3 +603,5 @@ Future iterations of this project will explore substituting zero-shot components
 [14] "CiteEval: Principle-Driven Citation Evaluation for Source Attribution," *arXiv preprint*, 2024.
 
 [15] Á. Kovács and G. Recski, "LettuceDetect: A Hallucination Detection Framework," *arXiv preprint arXiv:2502.17125*, 2025.
+ 
+[16] Gradio, "Gradio: Create demos for machine learning models," [Online]. Available: https://gradio.app. [Accessed: Apr. 14, 2026].
