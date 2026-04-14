@@ -10,6 +10,7 @@ This UI separates generation and verification into explicit stages:
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -342,6 +343,118 @@ class ControlledPipelineUI(ConfidenceUI):
             "hallucination_rate": rate,
         }
 
+    @staticmethod
+    def _normalize_claim_text_for_match(text: str) -> str:
+        normalized = (text or "").strip().lower()
+        normalized = re.sub(r"[^\w\s]", " ", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
+
+    @staticmethod
+    def _drop_leading_token(text: str) -> str:
+        parts = text.split(" ", 1)
+        return parts[1] if len(parts) > 1 else ""
+
+    def _claim_match_score(self, source_claim: Claim, target_claim: Claim) -> float:
+        source_text = self._normalize_claim_text_for_match(source_claim.text)
+        target_text = self._normalize_claim_text_for_match(target_claim.text)
+        if not source_text or not target_text:
+            return 0.0
+
+        full_ratio = SequenceMatcher(None, source_text, target_text).ratio()
+        source_tail = self._drop_leading_token(source_text)
+        target_tail = self._drop_leading_token(target_text)
+        tail_ratio = 0.0
+        if source_tail and target_tail:
+            tail_ratio = SequenceMatcher(None, source_tail, target_tail).ratio()
+
+        source_start, source_end = source_claim.answer_char_span
+        target_start, target_end = target_claim.answer_char_span
+        overlap = max(0, min(source_end, target_end) - max(source_start, target_start))
+        source_len = max(1, source_end - source_start)
+        target_len = max(1, target_end - target_start)
+        overlap_ratio = overlap / max(source_len, target_len)
+
+        text_similarity = max(full_ratio, tail_ratio)
+        # Keep overlap as a weak tie-breaker only; do not let span alignment
+        # alone map semantically unrelated claims.
+        return (0.8 * text_similarity) + (0.2 * overlap_ratio)
+
+    def _carryover_decisions_after_filter(
+        self,
+        original_claims: List[Claim],
+        original_decisions: List[ClaimDecision],
+        filtered_claims: List[Claim],
+    ) -> List[ClaimDecision]:
+        """Map post-filter claims to pre-filter claims and carry verdicts forward."""
+        decision_map = {decision.claim_id: decision for decision in original_decisions}
+        eligible_original_claims = [
+            claim
+            for claim in original_claims
+            if claim.claim_id in decision_map
+            and decision_map[claim.claim_id].status != "Contradictory"
+        ]
+
+        used_source_ids: set[str] = set()
+        carried: List[ClaimDecision] = []
+        mapped_count = 0
+        unmatched_count = 0
+
+        for filtered_claim in filtered_claims:
+            best_claim: Optional[Claim] = None
+            best_score = 0.0
+
+            for source_claim in eligible_original_claims:
+                if source_claim.claim_id in used_source_ids:
+                    continue
+                score = self._claim_match_score(source_claim, filtered_claim)
+                if score > best_score:
+                    best_score = score
+                    best_claim = source_claim
+
+            if best_claim is not None and best_score >= 0.55:
+                source_decision = decision_map[best_claim.claim_id]
+                carried.append(
+                    ClaimDecision(
+                        claim_id=filtered_claim.claim_id,
+                        status=source_decision.status,
+                        rationale=source_decision.rationale,
+                        primary_evidence=source_decision.primary_evidence,
+                        signals_ref=list(source_decision.signals_ref),
+                        confidence=dict(source_decision.confidence),
+                    )
+                )
+                used_source_ids.add(best_claim.claim_id)
+                mapped_count += 1
+                continue
+
+            unmatched_count += 1
+            carried.append(
+                ClaimDecision(
+                    claim_id=filtered_claim.claim_id,
+                    status="Low Confidence",
+                    rationale="Unmapped claim after mitigation rewrite; verdict fallback applied.",
+                    primary_evidence="",
+                    signals_ref=[],
+                    confidence={
+                        "overall_confidence": 50.0,
+                        "band": "Medium",
+                        "support_prob": 0.0,
+                        "contradict_prob": 0.0,
+                        "coverage_score": 0.0,
+                        "entropy_conf": 0.0,
+                    },
+                )
+            )
+
+        self.logger.info(
+            "[mitigate] carried verdicts: mapped=%d unmatched=%d total=%d",
+            mapped_count,
+            unmatched_count,
+            len(filtered_claims),
+        )
+        return carried
+
     def create_interface(self) -> gr.Blocks:
         """Create a staged Blocks UI for generate -> verify -> mitigate."""
 
@@ -573,6 +686,8 @@ class ControlledPipelineUI(ConfidenceUI):
                         decisions=working_decisions,
                     )
                     working_answer = filtered_text
+                    pre_filter_claims = list(working_claims)
+                    pre_filter_decisions = list(working_decisions)
                     working_claims = extract_claims(text=working_answer, method="auto")
                     working_claims = self.claim_filter.filter_placeholder_claims(
                         working_claims,
@@ -585,12 +700,10 @@ class ControlledPipelineUI(ConfidenceUI):
                     )
                     working_metadata["text"] = working_answer
                     working_metadata["original_query"] = query
-                    _, working_decisions = self._verify_from_bundle(
-                        query=query,
-                        answer_text=working_answer,
-                        claims=working_claims,
-                        evidence_chunks=working_evidence,
-                        metadata=working_metadata,
+                    working_decisions = self._carryover_decisions_after_filter(
+                        original_claims=pre_filter_claims,
+                        original_decisions=pre_filter_decisions,
+                        filtered_claims=working_claims,
                     )
 
                 if enable_reprompt and self.repromptr and self.repromptr.enabled:
