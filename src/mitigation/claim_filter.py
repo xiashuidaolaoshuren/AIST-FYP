@@ -112,6 +112,19 @@ class ClaimFilter:
             f"ClaimFilter initialized: enabled={self.enabled}, "
             f"placeholder='{self.placeholder}'"
         )
+
+    def is_placeholder(self, text: str) -> bool:
+        """Return True when text contains mitigation placeholder markers."""
+        if not text or not text.strip():
+            return False
+
+        lowered = text.lower()
+        placeholders = [self.placeholder, self.lc_placeholder]
+        for marker in placeholders:
+            if marker and marker.strip() and marker.lower() in lowered:
+                return True
+
+        return False
     
     def filter_answer(
         self,
