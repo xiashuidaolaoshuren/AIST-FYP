@@ -268,6 +268,33 @@ class SignalNormalizer:
                 f"Error normalizing variance {variance}: {e}, returning 0.5"
             )
             return 0.5
+
+    def normalize_token_probability(self, mean_token_prob: Optional[float]) -> float:
+        """
+        Normalize mean token probability from teacher-forced scoring to confidence.
+
+        The value is already in [0, 1] for valid metadata and can be used directly
+        as a confidence proxy when entropy collapses in evidence-dominated prompts.
+
+        Args:
+            mean_token_prob: Mean probability of claim tokens under teacher forcing
+
+        Returns:
+            Confidence in [0, 1], or 0.5 when missing/invalid
+        """
+        if mean_token_prob is None:
+            self.logger.debug("Token probability is None, returning neutral 0.5")
+            return 0.5
+
+        if np.isnan(mean_token_prob):
+            self.logger.warning("Token probability is NaN, returning neutral 0.5")
+            return 0.5
+
+        if np.isinf(mean_token_prob):
+            self.logger.warning("Token probability is Inf, returning neutral 0.5")
+            return 0.5
+
+        return float(np.clip(mean_token_prob, 0.0, 1.0))
     
     def normalize_coverage(self, coverage_dict: Dict[str, float]) -> float:
         """
@@ -483,6 +510,10 @@ class RuleBasedAggregator:
                 'coverage': float(getattr(agg_config, 'coverage_threshold', 0.6)),
                 'entropy_conf': float(getattr(agg_config, 'entropy_confidence_threshold', 0.4)),
                 'consistency_conf': float(getattr(agg_config, 'consistency_confidence_threshold', 0.4)),
+                'entropy_flat_conf': float(getattr(agg_config, 'entropy_flat_confidence_threshold', 0.95)),
+                'self_agreement_high_similarity': float(
+                    getattr(agg_config, 'self_agreement_high_similarity_threshold', 0.85)
+                ),
                 'low_coverage': float(getattr(agg_config, 'low_coverage_threshold', 0.3)),
             }
         else:
@@ -499,6 +530,8 @@ class RuleBasedAggregator:
                 'coverage': 0.6,
                 'entropy_conf': 0.4,
                 'consistency_conf': 0.4,
+                'entropy_flat_conf': 0.95,
+                'self_agreement_high_similarity': 0.85,
                 'low_coverage': 0.3,
             }
             self.logger.warning(
@@ -578,12 +611,39 @@ class RuleBasedAggregator:
             consistency_conf = self.normalizer.normalize_consistency(
                 signal.consistency.get('variance')
             )
+            token_prob_conf = self.normalizer.normalize_token_probability(
+                signal.uncertainty.get('mean_token_prob') if signal.uncertainty else None
+            )
+
+            # When embedding similarity is very high, rely on NLI-backed SA ratio if available.
+            agreement_nli_ratio = (
+                signal.consistency.get('agreement_nli_ratio') if signal.consistency else None
+            )
+            if (
+                agreement_nli_ratio is not None
+                and signal.consistency
+                and signal.consistency.get('score') is not None
+                and signal.consistency.get('score') >= self.thresholds['self_agreement_high_similarity']
+            ):
+                consistency_conf = float(np.clip(agreement_nli_ratio, 0.0, 1.0))
+
+            raw_model_score = (
+                signal.consistency.get('raw_model_score') if signal.consistency else None
+            )
+            if raw_model_score is not None:
+                consistency_conf = min(
+                    consistency_conf,
+                    float(np.clip(raw_model_score, 0.0, 1.0)),
+                )
+
             coverage_score = self.normalizer.normalize_coverage(signal.coverage)
             support_conf, contradict_conf = self.normalizer.normalize_nli(signal.nli)
             
             self.logger.info(
                 f"Claim {signal.claim_id} normalized signals: "
                 f"entropy={entropy_conf:.3f}, consistency={consistency_conf:.3f}, "
+                f"token_prob={token_prob_conf:.3f}, "
+                f"raw_model_score={raw_model_score if raw_model_score is not None else -1:.3f}, "
                 f"coverage={coverage_score:.3f}, support={support_conf:.3f}, "
                 f"contradict={contradict_conf:.3f}"
             )
@@ -591,13 +651,13 @@ class RuleBasedAggregator:
             # Step 2: Apply hierarchical classification rules
             status, rationale = self._apply_classification_rules(
                 signal, contradict_conf, support_conf, coverage_score,
-                entropy_conf, consistency_conf
+                entropy_conf, consistency_conf, token_prob_conf
             )
             
             # Step 3: Compute confidence breakdown
             confidence_breakdown = self._compute_confidence_breakdown(
                 status, support_conf, contradict_conf, coverage_score,
-                entropy_conf, consistency_conf
+                entropy_conf, consistency_conf, token_prob_conf, raw_model_score
             )
             
             # Step 4: Build evidence reference
@@ -651,7 +711,8 @@ class RuleBasedAggregator:
         support_conf: float,
         coverage_score: float,
         entropy_conf: float,
-        consistency_conf: float
+        consistency_conf: float,
+        token_prob_conf: float,
     ) -> Tuple[str, str]:
         """
         Apply hierarchical classification rules to determine claim status.
@@ -675,7 +736,7 @@ class RuleBasedAggregator:
         if self.ablation_mode == 'nli_only':
             return self._classify_nli_only(signal, contradict_conf, support_conf)
         if self.ablation_mode == 'intrinsic_only':
-            return self._classify_intrinsic_only(entropy_conf)
+            return self._classify_intrinsic_only(entropy_conf, token_prob_conf)
         if self.ablation_mode == 'self_agreement_only':
             return self._classify_self_agreement_only(consistency_conf)
 
@@ -686,6 +747,7 @@ class RuleBasedAggregator:
             coverage_score=coverage_score,
             entropy_conf=entropy_conf,
             consistency_conf=consistency_conf,
+            token_prob_conf=token_prob_conf,
         )
 
     def _classify_default_rules(
@@ -696,6 +758,7 @@ class RuleBasedAggregator:
         coverage_score: float,
         entropy_conf: float,
         consistency_conf: float,
+        token_prob_conf: float,
     ) -> Tuple[str, str]:
         """Default multi-signal classification path used outside ablation-only modes."""
         contradictory_result = self._classify_default_nli_contradiction(
@@ -732,6 +795,7 @@ class RuleBasedAggregator:
             coverage_score=coverage_score,
             entropy_conf=entropy_conf,
             consistency_conf=consistency_conf,
+            token_prob_conf=token_prob_conf,
         )
         return (STATUS_LOW_CONFIDENCE, rationale)
 
@@ -839,19 +903,30 @@ class RuleBasedAggregator:
         coverage_score: float,
         entropy_conf: float,
         consistency_conf: float,
+        token_prob_conf: float,
     ) -> str:
         """Build low-confidence rationale for default multi-signal path."""
         reasons = []
         
-        if entropy_conf < self.thresholds['entropy_conf']:
+        intrinsic_conf = token_prob_conf if entropy_conf >= self.thresholds['entropy_flat_conf'] else entropy_conf
+        intrinsic_name = 'token_prob_conf' if entropy_conf >= self.thresholds['entropy_flat_conf'] else 'entropy_conf'
+
+        if intrinsic_conf < self.thresholds['entropy_conf']:
             reasons.append(
-                f"high model uncertainty (entropy_conf={entropy_conf:.2f} < "
+                f"high model uncertainty ({intrinsic_name}={intrinsic_conf:.2f} < "
                 f"{self.thresholds['entropy_conf']:.2f})"
             )
         
         if consistency_conf < self.thresholds['consistency_conf']:
             reasons.append(
                 f"low consistency (consistency_conf={consistency_conf:.2f} < "
+                f"{self.thresholds['consistency_conf']:.2f})"
+            )
+
+        raw_model_score = signal.consistency.get('raw_model_score') if signal.consistency else None
+        if raw_model_score is not None and raw_model_score < self.thresholds['consistency_conf']:
+            reasons.append(
+                f"raw model disagrees without evidence (raw_model_score={raw_model_score:.2f} < "
                 f"{self.thresholds['consistency_conf']:.2f})"
             )
         
@@ -926,19 +1001,21 @@ class RuleBasedAggregator:
             "Low confidence: NLI-only signal does not pass support/contradiction thresholds."
         )
 
-    def _classify_intrinsic_only(self, entropy_conf: float) -> Tuple[str, str]:
+    def _classify_intrinsic_only(self, entropy_conf: float, token_prob_conf: float) -> Tuple[str, str]:
         """Isolated intrinsic uncertainty decision path."""
+        intrinsic_conf = token_prob_conf if entropy_conf >= self.thresholds['entropy_flat_conf'] else entropy_conf
+        intrinsic_name = 'token_prob_conf' if entropy_conf >= self.thresholds['entropy_flat_conf'] else 'entropy_conf'
         high_conf_floor = max(self.thresholds['entailment'], 0.65)
-        if entropy_conf < self.thresholds['entropy_conf']:
+        if intrinsic_conf < self.thresholds['entropy_conf']:
             return (
                 STATUS_CONTRADICTORY,
-                f"Intrinsic-only high uncertainty (entropy_conf={entropy_conf:.2f} < "
+                f"Intrinsic-only high uncertainty ({intrinsic_name}={intrinsic_conf:.2f} < "
                 f"{self.thresholds['entropy_conf']:.2f})."
             )
-        if entropy_conf >= high_conf_floor:
+        if intrinsic_conf >= high_conf_floor:
             return (
                 STATUS_SUPPORTED,
-                f"Intrinsic-only confidence is high (entropy_conf={entropy_conf:.2f} >= {high_conf_floor:.2f})."
+                f"Intrinsic-only confidence is high ({intrinsic_name}={intrinsic_conf:.2f} >= {high_conf_floor:.2f})."
             )
         return (
             STATUS_LOW_CONFIDENCE,
@@ -971,7 +1048,9 @@ class RuleBasedAggregator:
         contradict_conf: float,
         coverage_score: float,
         entropy_conf: float,
-        consistency_conf: float
+        consistency_conf: float,
+        token_prob_conf: float,
+        raw_model_score: Optional[float],
     ) -> Dict[str, float]:
         """
         Compute comprehensive confidence breakdown for transparency.
@@ -1017,6 +1096,8 @@ class RuleBasedAggregator:
             'coverage_score': float(coverage_score),
             'entropy_conf': float(entropy_conf),
             'consistency_conf': float(consistency_conf),
+            'token_prob_conf': float(token_prob_conf),
+            'raw_model_score': float(raw_model_score) if raw_model_score is not None else None,
             'overall_confidence': float(overall),
             'band': band
         }

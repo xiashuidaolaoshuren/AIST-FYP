@@ -227,6 +227,14 @@ class SelfAgreementDetector:
         
         self.logger.debug(f"Successfully generated {len(samples)}/{k} valid samples")
         return samples
+
+    def generate_samples_no_evidence(
+        self,
+        query: str,
+        k: Optional[int] = None,
+    ) -> List[str]:
+        """Generate stochastic samples using query-only prompting (no evidence chunks)."""
+        return self.generate_samples(query=query, evidence_chunks=[], k=k)
     
     def measure_consistency(
         self,

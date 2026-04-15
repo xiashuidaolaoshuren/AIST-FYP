@@ -83,7 +83,7 @@ class IntrinsicUncertaintyDetector:
         claim: Claim,
         evidence: EvidenceChunk,
         metadata: Dict
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Optional[float]]:
         """
         Compute intrinsic uncertainty signal for a claim-evidence pair.
         
@@ -116,7 +116,7 @@ class IntrinsicUncertaintyDetector:
         # Edge case: empty claim
         if not claim.text or not claim.text.strip():
             self.logger.warning(f"Empty claim {claim.claim_id}, returning 0.0 entropy")
-            return {'mean_entropy': 0.0}
+            return {'mean_entropy': 0.0, 'mean_token_prob': None}
         
         has_token_entropies = bool(metadata.get('token_entropies'))
         has_logits = bool(metadata.get('logits'))
@@ -128,11 +128,13 @@ class IntrinsicUncertaintyDetector:
                 self.logger.error(f"{message}; strict_logits enabled")
                 raise ValueError(message)
             self.logger.warning(f"{message}, returning 0.0 entropy")
-            return {'mean_entropy': 0.0}
+            return {'mean_entropy': 0.0, 'mean_token_prob': None}
         
         try:
             # Align claim to token indices
             token_indices = self._align_claim_tokens(claim, metadata)
+            aligned_token_probs: List[float] = []
+            has_token_probs = bool(metadata.get('scores'))
             
             if has_token_entropies:
                 # Teacher-forcing path: token-level entropy already computed
@@ -163,6 +165,10 @@ class IntrinsicUncertaintyDetector:
                         entropy_val = metadata['token_entropies'][token_idx]
                         if entropy_val is not None and np.isfinite(entropy_val):
                             entropies.append(float(entropy_val))
+                    if has_token_probs and token_idx < len(metadata['scores']):
+                        token_prob_val = metadata['scores'][token_idx]
+                        if token_prob_val is not None and np.isfinite(token_prob_val):
+                            aligned_token_probs.append(float(token_prob_val))
             else:
                 # Important: For seq2seq models (e.g., FLAN-T5), output.scores has (n-1) entries
                 # for n generated tokens. The EOS token (</s>) at position n-1 has no logits.
@@ -195,6 +201,10 @@ class IntrinsicUncertaintyDetector:
                         logits = metadata['logits'][token_idx]
                         entropy = self._calculate_entropy(logits, self.epsilon)
                         entropies.append(entropy)
+                    if has_token_probs and token_idx < len(metadata['scores']):
+                        token_prob_val = metadata['scores'][token_idx]
+                        if token_prob_val is not None and np.isfinite(token_prob_val):
+                            aligned_token_probs.append(float(token_prob_val))
             
             # Edge case: no valid entropies calculated
             if not entropies:
@@ -202,10 +212,16 @@ class IntrinsicUncertaintyDetector:
                     f"No entropies calculated for claim {claim.claim_id}, "
                     f"returning 0.0"
                 )
-                return {'mean_entropy': 0.0}
+                return {
+                    'mean_entropy': 0.0,
+                    'mean_token_prob': float(np.mean(aligned_token_probs)) if aligned_token_probs else None,
+                }
             
             # Calculate mean entropy
             mean_entropy = float(np.mean(entropies))
+            mean_token_prob: Optional[float] = (
+                float(np.mean(aligned_token_probs)) if aligned_token_probs else None
+            )
             
             self.logger.debug(
                 f"Claim {claim.claim_id}: {len(entropies)} tokens, "
@@ -219,19 +235,23 @@ class IntrinsicUncertaintyDetector:
                     "data": {
                         "claim_id": claim.claim_id,
                         "mean_entropy": mean_entropy,
+                        "mean_token_prob": mean_token_prob,
                         "token_count": len(entropies)
                     }
                 }
             )
             
-            return {'mean_entropy': mean_entropy}
+            return {
+                'mean_entropy': mean_entropy,
+                'mean_token_prob': mean_token_prob,
+            }
         
         except Exception as e:
             self.logger.error(
                 f"Error computing uncertainty for claim {claim.claim_id}: {e}",
                 exc_info=True
             )
-            return {'mean_entropy': 0.0}
+            return {'mean_entropy': 0.0, 'mean_token_prob': None}
     
     def _align_claim_tokens(
         self,

@@ -264,6 +264,72 @@ class VerifierHub:
             return self.nli_detector.detect_bidirectional(claim_text=claim_text, evidence_text=evidence_text)
         return self.nli_detector.detect(claim_text=claim_text, evidence_text=evidence_text)
 
+    def _compute_self_agreement_nli_ratio(
+        self,
+        claim_text: str,
+        query: str,
+        evidence_chunks: Optional[List[EvidenceChunk]] = None,
+        entailment_threshold: float = 0.5,
+    ) -> Optional[float]:
+        """Measure self-agreement via NLI entailment ratio over stochastic samples."""
+        if self.nli_detector is None or self.self_agreement_detector is None:
+            return None
+        if not claim_text or not claim_text.strip() or not query or not query.strip():
+            return None
+
+        try:
+            samples = self.self_agreement_detector.generate_samples(
+                query=query,
+                evidence_chunks=evidence_chunks,
+            )
+        except Exception as e:
+            self.logger.debug("Self-agreement sample generation failed for NLI ratio: %s", e)
+            return None
+
+        valid_samples = [sample for sample in samples if sample and sample.strip()]
+        if not valid_samples:
+            return None
+
+        entail_count = 0
+        compared = 0
+        for sample in valid_samples:
+            try:
+                nli_scores = self._detect_nli_single(
+                    claim_text=claim_text,
+                    evidence_text=sample,
+                )
+                compared += 1
+                if float(nli_scores.get('entailment', 0.0)) >= entailment_threshold:
+                    entail_count += 1
+            except Exception:
+                continue
+
+        if compared == 0:
+            return None
+        return float(entail_count / compared)
+
+    def _compute_self_agreement_raw_model_score(
+        self,
+        claim_text: str,
+        query: str,
+    ) -> Optional[float]:
+        """Measure agreement against raw model outputs without evidence conditioning."""
+        if self.self_agreement_detector is None:
+            return None
+        if not claim_text or not claim_text.strip() or not query or not query.strip():
+            return None
+
+        try:
+            if hasattr(self.self_agreement_detector, 'generate_samples_no_evidence'):
+                samples = self.self_agreement_detector.generate_samples_no_evidence(query=query)
+            else:
+                samples = self.self_agreement_detector.generate_samples(query=query, evidence_chunks=[])
+            consistency = self.self_agreement_detector.measure_consistency(claim_text, samples)
+            return float(consistency.get('consistency_score'))
+        except Exception as e:
+            self.logger.debug("Raw-model self-agreement score failed: %s", e)
+            return None
+
     def _resolve_module_flags(self) -> Dict[str, bool]:
         """Resolve per-detector enable flags from config with safe defaults."""
         defaults = {
@@ -551,6 +617,7 @@ class VerifierHub:
         sa_claim_texts: List[str] = []
         sa_queries: List[str] = []
         sa_evidence_list: List[List[EvidenceChunk]] = []
+        sa_source_modes: List[str] = []
         sa_pending_indices: List[int] = []
 
         for item in single_items:
@@ -609,6 +676,7 @@ class VerifierHub:
                     sa_claim_texts.append(claim.text)
                     sa_queries.append(query)
                     sa_evidence_list.append([evidence])
+                    sa_source_modes.append(str(metadata.get('source_mode', '')))
             except Exception as e:
                 self.logger.error(
                     "Batch verify prepare failed for claim %s: %s",
@@ -644,6 +712,38 @@ class VerifierHub:
             except Exception:
                 for idx in sa_pending_indices:
                     sa_results_by_index[idx] = {'variance': None}
+
+        # Pass 1.6: NLI-backed self-agreement for sample-vs-claim entailment robustness.
+        if self.nli_detector is not None and self.self_agreement_detector is not None and sa_pending_indices:
+            for idx, claim_text, query, evidence_chunks, source_mode in zip(
+                sa_pending_indices,
+                sa_claim_texts,
+                sa_queries,
+                sa_evidence_list,
+                sa_source_modes,
+            ):
+                ratio = self._compute_self_agreement_nli_ratio(
+                    claim_text=claim_text,
+                    query=query,
+                    evidence_chunks=evidence_chunks,
+                )
+                raw_model_score = None
+                if source_mode == 'user_context':
+                    raw_model_score = self._compute_self_agreement_raw_model_score(
+                        claim_text=claim_text,
+                        query=query,
+                    )
+
+                if ratio is not None or raw_model_score is not None:
+                    current = sa_results_by_index.get(
+                        idx,
+                        {'variance': None, 'score': None, 'samples_generated': 0}
+                    )
+                    if ratio is not None:
+                        current['agreement_nli_ratio'] = ratio
+                    if raw_model_score is not None:
+                        current['raw_model_score'] = raw_model_score
+                    sa_results_by_index[idx] = current
 
         # Pass 2: Build prepared items and NLI pending tuples.
         for item in precomputed_single:
@@ -858,6 +958,21 @@ class VerifierHub:
                             evidence_chunks=[evidence] if isinstance(evidence, EvidenceChunk) else evidence
                         )
                         consistency_signal = sa_result
+                        source_mode = str(metadata.get('source_mode', ''))
+                        if source_mode == 'user_context':
+                            raw_model_score = self._compute_self_agreement_raw_model_score(
+                                claim_text=claim.text,
+                                query=query,
+                            )
+                            if raw_model_score is not None:
+                                consistency_signal['raw_model_score'] = raw_model_score
+                        agreement_nli_ratio = self._compute_self_agreement_nli_ratio(
+                            claim_text=claim.text,
+                            query=query,
+                            evidence_chunks=[evidence] if isinstance(evidence, EvidenceChunk) else evidence,
+                        )
+                        if agreement_nli_ratio is not None:
+                            consistency_signal['agreement_nli_ratio'] = agreement_nli_ratio
                         self.logger.debug(
                             f"Self-agreement signal computed for claim {claim.claim_id}: "
                             f"score={sa_result.get('score', 0.0):.3f}, "
@@ -871,6 +986,8 @@ class VerifierHub:
                                     "claim_id": claim.claim_id,
                                     "score": sa_result.get('score', None),
                                     "variance": sa_result.get('variance', None),
+                                    "agreement_nli_ratio": consistency_signal.get('agreement_nli_ratio', None),
+                                    "raw_model_score": consistency_signal.get('raw_model_score', None),
                                     "samples_generated": sa_result.get('samples_generated', None)
                                 }
                             }
@@ -1061,6 +1178,21 @@ class VerifierHub:
                             evidence_chunks=evidence_list
                         )
                         consistency_signal = sa_result
+                        source_mode = str(metadata.get('source_mode', ''))
+                        if source_mode == 'user_context':
+                            raw_model_score = self._compute_self_agreement_raw_model_score(
+                                claim_text=claim.text,
+                                query=query,
+                            )
+                            if raw_model_score is not None:
+                                consistency_signal['raw_model_score'] = raw_model_score
+                        agreement_nli_ratio = self._compute_self_agreement_nli_ratio(
+                            claim_text=claim.text,
+                            query=query,
+                            evidence_chunks=evidence_list,
+                        )
+                        if agreement_nli_ratio is not None:
+                            consistency_signal['agreement_nli_ratio'] = agreement_nli_ratio
                         self.logger.debug(
                             f"Self-agreement computed: score={sa_result.get('score', 0.0):.3f}, "
                             f"variance={sa_result.get('variance', 0.0):.3f}"
