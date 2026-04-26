@@ -145,6 +145,8 @@ While LettuceDetect is a post-hoc detection tool for tagging spans as hallucinat
 
 The goal of our verifier is to mitigate hallucinated claims from leaking into final answers. To perform a fair "apple-to-apple" comparison (ablation) of different verifier signals, each variant is paired with a **standardized Filter actuator**. 
 
+Furthermore, it is important to emphasize that the filter actuator does not heavily distort the core linguistic structure or overall meaning of the responses. As shown in the *Verifier Filtering Statistics*, the maximum filter rate across all variants sits concisely around ~4.3% (e.g., 31 out of 715 claims flagged in the `verifier_nli_filter`). Because the filter acts strictly as a surgical intervention removing precise, isolated ungrounded claims rather than executing blunt rewrites, the vast majority of the generator's original content and syntactic structure remains intact. This minimal structural disruption ensures that comparing the final outputs serves as an approximately fair and robust evaluation of the underlying verifier signals themselves.
+
 As detailed in the [Evaluation Workflow](evaluation_workflow.md#why-verifier-variants-must-include-a-filter-in-citebench), CiteEval scores the final text string; therefore, a verifier's detection must be "acted upon" (filtered) for its impact to be measurable. The following analysis focuses on the **efficacy of the underlying verifier signals**, treating the filter as a constant across all experiments:
 
 1. **`verifier_nli_filter` (Best Performance)**:
@@ -164,8 +166,17 @@ As detailed in the [Evaluation Workflow](evaluation_workflow.md#why-verifier-var
 
 ## 4. Concluding Plan for Further Documentation
 
-**Key Takeaways to expand on:**
-1. **Metric Definition Clarity**: Emphasize that CiteBench's strength relies purely on evaluating citation generation explicitly; emphasize CA Retrieval Ratio and Sentence Coverage as sanity check metrics before observing scores. Give a clear disclaimer on why LettuceDetect is represented this way.
-2. **NLI is the Champion Mechanism**: Highlight that deep semantic verification effectively addresses standard RAG hallucinations. The alignment mapped perfectly out of the NLI module scoring CE 4.0+.
-3. **Redundancy of Intrinsic Signals**: Acknowledge that intrinsic entropy metrics proved useless in a heavily anchored knowledge context natively. 
-4. **Aggregator Review Needed**: State the need for reformulating the RuleBasedAggregator's weights, as the "sum of all signals" actively harmed the precision isolated by the NLI module.
+**Key Takeaways (Expanded Analysis):**
+
+1. **Metric Definition Clarity & Sanity Checks**: 
+   CiteBench is fundamentally designed to explicitly evaluate the accuracy, necessity, and quality of generated citations, rather than serving as a generic text quality scorer. Before interpreting the final performance scores, it is crucial to review "sanity check" metrics such as the **CA Retrieval Ratio** and **Sentence Coverage**. A high CA Retrieval Ratio confirms that the model is actively attempting to ground its responses in the retrieved context rather than relying on its internal parametric knowledge. Simultaneously, Sentence Coverage ensures the evaluation captures a statistically meaningful portion of the output. 
+   *Disclaimer on LettuceDetect:* This context is essential when evaluating LettuceDetect. Because LettuceDetect acts as a post-hoc detection tool rather than an integrated generation pipeline with active citation injection, its Sentence Coverage is exceptionally low (~9.5%). While its Answer Ratings ostensibly appear high, they represent only a tiny, highly skewed fraction of the text. Thus, comparing LettuceDetect directly against fully integrated verifier pipelines is structurally imbalanced without acknowledging this coverage disparity.
+
+2. **NLI is the Champion Mechanism**: 
+   The evaluation unequivocally demonstrates that Natural Language Inference (NLI) is the most robust and effective signal for mitigating hallucinations in standard RAG architectures. Relying on deep semantic verification, the `verifier_nli_filter` successfully identifies complex contextual contradictions that superficial lexical matching completely misses. This alignment maps perfectly to human-level citation requirements, allowing the NLI-driven module to achieve an outstanding Citation Evaluation (CE) Mean Rating of 4.009 (approaching a "Good" human rating) and the highest overall Statement Rating. Semantic entailment is the definitive standard for this task.
+
+3. **Redundancy of Intrinsic Signals**: 
+   The experiments expose a critical limitation of intrinsic, uncertainty-based signals (like entropy and self-agreement) when deployed within a heavily anchored RAG environment. Variants relying on these metrics (`verifier_intrinsic_filter` and `verifier_self_agreement_filter`) failed to flag a single hallucinated claim. While entropy might indicate uncertainty in zero-shot generative tasks, the presence of strong external context in RAG effectively collapses the model's output probability distribution. The model becomes highly "confident" in its output—even when hallucinating. Therefore, intrinsic confidence metrics natively prove useless as a proxy for hallucination detection when robust external evidence is provided.
+
+4. **Aggregator Review Needed**: 
+   The sub-par performance of the `full_verifier_filter` variants reveals that blindly ensembling all signals actively harms the system. The current RuleBasedAggregator dilutes the superior precision of the NLI module by attempting to balance it with the ineffective intrinsic signals and less nuanced lexical matching. This "sum of all signals" approach caused the ensemble to miss 9 ungrounded claims that the standalone NLI module caught perfectly. Moving forward, the aggregator's weights and logic urgently require reformulation. We must pivot away from flat weighting toward a hierarchical or "NLI-first" gating strategy, ensuring that high-confidence semantic entailment overrides weaker, noisier signals.
