@@ -112,7 +112,7 @@ flowchart TD
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-org>/AIST-FYP.git
+git clone https://github.com/xiashuidaolaoshuren/AIST-FYP.git
 cd AIST-FYP
 ```
 
